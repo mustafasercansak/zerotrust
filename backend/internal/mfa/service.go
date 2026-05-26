@@ -18,8 +18,19 @@ type SetupResult struct {
 	Secret     string // raw base32 secret for manual entry
 }
 
+// store is the persistence interface consumed by Service.
+// *Repository satisfies it; tests may supply a stub.
+type store interface {
+	IsEnabled(ctx context.Context, userID string) bool
+	UpsertPending(ctx context.Context, userID, pendingEnc string) error
+	Enable(ctx context.Context, userID string) error
+	Delete(ctx context.Context, userID string) error
+	SecretEnc(ctx context.Context, userID string) (string, error)
+	PendingSecretEnc(ctx context.Context, userID string) (string, error)
+}
+
 type Service struct {
-	repo   *Repository
+	repo   store
 	encKey []byte // 32-byte AES-256 key
 }
 

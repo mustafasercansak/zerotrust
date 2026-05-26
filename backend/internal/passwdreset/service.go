@@ -13,8 +13,15 @@ import (
 	"github.com/zerotrust/backend/pkg/mailer"
 )
 
+// store is the persistence interface consumed by Service.
+// *Repository satisfies it; tests may supply a stub.
+type store interface {
+	Create(ctx context.Context, userID string) (string, error)
+	ConsumeAndReset(ctx context.Context, rawToken, newPasswordHash string) error
+}
+
 type Service struct {
-	repo  *Repository
+	repo  store
 	users *user.Service
 	mail  mailer.Mailer
 }

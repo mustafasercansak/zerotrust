@@ -43,6 +43,12 @@ func (r *Repository) Create(ctx context.Context, userID string) (string, error) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// Serialize concurrent reset requests for the same user so only one active
+	// token can exist. The lock is transaction-scoped and released on commit/rollback.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1, hashtext($1))`, userID); err != nil {
+		return "", err
+	}
+
 	// Cancel any previous unused tokens so old links cannot be replayed.
 	if _, err = tx.Exec(ctx, `
 		UPDATE password_reset_tokens
