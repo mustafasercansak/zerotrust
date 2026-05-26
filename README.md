@@ -1,12 +1,14 @@
 # ZeroTrust
 
-A Zero Trust authentication and authorization platform built with Go and Next.js — fully containerized, production-hardened.
+A security-focused Zero Trust authentication and authorization platform built with Go, Next.js, PostgreSQL, Redis, and Docker.
+
+> **Status:** Active development. This project is designed as a serious learning and portfolio project for modern auth/security engineering. It has not been independently audited and should not be treated as production-ready without further review, testing, and hardening.
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│  Next.js 15 │────▶│  Go Backend │────▶│  PostgreSQL  │
+│  Next.js 16 │────▶│  Go Backend │────▶│  PostgreSQL  │
 │  (port 3000)│     │  (port 8080)│     │  (port 5432) │
 └─────────────┘     └──────┬──────┘     └──────────────┘
                            │
@@ -31,6 +33,8 @@ Next.js proxies all `/api/*` requests to the backend, so cookies work on the sam
 | Atomic Token Rotation | `SELECT … FOR UPDATE` prevents replay race |
 | JTI Blocklist | Instant revocation via Redis (auto-TTL) |
 | Key Rotation | Zero-downtime via primary/secondary key slots |
+| TOTP MFA | Encrypted TOTP secrets with pending setup flow |
+| Password Reset | Opaque reset tokens, atomic consume + password update + session revocation |
 | Progressive Lockout | 1 / 5 / 30 min escalating lockout (Redis) |
 | Rate Limiting | Login 10/min · global 300/min (sliding window) |
 | RBAC | Roles → role_permissions → permissions |
@@ -41,12 +45,36 @@ Next.js proxies all `/api/*` requests to the backend, so cookies work on the sam
 | bcrypt | Cost factor 12 |
 | i18n | Turkish (default) / English |
 
+## Current Scope
+
+ZeroTrust currently includes:
+
+- Browser login with secure cookie-based sessions
+- Proactive access-token refresh
+- Refresh-token rotation backed by PostgreSQL sessions
+- User/session management
+- Admin user and role management
+- Fine-grained permissions
+- Service-account credentials and M2M token issuing
+- TOTP MFA setup, verification, disable, and MFA challenge during login
+- Password reset flow with SMTP or development log mailer
+- Audit log listing
+- Turkish and English UI messages
+- Docker Compose development and production profiles
+- GitHub Actions CI for backend and frontend checks
+
+Planned/ongoing hardening:
+
+- Broader backend test coverage for MFA, password reset, session revocation, and service accounts
+- More end-to-end tests around browser auth flows
+- Operational security review before any real production deployment
+
 ## Quick Start
 
 ### Requirements
 
 - Docker and Docker Compose
-- Go 1.22+ (for secret generation script)
+- Go 1.25+ (matches `backend/go.mod`; used by the secret generation script)
 - OpenSSL
 
 ### 1. Generate Secrets
@@ -61,11 +89,14 @@ Save the admin password shown in the output — **it will not be displayed again
 ### 2. Run
 
 ```bash
-# Production
-cd infra && sudo docker compose up --build
+# Development-style HTTP run
+make up
 
 # Development — hot reload (Air + Next.js HMR)
-cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
+make dev
+
+# Production-style local HTTPS run through nginx
+make up-prod
 ```
 
 | Service  | URL                          |
@@ -85,6 +116,8 @@ zerotrust/
 │   │   ├── admin/              # User management handler
 │   │   ├── audit/              # Audit log repository
 │   │   ├── auth/               # JWT, keys, token service, handler
+│   │   ├── mfa/                # TOTP setup/verify/disable
+│   │   ├── passwdreset/        # Password reset tokens and mail flow
 │   │   ├── serviceaccount/     # M2M service accounts + SSE events
 │   │   ├── session/            # Session store (PostgreSQL) + handler
 │   │   └── user/               # User model, repo, service
@@ -95,8 +128,8 @@ zerotrust/
 │       └── validation/         # Email and password rules
 ├── frontend/
 │   ├── app/[locale]/           # Next.js App Router (TR/EN)
-│   │   ├── auth/               # Login / register pages
-│   │   └── dashboard/          # Dashboard, users, sessions, service accounts
+│   │   ├── auth/               # Login, register, password reset
+│   │   └── dashboard/          # Dashboard, users, audit, MFA, sessions, service accounts
 │   ├── lib/                    # API client, token manager, useAuth hook
 │   └── messages/               # i18n translation files (en, tr)
 ├── infra/
@@ -115,9 +148,12 @@ zerotrust/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/auth/login` | Sign in → sets httpOnly cookies |
+| POST | `/api/v1/auth/mfa/challenge` | Complete login when MFA is required |
 | POST | `/api/v1/auth/refresh` | Rotate tokens |
 | POST | `/api/v1/auth/logout` | Revoke session and clear cookies |
 | POST | `/api/v1/auth/register` | Create account |
+| POST | `/api/v1/auth/forgot-password` | Send a reset link when email exists |
+| POST | `/api/v1/auth/reset-password` | Consume reset token and update password |
 | POST | `/api/v1/auth/token` | `client_credentials` grant (M2M) |
 | GET  | `/.well-known/jwks.json` | Public key set (JWKS) |
 
@@ -128,6 +164,10 @@ zerotrust/
 | GET | `/api/v1/me` | Current user info |
 | GET | `/api/v1/sessions` | List active sessions |
 | DELETE | `/api/v1/sessions/{id}` | Revoke a session |
+| GET | `/api/v1/mfa/status` | Read MFA status |
+| POST | `/api/v1/mfa/setup` | Create a pending TOTP setup |
+| POST | `/api/v1/mfa/verify` | Verify pending TOTP setup |
+| POST | `/api/v1/mfa/disable` | Disable MFA with current TOTP code |
 
 ### Admin
 
@@ -136,6 +176,7 @@ zerotrust/
 | GET | `/api/v1/admin/users` | `users:read` |
 | POST | `/api/v1/admin/users` | `users:write` |
 | PATCH | `/api/v1/admin/users/{id}/roles` | `users:write` |
+| GET | `/api/v1/admin/audit` | `audit:read` |
 | GET | `/api/v1/admin/service-accounts` | `service_accounts:read` |
 | POST | `/api/v1/admin/service-accounts` | `service_accounts:write` |
 | PATCH | `/api/v1/admin/service-accounts/{id}/status` | `service_accounts:write` |
@@ -143,7 +184,7 @@ zerotrust/
 
 ## Environment Variables
 
-Generated automatically by `scripts/generate-secrets.sh`.
+Core local secrets are generated by `scripts/generate-secrets.sh`; deployment-specific values such as SMTP and public origin should be configured per environment.
 
 | Variable | Description |
 |----------|-------------|
@@ -153,15 +194,53 @@ Generated automatically by `scripts/generate-secrets.sh`.
 | `JWT_PRIVATE_KEY_FILE` | Path to PKCS#8 EC private key |
 | `JWT_SECONDARY_KEY_FILE` | Secondary key for zero-downtime rotation |
 | `COOKIES_SECURE` | `true` in production (requires HTTPS) |
+| `REGISTRATION_ENABLED` | Enables/disables public registration |
+| `MFA_ENCRYPTION_KEY` | 64 hex chars / 32 bytes for AES-256-GCM TOTP secret encryption |
+| `SMTP_HOST` | SMTP host for password reset email |
+| `SMTP_PORT` | SMTP port, defaults to `587` |
+| `SMTP_FROM` | Sender address for password reset email |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password |
+| `PUBLIC_APP_URL` | Public frontend origin used in password reset links |
 | `INITIAL_ADMIN_EMAIL` | Seed admin email |
 | `INITIAL_ADMIN_PASSWORD_HASH` | bcrypt hash of admin password |
+
+## Development Checks
+
+```bash
+# Backend
+cd backend
+go test ./...
+go vet ./...
+
+# Frontend
+cd frontend
+npx tsc --noEmit
+npm run build
+
+# Or use the project helpers
+make test
+make lint
+```
+
+GitHub Actions runs backend build/vet/test and frontend type-check/build on pushes and pull requests to `main`/`master`.
+
+## Security Notes
+
+- Do not commit `infra/.env`, `infra/.env.admin`, `secrets/`, TLS certificates, or private keys.
+- If any secret has ever been shown publicly, regenerate it before making the repository public.
+- Production mode should run behind HTTPS with `COOKIES_SECURE=true`.
+- `PUBLIC_APP_URL` must be a trusted application origin; password reset links are generated from this config value, not from request headers.
+- MFA is disabled unless `MFA_ENCRYPTION_KEY` is configured with a valid 32-byte key.
+- See [SECURITY.md](SECURITY.md) for vulnerability reporting guidance.
 
 ## Makefile Commands
 
 ```
 make secrets   Generate secrets (infra/.env, EC key pair)
-make up        Start in production mode
+make up        Start in development-style HTTP mode
 make dev       Start in development mode with hot reload
+make up-prod   Start production-style HTTPS mode via nginx
 make down      Stop all services
 make down-v    Stop and delete volumes (resets database)
 make test      Run backend tests
