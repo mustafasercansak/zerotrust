@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.dev
+    develop:
+      watch:
+        - path: ../backend
+          action: sync
+          target: /app
+          ignore:
+            - tmp/
+            - "*.pem"
+        - path: ../backend/go.mod
+          action: rebuild
+        - path: ../backend/go.sum
+          action: rebuild
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      NODE_ENV: development
+    develop:
+      watch:
+        - path: ../frontend
+          action: sync
+          target: /app
+          ignore:
+            - node_modules/
+            - .next/
+        - path: ../frontend/package.json
+          action: rebuild
+        - path: ../frontend/package-lock.json
+          action: rebuild

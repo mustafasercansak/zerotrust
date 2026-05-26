@@ -1,0 +1,35 @@
+# ── Secrets — never commit ───────────────────
+secrets/
+infra/.env
+infra/.env.admin
+infra/certs/
+*.pem
+*.key
+*.crt
+.env
+.env.*
+
+# ── Go ───────────────────────────────────────
+backend/server
+backend/tmp/
+
+# ── Next.js ──────────────────────────────────
+frontend/.next/
+frontend/node_modules/
+frontend/*.tsbuildinfo
+
+# ── OS ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# ── Docker ───────────────────────────────────
+infra/postgres_data/
+infra/redis_data/
