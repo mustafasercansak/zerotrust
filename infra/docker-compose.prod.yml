@@ -29,7 +29,6 @@ services:
         ipv4_address: 192.168.200.2
 
   backend:
-    ports: []          # remove direct port exposure — only nginx reaches backend
     restart: unless-stopped
     environment:
       TLS_ENABLED: "false"          # TLS terminated by nginx; backend stays plain HTTP internally
@@ -51,7 +50,6 @@ services:
       - internal
 
   frontend:
-    ports: []          # same — only nginx is public
     restart: unless-stopped
     environment:
       BACKEND_INTERNAL_URL: "http://backend:8080"   # rewrites proxy to backend on the internal network
@@ -59,12 +57,10 @@ services:
       - internal
 
   postgres:
-    ports: []          # never expose DB to the host in production
     networks:
       - internal
 
   redis:
-    ports: []
     networks:
       - internal
 

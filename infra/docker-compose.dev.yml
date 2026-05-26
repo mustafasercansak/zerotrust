@@ -1,5 +1,15 @@
 services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
   backend:
+    ports:
+      - "8080:8080"
     build:
       context: ../backend
       dockerfile: Dockerfile.dev
@@ -19,6 +29,8 @@ services:
           action: rebuild
 
   frontend:
+    ports:
+      - "3000:3000"
     build:
       context: ../frontend
       dockerfile: Dockerfile.dev

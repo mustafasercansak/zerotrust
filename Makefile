@@ -13,16 +13,16 @@ jwt-key: ## Generate a persistent EC P-256 JWT signing key
 	bash infra/scripts/gen-jwt-key.sh
 
 up: ## Start in development mode (HTTP, ports exposed)
-	cd infra && sudo docker compose up --build
+	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 up-prod: certs ## Start in production mode (HTTPS via nginx, no exposed backend/frontend ports)
 	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 
-down: ## Stop all services
-	cd infra && sudo docker compose down
+down: ## Stop all services (works after make up, make dev, or make up-prod)
+	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.prod.yml down --remove-orphans
 
 down-v: ## Stop and delete volumes (resets database)
-	cd infra && sudo docker compose down -v
+	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.prod.yml down -v --remove-orphans
 
 dev: ## Start in development mode with hot reload
 	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
@@ -38,4 +38,4 @@ lint: ## Run go vet + frontend tsc
 	cd frontend && npx tsc --noEmit
 
 clean: ## Remove Docker images and volumes
-	cd infra && sudo docker compose down -v --rmi local
+	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.prod.yml down -v --rmi local --remove-orphans
