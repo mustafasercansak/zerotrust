@@ -37,13 +37,13 @@ func (r *Repository) Log(ctx context.Context, e Entry) {
 
 // EntryRow is the read model for audit log listing.
 type EntryRow struct {
-	ID        string
-	UserID    *string
-	Action    string
-	Resource  string
-	IPAddress *string
-	UserAgent *string
-	CreatedAt string
+	ID        string  `json:"id"`
+	UserID    *string `json:"user_id"`
+	Action    string  `json:"action"`
+	Resource  string  `json:"resource"`
+	IPAddress *string `json:"ip_address"`
+	UserAgent *string `json:"user_agent"`
+	CreatedAt string  `json:"created_at"`
 }
 
 // List returns audit entries ordered newest-first with limit/offset pagination.
@@ -58,7 +58,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]EntryRow, e
 		       resource,
 		       ip_address::text,
 		       user_agent,
-		       created_at::text
+		       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM audit_logs
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2

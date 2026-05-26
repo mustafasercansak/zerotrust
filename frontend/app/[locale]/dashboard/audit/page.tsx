@@ -7,7 +7,10 @@ import { useMeContext } from "../context";
 
 const PAGE_SIZE = 50;
 
-function formatDate(iso: string): string {
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "short",
@@ -15,7 +18,7 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  }).format(new Date(iso));
+  }).format(d);
 }
 
 export default function AuditPage() {
