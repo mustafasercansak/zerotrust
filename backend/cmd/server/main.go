@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,10 +21,13 @@ import (
 	"github.com/zerotrust/backend/internal/admin"
 	"github.com/zerotrust/backend/internal/audit"
 	"github.com/zerotrust/backend/internal/auth"
+	"github.com/zerotrust/backend/internal/mfa"
+	"github.com/zerotrust/backend/internal/passwdreset"
 	"github.com/zerotrust/backend/internal/serviceaccount"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
+	"github.com/zerotrust/backend/pkg/mailer"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
 
@@ -85,9 +89,34 @@ func main() {
 	sessionHandler := session.NewHandler(sessionRepo)
 	go runSessionCleanup(sessionRepo)
 
-	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks)
 	auditRepo := audit.NewRepository(db)
-	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure)
+	auditHandler := audit.NewHandler(auditRepo)
+
+	// MFA
+	var mfaSvc *mfa.Service
+	var mfaHandler *mfa.Handler
+	if len(cfg.MFAEncryptionKey) == 32 {
+		mfaRepo := mfa.NewRepository(db)
+		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey)
+		mfaHandler = mfa.NewHandler(mfaSvc)
+		slog.Info("MFA enabled")
+	} else {
+		slog.Warn("MFA_ENCRYPTION_KEY not set or invalid — MFA disabled")
+	}
+
+	// Password reset mailer
+	var ml mailer.Mailer = mailer.LogMailer{}
+	if cfg.SMTPHost != "" {
+		ml = mailer.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPassword)
+		slog.Info("SMTP mailer configured", "host", cfg.SMTPHost)
+	} else {
+		slog.Warn("SMTP_HOST not set — password reset emails will be logged only")
+	}
+	prRepo := passwdreset.NewRepository(db)
+	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
+
+	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaSvc)
+	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc)
 	adminHandler := admin.NewHandler(userSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -117,7 +146,6 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok","service":"zerotrust"}`)
 	})
 
-	// JWKS endpoint — allows external services to fetch public keys for local JWT validation
 	r.Get("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
@@ -128,11 +156,15 @@ func main() {
 		r.Use(authmw.CSRF())
 
 		r.With(loginRL.Middleware()).Post("/auth/login", authHandler.Login)
-		r.With(tokenRL.Middleware()).Post("/auth/token", authHandler.Token) // client_credentials
+		r.With(loginRL.Middleware()).Post("/auth/mfa/challenge", authHandler.MFAChallenge)
+		r.With(tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
 		r.Post("/auth/refresh", authHandler.Refresh)
 		r.Post("/auth/logout", authHandler.Logout)
+		r.Post("/auth/register", authHandler.Register)
+		r.With(loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
+		r.Post("/auth/reset-password", authHandler.ResetPassword)
 
-		// SSE stream — auth handled inside handler via ?token= (EventSource can't send headers)
+		// SSE stream — auth handled inside handler via cookie (EventSource sends cookies automatically)
 		r.Get("/admin/service-accounts/events", saHandler.Events)
 
 		// Protected routes — ES256 + jti blocklist + audit log
@@ -157,14 +189,25 @@ func main() {
 					claims.UserID, claims.Email, claims.Locale, rolesJSON, permsJSON)
 			})
 
-			// User management — fine-grained permissions
+			// Session management — any authenticated user manages their own sessions
+			r.Get("/sessions", sessionHandler.List)
+			r.Delete("/sessions/{id}", sessionHandler.Revoke)
+
+			// MFA management — any authenticated user
+			if mfaHandler != nil {
+				r.Get("/mfa/status", mfaHandler.Status)
+				r.Get("/mfa/setup", mfaHandler.Setup)
+				r.Post("/mfa/verify", mfaHandler.Verify)
+				r.Post("/mfa/disable", mfaHandler.Disable)
+			}
+
+			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "write")).Post("/admin/users", adminHandler.CreateUser)
 			r.With(authmw.RequirePermission("users", "write")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 
-			// Session management — any authenticated user manages their own sessions
-			r.Get("/sessions", sessionHandler.List)
-			r.Delete("/sessions/{id}", sessionHandler.Revoke)
+			// Audit log
+			r.With(authmw.RequirePermission("users", "read")).Get("/admin/audit", auditHandler.List)
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
@@ -210,15 +253,32 @@ type config struct {
 	JWTSecondaryKeyFile      string
 	TLSEnabled               bool
 	CookiesSecure            bool
+	RegistrationEnabled      bool
 	CORSOrigins              []string
 	InitialAdminEmail        string
 	InitialAdminPasswordHash string
+	MFAEncryptionKey         []byte
+	SMTPHost                 string
+	SMTPPort                 string
+	SMTPFrom                 string
+	SMTPUser                 string
+	SMTPPassword             string
 }
 
 func loadConfig() config {
 	tlsEnabled := getEnv("TLS_ENABLED", "false") == "true"
 	cookiesSecure := getEnv("COOKIES_SECURE", "false") == "true"
+	registrationEnabled := getEnv("REGISTRATION_ENABLED", "false") == "true"
 	origins := strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"), ",")
+
+	var mfaKey []byte
+	if keyHex := getEnv("MFA_ENCRYPTION_KEY", ""); keyHex != "" {
+		if b, err := hex.DecodeString(keyHex); err == nil && len(b) == 32 {
+			mfaKey = b
+		} else {
+			slog.Warn("MFA_ENCRYPTION_KEY is set but invalid (must be 64 hex chars / 32 bytes)")
+		}
+	}
 
 	return config{
 		ServerAddr:               getEnv("SERVER_ADDR", ":8080"),
@@ -230,9 +290,16 @@ func loadConfig() config {
 		JWTSecondaryKeyFile:      getEnv("JWT_SECONDARY_KEY_FILE", ""),
 		TLSEnabled:               tlsEnabled,
 		CookiesSecure:            cookiesSecure,
+		RegistrationEnabled:      registrationEnabled,
 		CORSOrigins:              origins,
 		InitialAdminEmail:        getEnv("INITIAL_ADMIN_EMAIL", ""),
 		InitialAdminPasswordHash: getEnv("INITIAL_ADMIN_PASSWORD_HASH", ""),
+		MFAEncryptionKey:         mfaKey,
+		SMTPHost:                 getEnv("SMTP_HOST", ""),
+		SMTPPort:                 getEnv("SMTP_PORT", "587"),
+		SMTPFrom:                 getEnv("SMTP_FROM", "noreply@localhost"),
+		SMTPUser:                 getEnv("SMTP_USER", ""),
+		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
 	}
 }
 

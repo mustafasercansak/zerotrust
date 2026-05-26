@@ -48,6 +48,16 @@ export interface Session {
   is_current: boolean;
 }
 
+export interface AuditEntry {
+  id: string;
+  user_id: string | null;
+  action: string;
+  resource: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
 function getCSRFToken(): string {
   if (typeof document === "undefined") return "";
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
@@ -123,9 +133,15 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
 
 export const api = {
   login: (email: string, password: string) =>
-    request<{ ok: boolean }>("/api/v1/auth/login", {
+    request<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string }>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
+    }),
+
+  mfaChallenge: (mfaToken: string, totpCode: string) =>
+    request<{ ok: boolean }>("/api/v1/auth/mfa/challenge", {
+      method: "POST",
+      body: JSON.stringify({ mfa_token: mfaToken, totp_code: totpCode }),
     }),
 
   logout: () =>
@@ -140,10 +156,42 @@ export const api = {
 
   me: () => request<MeData>("/api/v1/me"),
 
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean }>("/api/v1/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    request<{ ok: boolean }>("/api/v1/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+
   listSessions: () => request<Session[]>("/api/v1/sessions"),
 
   revokeSession: (id: string) =>
     request<void>(`/api/v1/sessions/${id}`, { method: "DELETE" }),
+
+  listAuditLog: (limit = 50, offset = 0) =>
+    request<AuditEntry[]>(`/api/v1/admin/audit?limit=${limit}&offset=${offset}`),
+
+  mfaStatus: () => request<{ enabled: boolean }>("/api/v1/mfa/status"),
+
+  mfaSetup: () =>
+    request<{ otp_auth_url: string; secret: string }>("/api/v1/mfa/setup"),
+
+  mfaVerify: (code: string) =>
+    request<{ ok: boolean }>("/api/v1/mfa/verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  mfaDisable: (code: string) =>
+    request<{ ok: boolean }>("/api/v1/mfa/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 
   admin: {
     listUsers: () => request<UserData[]>("/api/v1/admin/users"),

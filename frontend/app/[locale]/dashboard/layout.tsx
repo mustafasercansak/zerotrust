@@ -35,9 +35,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navLinks = [
     { href: `/${locale}/dashboard`, label: t("dashboard") },
     { href: `/${locale}/dashboard/sessions`, label: t("sessions") },
+    { href: `/${locale}/dashboard/mfa`, label: t("mfa") },
     ...(isAdmin
       ? [
           { href: `/${locale}/dashboard/users`, label: t("users") },
+          { href: `/${locale}/dashboard/audit`, label: t("audit") },
           { href: `/${locale}/dashboard/service-accounts`, label: t("serviceAccounts") },
         ]
       : []),

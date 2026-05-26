@@ -47,6 +47,10 @@ func (s *Service) GetPermissions(ctx context.Context, userID string) ([]string, 
 	return s.repo.GetPermissions(ctx, userID)
 }
 
+func (s *Service) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
+	return s.repo.UpdatePassword(ctx, userID, passwordHash)
+}
+
 // SeedAdmin creates the initial admin user with the admin role if the email doesn't exist.
 // hash must be a pre-computed bcrypt hash.
 func (s *Service) SeedAdmin(ctx context.Context, email, hash string) error {

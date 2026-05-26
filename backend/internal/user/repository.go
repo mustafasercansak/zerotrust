@@ -139,6 +139,14 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 	return tx.Commit(ctx)
 }
 
+// UpdatePassword replaces the stored password hash for a user.
+func (r *Repository) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2
+	`, passwordHash, userID)
+	return err
+}
+
 // GetPermissions returns all resource:action strings for the user via their roles.
 func (r *Repository) GetPermissions(ctx context.Context, userID string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `

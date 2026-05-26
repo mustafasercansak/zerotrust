@@ -3,6 +3,8 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile.dev
+    environment:
+      REGISTRATION_ENABLED: "true"
     develop:
       watch:
         - path: ../backend

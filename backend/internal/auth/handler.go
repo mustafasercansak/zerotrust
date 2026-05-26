@@ -15,19 +15,29 @@ import (
 	"github.com/zerotrust/backend/pkg/validation"
 )
 
-type Handler struct {
-	authSvc       *Service
-	userSvc       *user.Service
-	auditRepo     *audit.Repository
-	cookiesSecure bool
+// PasswordResetter is implemented by passwdreset.Service.
+type PasswordResetter interface {
+	SendReset(ctx context.Context, email, baseURL string) error
+	Reset(ctx context.Context, token, newPassword string) error
 }
 
-func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Repository, cookiesSecure bool) *Handler {
+type Handler struct {
+	authSvc             *Service
+	userSvc             *user.Service
+	auditRepo           *audit.Repository
+	passwordResetter    PasswordResetter // nil when not configured
+	cookiesSecure       bool
+	registrationEnabled bool
+}
+
+func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Repository, cookiesSecure, registrationEnabled bool, pr PasswordResetter) *Handler {
 	return &Handler{
-		authSvc:       authSvc,
-		userSvc:       userSvc,
-		auditRepo:     auditRepo,
-		cookiesSecure: cookiesSecure,
+		authSvc:             authSvc,
+		userSvc:             userSvc,
+		auditRepo:           auditRepo,
+		passwordResetter:    pr,
+		cookiesSecure:       cookiesSecure,
+		registrationEnabled: registrationEnabled,
 	}
 }
 
@@ -79,7 +89,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
 	if err != nil {
 		var lockedErr *AccountLockedError
 		switch {
@@ -112,6 +122,41 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.Header.Get("User-Agent"),
 		Metadata:  map[string]any{"email": req.Email},
 	})
+
+	if result.MFARequired {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"mfa_required": true,
+			"mfa_token":    result.MFAPendingToken,
+		})
+		return
+	}
+
+	h.writeCookies(w, result.Pair)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/v1/auth/mfa/challenge — second factor after Login returned mfa_required
+func (h *Handler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MFAToken string `json:"mfa_token"`
+		TOTPCode string `json:"totp_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if req.MFAToken == "" || req.TOTPCode == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields")
+		return
+	}
+
+	pair, err := h.authSvc.MFAChallenge(r.Context(), req.MFAToken, req.TOTPCode)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
 
 	h.writeCookies(w, pair)
 	w.Header().Set("Content-Type", "application/json")
@@ -154,6 +199,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	if !h.registrationEnabled {
+		writeError(w, http.StatusForbidden, "registration_disabled")
+		return
+	}
+
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -193,15 +243,73 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.Header.Get("User-Agent"),
 	})
 
-	pair, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
-	h.writeCookies(w, pair)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	if result.MFARequired {
+		// Can't happen for a brand-new account; handle gracefully.
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		return
+	}
+	h.writeCookies(w, result.Pair)
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/v1/auth/forgot-password
+func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if h.passwordResetter == nil {
+		writeError(w, http.StatusNotImplemented, "not_configured")
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	baseURL := r.Header.Get("Origin")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+	// Always respond 200 — never reveal whether the email exists.
+	go h.passwordResetter.SendReset(context.Background(), req.Email, baseURL)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/v1/auth/reset-password
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if h.passwordResetter == nil {
+		writeError(w, http.StatusNotImplemented, "not_configured")
+		return
+	}
+	var req struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if req.Token == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields")
+		return
+	}
+	if err := validation.Password(req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.passwordResetter.Reset(r.Context(), req.Token, req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_token")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 

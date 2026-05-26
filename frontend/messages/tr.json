@@ -10,6 +10,8 @@
   "auth": {
     "email": "E-posta",
     "password": "Şifre",
+    "newPassword": "Yeni Şifre",
+    "confirmPassword": "Şifreyi Onayla",
     "loginTitle": "Giriş Yap",
     "loginButton": "Giriş Yap",
     "registerTitle": "Hesap Oluştur",
@@ -18,6 +20,19 @@
     "hasAccount": "Zaten hesabın var mı?",
     "signUp": "Kayıt Ol",
     "signIn": "Giriş Yap",
+    "forgotLink": "Şifremi unuttum",
+    "backToLogin": "Girişe dön",
+    "forgotTitle": "Şifreni sıfırla",
+    "forgotSubtitle": "E-posta adresini gir, sıfırlama bağlantısı gönderelim.",
+    "forgotButton": "Bağlantı gönder",
+    "forgotSent": "Bu e-posta kayıtlıysa, sıfırlama bağlantısı gönderildi.",
+    "resetTitle": "Yeni şifre belirle",
+    "resetButton": "Şifreyi kaydet",
+    "resetDone": "Şifre güncellendi. Girişe yönlendiriliyorsunuz...",
+    "mfaTitle": "İki Faktörlü Doğrulama",
+    "mfaSubtitle": "Kimlik doğrulama uygulamanızdaki 6 haneli kodu girin.",
+    "mfaCode": "Doğrulama kodu",
+    "mfaButton": "Doğrula",
     "errors": {
       "missing_fields": "E-posta ve şifre gereklidir.",
       "invalid_credentials": "E-posta veya şifre hatalı.",
@@ -27,7 +42,7 @@
       "invalid_request": "Geçersiz istek.",
       "missing_token": "Oturum bulunamadı.",
       "token_expired": "Oturumunuz sona erdi. Lütfen tekrar giriş yapın.",
-      "invalid_token": "Geçersiz oturum.",
+      "invalid_token": "Geçersiz veya süresi dolmuş bağlantı.",
       "account_locked": "Çok fazla başarısız giriş denemesi. {minutes} dakika sonra tekrar deneyin.",
       "rate_limit_exceeded": "Çok fazla istek gönderildi. Lütfen bir dakika bekleyin.",
       "email_invalid": "Geçerli bir e-posta adresi girin.",
@@ -36,13 +51,17 @@
       "password_no_lowercase": "Şifre en az bir küçük harf içermelidir.",
       "password_no_digit": "Şifre en az bir rakam içermelidir.",
       "password_no_special": "Şifre en az bir özel karakter içermelidir (örn. !@#$%).",
-      "forbidden": "Bu işlem için yetkiniz yok."
+      "forbidden": "Bu işlem için yetkiniz yok.",
+      "registration_disabled": "Kayıt şu anda devre dışıdır.",
+      "passwords_mismatch": "Şifreler eşleşmiyor."
     }
   },
   "nav": {
     "dashboard": "Ana Sayfa",
     "sessions": "Oturumlar",
+    "mfa": "İki Faktörlü",
     "users": "Kullanıcılar",
+    "audit": "Denetim Günlüğü",
     "serviceAccounts": "Servis Hesapları"
   },
   "dashboard": {
@@ -97,6 +116,38 @@
     "errors": {
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin.",
       "not_found": "Oturum bulunamadı."
+    }
+  },
+  "audit": {
+    "title": "Denetim Günlüğü",
+    "action": "Eylem",
+    "user": "Kullanıcı ID",
+    "ip": "IP Adresi",
+    "time": "Zaman",
+    "noEntries": "Denetim kaydı bulunamadı.",
+    "loadMore": "Daha fazla yükle",
+    "accessDenied": "Bu sayfaya erişim yetkiniz yok.",
+    "errors": {
+      "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
+    }
+  },
+  "mfa": {
+    "title": "İki Faktörlü Kimlik Doğrulama",
+    "statusEnabled": "Etkin",
+    "statusDisabled": "Devre Dışı",
+    "enabledDesc": "Hesabınız TOTP kimlik doğrulamasıyla korunuyor.",
+    "disabledDesc": "Kimlik doğrulama uygulamasıyla ekstra güvenlik katmanı ekleyin.",
+    "setupButton": "2FA'yı Etkinleştir",
+    "setupInstructions": "Aşağıdaki kodu kimlik doğrulama uygulamanızda (Google Authenticator, Authy vb.) taratın veya gizli anahtarı manuel olarak girin.",
+    "secretLabel": "Manuel giriş anahtarı",
+    "openInApp": "Uygulamada aç →",
+    "verifyPrompt": "Kurulumu onaylamak için kimlik doğrulama uygulamanızdaki 6 haneli kodu girin.",
+    "verifyButton": "Onayla ve Etkinleştir",
+    "disablePrompt": "2FA'yı devre dışı bırakmak için mevcut doğrulama kodunuzu girin.",
+    "disableButton": "2FA'yı Devre Dışı Bırak",
+    "errors": {
+      "invalid_code": "Geçersiz kod. Lütfen tekrar deneyin.",
+      "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
     }
   },
   "serviceAccounts": {
