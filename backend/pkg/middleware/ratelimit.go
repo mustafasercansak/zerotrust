@@ -25,7 +25,7 @@ func NewRateLimiter(rdb *redis.Client, prefix string, max int, window time.Durat
 func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := fmt.Sprintf("rl:%s:%s", rl.prefix, realIP(r))
+			key := fmt.Sprintf("rl:%s:%s", rl.prefix, ClientIP(r))
 
 			count, err := rl.increment(r.Context(), key)
 			if err != nil {
@@ -64,6 +64,3 @@ func (rl *RateLimiter) increment(ctx context.Context, key string) (int, error) {
 	return int(incr.Val()), nil
 }
 
-func realIP(r *http.Request) string {
-	return r.RemoteAddr
-}

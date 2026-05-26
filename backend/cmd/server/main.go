@@ -132,6 +132,7 @@ func main() {
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
 	tokenRL := authmw.NewRateLimiter(rdb, "token", 30, time.Minute)
 	globalRL := authmw.NewRateLimiter(rdb, "global", 300, time.Minute)
+	trustedCIDRs := authmw.ParseCIDRs(cfg.TrustedProxies)
 
 	r := chi.NewRouter()
 
@@ -145,7 +146,7 @@ func main() {
 		MaxAge:           300,
 	}))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	r.Use(authmw.TrustedClientIP(trustedCIDRs))
 	r.Use(globalRL.Middleware())
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
@@ -265,6 +266,7 @@ type config struct {
 	CookiesSecure            bool
 	RegistrationEnabled      bool
 	CORSOrigins              []string
+	TrustedProxies           string
 	InitialAdminEmail        string
 	InitialAdminPasswordHash string
 	MFAEncryptionKey         []byte
@@ -303,6 +305,7 @@ func loadConfig() config {
 		CookiesSecure:            cookiesSecure,
 		RegistrationEnabled:      registrationEnabled,
 		CORSOrigins:              origins,
+		TrustedProxies:           getEnv("TRUSTED_PROXIES", ""),
 		InitialAdminEmail:        getEnv("INITIAL_ADMIN_EMAIL", ""),
 		InitialAdminPasswordHash: getEnv("INITIAL_ADMIN_PASSWORD_HASH", ""),
 		MFAEncryptionKey:         mfaKey,

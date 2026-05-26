@@ -43,6 +43,7 @@ services:
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
       PUBLIC_APP_URL: "${PUBLIC_ORIGIN:-https://localhost}"
+      TRUSTED_PROXIES: "172.16.0.0/12"
     secrets:
       - jwt_ec_primary
     networks:
