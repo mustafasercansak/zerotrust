@@ -47,8 +47,8 @@ func (s *Service) FindByClientID(ctx context.Context, clientID string) (*Service
 	return s.repo.FindByClientID(ctx, clientID)
 }
 
-func (s *Service) ListAll(ctx context.Context) ([]*ServiceAccount, error) {
-	return s.repo.ListAll(ctx)
+func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
+	return s.repo.List(ctx, p)
 }
 
 func (s *Service) Revoke(ctx context.Context, id string) error {

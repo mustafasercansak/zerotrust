@@ -5,7 +5,18 @@
     "error": "Bir hata oluştu",
     "save": "Kaydet",
     "cancel": "İptal",
-    "logout": "Çıkış Yap"
+    "logout": "Çıkış Yap",
+    "previous": "Önceki",
+    "next": "Sonraki",
+    "page": "Sayfa {page}",
+    "pageOf": "{page} / {total}",
+    "search": "Ara...",
+    "filterAll": "Tümü",
+    "filterActive": "Aktif",
+    "filterInactive": "Pasif",
+    "filterExpired": "Süresi Dolmuş",
+    "rowsPerPage": "Sayfa başına satır:",
+    "showingOf": "{from}–{to} / {total} kayıt"
   },
   "auth": {
     "email": "E-posta",
@@ -124,8 +135,8 @@
     "user": "Kullanıcı ID",
     "ip": "IP Adresi",
     "time": "Zaman",
+    "resource": "Kaynak",
     "noEntries": "Denetim kaydı bulunamadı.",
-    "loadMore": "Daha fazla yükle",
     "accessDenied": "Bu sayfaya erişim yetkiniz yok.",
     "errors": {
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."

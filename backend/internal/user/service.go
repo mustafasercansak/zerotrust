@@ -46,8 +46,8 @@ func (s *Service) CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-func (s *Service) ListAll(ctx context.Context) ([]*User, error) {
-	return s.repo.ListAll(ctx)
+func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
+	return s.repo.List(ctx, p)
 }
 
 func (s *Service) SetRoles(ctx context.Context, userID string, roles []string) error {

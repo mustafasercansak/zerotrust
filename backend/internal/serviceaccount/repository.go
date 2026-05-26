@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -98,33 +99,109 @@ func (r *Repository) FindByClientID(ctx context.Context, clientID string) (*Serv
 	return sa, nil
 }
 
-func (r *Repository) ListAll(ctx context.Context) ([]*ServiceAccount, error) {
-	rows, err := r.db.Query(ctx, `
+// ListParams configures pagination, sorting, and filtering for List.
+type ListParams struct {
+	Limit   int
+	Offset  int
+	SortBy  string // name | created_at | is_active | expires_at
+	SortDir string // asc | desc
+	Name    string // ILIKE filter
+	Status  string // active | inactive | expired | ""
+}
+
+// ListResult holds one page of service accounts and the total matching count.
+type ListResult struct {
+	Accounts []*ServiceAccount
+	Total    int
+}
+
+var saSortCols = map[string]string{
+	"name":       "sa.name",
+	"created_at": "sa.created_at",
+	"is_active":  "sa.is_active",
+	"expires_at": "sa.expires_at",
+}
+
+// List returns a filtered, sorted, paginated page of service accounts with the total count.
+func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error) {
+	if p.Limit <= 0 || p.Limit > 200 {
+		p.Limit = 25
+	}
+	col, ok := saSortCols[p.SortBy]
+	if !ok {
+		col = "sa.created_at"
+	}
+	dir := "ASC"
+	if strings.EqualFold(p.SortDir, "desc") {
+		dir = "DESC"
+	}
+
+	var conds []string
+	var args []any
+	n := 1
+
+	if p.Name != "" {
+		conds = append(conds, fmt.Sprintf("LOWER(sa.name) LIKE $%d", n))
+		args = append(args, "%"+strings.ToLower(p.Name)+"%")
+		n++
+	}
+	switch p.Status {
+	case "active":
+		conds = append(conds, fmt.Sprintf("sa.is_active = $%d AND (sa.expires_at IS NULL OR sa.expires_at >= NOW())", n))
+		args = append(args, true)
+		n++
+	case "inactive":
+		conds = append(conds, fmt.Sprintf("sa.is_active = $%d", n))
+		args = append(args, false)
+		n++
+	case "expired":
+		conds = append(conds, "sa.expires_at IS NOT NULL AND sa.expires_at < NOW()")
+	}
+
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM service_accounts sa %s`, where),
+		args...,
+	).Scan(&total); err != nil {
+		return ListResult{}, err
+	}
+
+	dataArgs := append(append([]any{}, args...), p.Limit, p.Offset)
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT sa.id, sa.name, sa.client_id, sa.is_active, sa.created_at, sa.expires_at,
 		       COALESCE(string_agg(s.scope, ',' ORDER BY s.scope), '') AS scopes
 		FROM service_accounts sa
 		LEFT JOIN service_account_scopes s ON sa.id = s.service_account_id
+		%s
 		GROUP BY sa.id
-		ORDER BY sa.created_at ASC
-	`)
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, where, col, dir, n, n+1), dataArgs...)
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
 	defer rows.Close()
 
-	var list []*ServiceAccount
+	list := make([]*ServiceAccount, 0)
 	for rows.Next() {
 		sa := &ServiceAccount{}
 		var scopesStr string
 		if err := rows.Scan(&sa.ID, &sa.Name, &sa.ClientID, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt, &scopesStr); err != nil {
-			return nil, err
+			return ListResult{}, err
 		}
 		if scopesStr != "" {
 			sa.Scopes = strings.Split(scopesStr, ",")
+		} else {
+			sa.Scopes = []string{}
 		}
 		list = append(list, sa)
 	}
-	return list, rows.Err()
+	return ListResult{Accounts: list, Total: total}, rows.Err()
 }
 
 func (r *Repository) Revoke(ctx context.Context, id string) error {

@@ -5,7 +5,18 @@
     "error": "An error occurred",
     "save": "Save",
     "cancel": "Cancel",
-    "logout": "Log Out"
+    "logout": "Log Out",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page}",
+    "pageOf": "{page} / {total}",
+    "search": "Search...",
+    "filterAll": "All",
+    "filterActive": "Active",
+    "filterInactive": "Inactive",
+    "filterExpired": "Expired",
+    "rowsPerPage": "Rows per page:",
+    "showingOf": "Showing {from}–{to} of {total}"
   },
   "auth": {
     "email": "Email",
@@ -124,8 +135,8 @@
     "user": "User ID",
     "ip": "IP Address",
     "time": "Time",
+    "resource": "Resource",
     "noEntries": "No audit entries found.",
-    "loadMore": "Load more",
     "accessDenied": "You do not have permission to access this page.",
     "errors": {
       "internal_error": "Server error. Please try again."

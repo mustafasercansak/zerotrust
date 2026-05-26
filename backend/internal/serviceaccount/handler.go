@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -61,19 +62,32 @@ func toResponse(sa *ServiceAccount) saResponse {
 	}
 }
 
-// GET /api/v1/admin/service-accounts
+type pagedSAResponse struct {
+	Data  []saResponse `json:"data"`
+	Total int          `json:"total"`
+}
+
+// GET /api/v1/admin/service-accounts?limit=25&offset=0&sort_by=name&sort_dir=asc&name=foo&status=active
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.ListAll(r.Context())
+	q := r.URL.Query()
+	result, err := h.svc.List(r.Context(), ListParams{
+		Limit:   queryInt(q.Get("limit"), 25),
+		Offset:  queryInt(q.Get("offset"), 0),
+		SortBy:  q.Get("sort_by"),
+		SortDir: q.Get("sort_dir"),
+		Name:    q.Get("name"),
+		Status:  q.Get("status"),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	resp := make([]saResponse, len(list))
-	for i, sa := range list {
-		resp[i] = toResponse(sa)
+	data := make([]saResponse, len(result.Accounts))
+	for i, sa := range result.Accounts {
+		data[i] = toResponse(sa)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(pagedSAResponse{Data: data, Total: result.Total})
 }
 
 type createRequest struct {
@@ -218,4 +232,11 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func queryInt(s string, def int) int {
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+		return n
+	}
+	return def
 }

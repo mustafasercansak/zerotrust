@@ -65,9 +65,7 @@ export default function MFAPage() {
   }
 
   return (
-    <div className="px-8 py-8 max-w-lg space-y-6">
-      <h1 className="text-2xl font-bold text-white">{t("title")}</h1>
-
+    <div className="h-full overflow-auto px-8 py-8 max-w-lg space-y-6">
       {status === "loading" && <p className="text-gray-400 text-sm">...</p>}
 
       {status === "enabled" && (

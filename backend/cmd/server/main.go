@@ -200,6 +200,27 @@ func main() {
 					claims.UserID, claims.Email, claims.Locale, rolesJSON, permsJSON)
 			})
 
+			r.Patch("/me/locale", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				var req struct {
+					Locale string `json:"locale"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				allowed := map[string]bool{"tr": true, "en": true}
+				if !allowed[req.Locale] {
+					http.Error(w, `{"error":"invalid_locale"}`, http.StatusBadRequest)
+					return
+				}
+				if err := userRepo.UpdateLocale(r.Context(), claims.UserID, req.Locale); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+
 			// Session management — any authenticated user manages their own sessions
 			r.Get("/sessions", sessionHandler.List)
 			r.Delete("/sessions/{id}", sessionHandler.Revoke)

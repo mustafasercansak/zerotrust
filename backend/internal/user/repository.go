@@ -107,6 +107,14 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 	return u, nil
 }
 
+func (r *Repository) UpdateLocale(ctx context.Context, userID, locale string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE users SET locale = $1, updated_at = NOW() WHERE id = $2`,
+		locale, userID,
+	)
+	return err
+}
+
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
@@ -129,35 +137,107 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	return u, nil
 }
 
-// ListAll returns all users with their roles, ordered by creation time.
-func (r *Repository) ListAll(ctx context.Context) ([]*User, error) {
-	rows, err := r.db.Query(ctx, `
+// ListParams configures pagination, sorting, and filtering for List.
+type ListParams struct {
+	Limit   int
+	Offset  int
+	SortBy  string // email | created_at | is_active
+	SortDir string // asc | desc
+	Email   string // ILIKE filter
+	Status  string // active | inactive | ""
+}
+
+// ListResult holds one page of users and the unfiltered total count.
+type ListResult struct {
+	Users []*User
+	Total int
+}
+
+var userSortCols = map[string]string{
+	"email":      "u.email",
+	"created_at": "u.created_at",
+	"is_active":  "u.is_active",
+}
+
+// List returns a filtered, sorted, paginated page of users with the total matching count.
+func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error) {
+	if p.Limit <= 0 || p.Limit > 200 {
+		p.Limit = 25
+	}
+	col, ok := userSortCols[p.SortBy]
+	if !ok {
+		col = "u.created_at"
+	}
+	dir := "ASC"
+	if strings.EqualFold(p.SortDir, "desc") {
+		dir = "DESC"
+	}
+
+	var conds []string
+	var args []any
+	n := 1
+
+	if p.Email != "" {
+		conds = append(conds, fmt.Sprintf("LOWER(u.email) LIKE $%d", n))
+		args = append(args, "%"+strings.ToLower(p.Email)+"%")
+		n++
+	}
+	switch p.Status {
+	case "active":
+		conds = append(conds, fmt.Sprintf("u.is_active = $%d", n))
+		args = append(args, true)
+		n++
+	case "inactive":
+		conds = append(conds, fmt.Sprintf("u.is_active = $%d", n))
+		args = append(args, false)
+		n++
+	}
+
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM users u %s`, where),
+		args...,
+	).Scan(&total); err != nil {
+		return ListResult{}, err
+	}
+
+	dataArgs := append(append([]any{}, args...), p.Limit, p.Offset)
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT u.id, u.email, u.locale, u.is_active, u.created_at, u.updated_at,
 		       COALESCE(string_agg(ro.name, ',' ORDER BY ro.name), '') AS roles
 		FROM users u
 		LEFT JOIN user_roles ur ON u.id = ur.user_id
 		LEFT JOIN roles ro ON ur.role_id = ro.id
+		%s
 		GROUP BY u.id
-		ORDER BY u.created_at ASC
-	`)
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, where, col, dir, n, n+1), dataArgs...)
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
 	defer rows.Close()
 
-	var users []*User
+	users := make([]*User, 0)
 	for rows.Next() {
 		u := &User{}
 		var rolesStr string
 		if err := rows.Scan(&u.ID, &u.Email, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &rolesStr); err != nil {
-			return nil, err
+			return ListResult{}, err
 		}
 		if rolesStr != "" {
 			u.Roles = strings.Split(rolesStr, ",")
+		} else {
+			u.Roles = []string{}
 		}
 		users = append(users, u)
 	}
-	return users, rows.Err()
+	return ListResult{Users: users, Total: total}, rows.Err()
 }
 
 // AssignRoleByName assigns a named role to a user (idempotent).

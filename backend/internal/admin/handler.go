@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zerotrust/backend/internal/user"
@@ -27,6 +28,11 @@ type userResponse struct {
 	CreatedAt string   `json:"created_at"`
 }
 
+type pagedResponse[T any] struct {
+	Data  []T `json:"data"`
+	Total int `json:"total"`
+}
+
 func toResponse(u *user.User) userResponse {
 	roles := u.Roles
 	if roles == nil {
@@ -42,19 +48,28 @@ func toResponse(u *user.User) userResponse {
 	}
 }
 
-// GET /api/v1/admin/users
+// GET /api/v1/admin/users?limit=25&offset=0&sort_by=email&sort_dir=asc&email=foo&status=active
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.userSvc.ListAll(r.Context())
+	q := r.URL.Query()
+	result, err := h.userSvc.List(r.Context(), user.ListParams{
+		Limit:   queryInt(q.Get("limit"), 25),
+		Offset:  queryInt(q.Get("offset"), 0),
+		SortBy:  q.Get("sort_by"),
+		SortDir: q.Get("sort_dir"),
+		Email:   q.Get("email"),
+		Status:  q.Get("status"),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	resp := make([]userResponse, len(users))
-	for i, u := range users {
-		resp[i] = toResponse(u)
+
+	data := make([]userResponse, len(result.Users))
+	for i, u := range result.Users {
+		data[i] = toResponse(u)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(pagedResponse[userResponse]{Data: data, Total: result.Total})
 }
 
 type createUserRequest struct {
@@ -128,4 +143,11 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func queryInt(s string, def int) int {
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+		return n
+	}
+	return def
 }

@@ -1,16 +1,18 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { useMeContext } from "./context";
+import { Badge } from "@/components/ui/badge";
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
+  const locale = useLocale();
   const me = useMeContext();
 
   if (!me) return null;
 
   return (
-    <div className="px-8 py-8 max-w-2xl space-y-6">
+    <div className="h-full overflow-auto px-8 py-8 max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold text-white">{t("title")}</h1>
 
       <div className="rounded-xl bg-gray-900 border border-gray-800 p-6 space-y-3">
@@ -27,17 +29,10 @@ export default function DashboardPage() {
           <span className="text-gray-400">User ID</span>
           <span className="text-gray-200 font-mono text-xs truncate">{me.user_id}</span>
           <span className="text-gray-400">{t("locale")}</span>
-          <span className="text-gray-200">{me.locale.toUpperCase()}</span>
+          <span className="text-gray-200">{locale.toUpperCase()}</span>
           <span className="text-gray-400">{t("roles")}</span>
           <div className="flex flex-wrap gap-1">
-            {me.roles.map((r) => (
-              <span
-                key={r}
-                className="text-xs px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-700"
-              >
-                {r}
-              </span>
-            ))}
+            {me.roles.map((r) => <Badge key={r} variant="indigo">{r}</Badge>)}
           </div>
         </div>
       </div>

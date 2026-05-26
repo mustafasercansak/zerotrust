@@ -58,6 +58,32 @@ export interface AuditEntry {
   created_at: string;
 }
 
+// Shared pagination / sort / filter params used by DataTable and API fetchers.
+export interface PageParams {
+  page: number;
+  pageSize: number;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+  filters: Record<string, string>;
+}
+
+export interface PagedResult<T> {
+  data: T[];
+  total: number;
+}
+
+function buildQuery(p: PageParams): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(p.pageSize));
+  params.set("offset", String(p.page * p.pageSize));
+  if (p.sortKey) params.set("sort_by", p.sortKey);
+  if (p.sortDir) params.set("sort_dir", p.sortDir);
+  for (const [k, v] of Object.entries(p.filters)) {
+    if (v) params.set(k, v);
+  }
+  return `?${params.toString()}`;
+}
+
 function getCSRFToken(): string {
   if (typeof document === "undefined") return "";
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
@@ -156,6 +182,12 @@ export const api = {
 
   me: () => request<MeData>("/api/v1/me"),
 
+  updateLocale: (locale: string) =>
+    request<void>("/api/v1/me/locale", {
+      method: "PATCH",
+      body: JSON.stringify({ locale }),
+    }),
+
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>("/api/v1/auth/forgot-password", {
       method: "POST",
@@ -173,8 +205,8 @@ export const api = {
   revokeSession: (id: string) =>
     request<void>(`/api/v1/sessions/${id}`, { method: "DELETE" }),
 
-  listAuditLog: (limit = 50, offset = 0) =>
-    request<AuditEntry[]>(`/api/v1/admin/audit?limit=${limit}&offset=${offset}`),
+  listAuditLog: (p: PageParams) =>
+    request<PagedResult<AuditEntry>>(`/api/v1/admin/audit${buildQuery(p)}`),
 
   mfaStatus: () => request<{ enabled: boolean }>("/api/v1/mfa/status"),
 
@@ -194,7 +226,8 @@ export const api = {
     }),
 
   admin: {
-    listUsers: () => request<UserData[]>("/api/v1/admin/users"),
+    listUsers: (p: PageParams) =>
+      request<PagedResult<UserData>>(`/api/v1/admin/users${buildQuery(p)}`),
 
     createUser: (payload: { email: string; password: string; locale: string; roles: string[] }) =>
       request<UserData>("/api/v1/admin/users", {
@@ -208,8 +241,8 @@ export const api = {
         body: JSON.stringify({ roles }),
       }),
 
-    listServiceAccounts: () =>
-      request<ServiceAccount[]>("/api/v1/admin/service-accounts"),
+    listServiceAccounts: (p: PageParams) =>
+      request<PagedResult<ServiceAccount>>(`/api/v1/admin/service-accounts${buildQuery(p)}`),
 
     createServiceAccount: (payload: { name: string; scopes: string[]; expires_at?: string }) =>
       request<ServiceAccountCreated>("/api/v1/admin/service-accounts", {

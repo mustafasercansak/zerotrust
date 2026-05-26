@@ -3,6 +3,8 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -46,12 +48,79 @@ type EntryRow struct {
 	CreatedAt string  `json:"created_at"`
 }
 
-// List returns audit entries ordered newest-first with limit/offset pagination.
-func (r *Repository) List(ctx context.Context, limit, offset int) ([]EntryRow, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
+// ListParams configures pagination, sorting, and filtering for List.
+type ListParams struct {
+	Limit    int
+	Offset   int
+	SortBy   string // created_at | action | user_id | resource
+	SortDir  string // asc | desc
+	Action   string // ILIKE filter
+	UserID   string // exact match
+	Resource string // ILIKE filter
+}
+
+// ListResult holds one page of audit entries and the total matching count.
+type ListResult struct {
+	Entries []EntryRow
+	Total   int
+}
+
+var auditSortCols = map[string]string{
+	"created_at": "created_at",
+	"action":     "action",
+	"user_id":    "user_id",
+	"resource":   "resource",
+}
+
+// List returns a filtered, sorted, paginated page of audit entries with the total count.
+func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error) {
+	if p.Limit <= 0 || p.Limit > 200 {
+		p.Limit = 25
 	}
-	rows, err := r.db.Query(ctx, `
+	col, ok := auditSortCols[p.SortBy]
+	if !ok {
+		col = "created_at"
+	}
+	dir := "DESC"
+	if strings.EqualFold(p.SortDir, "asc") {
+		dir = "ASC"
+	}
+
+	var conds []string
+	var args []any
+	n := 1
+
+	if p.Action != "" {
+		conds = append(conds, fmt.Sprintf("action ILIKE $%d", n))
+		args = append(args, "%"+p.Action+"%")
+		n++
+	}
+	if p.UserID != "" {
+		conds = append(conds, fmt.Sprintf("user_id::text = $%d", n))
+		args = append(args, p.UserID)
+		n++
+	}
+	if p.Resource != "" {
+		conds = append(conds, fmt.Sprintf("resource ILIKE $%d", n))
+		args = append(args, "%"+p.Resource+"%")
+		n++
+	}
+
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM audit_logs %s`, where),
+		args...,
+	).Scan(&total); err != nil {
+		return ListResult{}, err
+	}
+
+	dataArgs := append(append([]any{}, args...), p.Limit, p.Offset)
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT id::text,
 		       user_id::text,
 		       action,
@@ -60,11 +129,12 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]EntryRow, e
 		       user_agent,
 		       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM audit_logs
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		%s
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, where, col, dir, n, n+1), dataArgs...)
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
 	defer rows.Close()
 
@@ -72,11 +142,11 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]EntryRow, e
 	for rows.Next() {
 		var e EntryRow
 		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.IPAddress, &e.UserAgent, &e.CreatedAt); err != nil {
-			return nil, err
+			return ListResult{}, err
 		}
 		entries = append(entries, e)
 	}
-	return entries, rows.Err()
+	return ListResult{Entries: entries, Total: total}, rows.Err()
 }
 
 func nullStr(s string) *string {
