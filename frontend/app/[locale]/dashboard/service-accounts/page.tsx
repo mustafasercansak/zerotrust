@@ -5,19 +5,26 @@ import { useTranslations, useLocale } from "next-intl";
 import { api, type PageParams, type ServiceAccount, type ServiceAccountCreated } from "@/lib/api";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "../context";
-import { DataTable, type Column, type Tab } from "@/components/DataTable";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Copy, Check } from "lucide-react";
+import { ResourceTablePage } from "@/components/ResourceTablePage";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import Check from "@mui/icons-material/Check";
+import ContentCopy from "@mui/icons-material/ContentCopy";
+import type { GridColDef } from "@mui/x-data-grid";
 
 const ALL_SCOPES = [
   "users:read",
@@ -50,80 +57,102 @@ export default function ServiceAccountsPage() {
     [refresh],
   );
 
-  const tabs = useMemo<Tab[]>(() => [
+  const tabs = useMemo(() => [
     { key: "all",      label: tCommon("filterAll") },
     { key: "active",   label: tCommon("filterActive"),   preset: { status: "active" } },
     { key: "inactive", label: tCommon("filterInactive"), preset: { status: "inactive" } },
     { key: "expired",  label: tCommon("filterExpired"),  preset: { status: "expired" } },
   ], [tCommon]);
 
-  const columns = useMemo<Column<ServiceAccount>[]>(() => [
+  const columns = useMemo<GridColDef<ServiceAccount>[]>(() => [
     {
-      key: "name",
-      label: t("name"),
-      sortKey: "name",
-      filterKey: "name",
-      render: (sa) => <span className="text-white font-medium">{sa.name}</span>,
+      field: "name",
+      headerName: t("name"),
+      minWidth: 180,
+      flex: 1,
+      renderCell: ({ row }) => <Typography variant="body2" fontWeight={600}>{row.name}</Typography>,
     },
     {
-      key: "client_id",
-      label: t("clientId"),
-      render: (sa) => <span className="text-gray-300 font-mono text-xs">{sa.client_id}</span>,
-    },
-    {
-      key: "scopes",
-      label: t("scopes"),
-      render: (sa) =>
-        sa.scopes.length === 0 ? (
-          <Badge variant="muted">{t("noScopes")}</Badge>
-        ) : (
-          <div className="flex flex-wrap gap-1">
-            {sa.scopes.map((s) => <Badge key={s} variant="sky">{s}</Badge>)}
-          </div>
-        ),
-    },
-    {
-      key: "status",
-      label: t("status"),
-      sortKey: "is_active",
-      render: (sa) => (
-        <button
-          onClick={() => handleToggleStatus(sa)}
-          title={sa.is_active ? t("deactivateHint") : t("activateHint")}
-          className={`text-xs px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
-            sa.is_active
-              ? "bg-emerald-900/50 text-emerald-300 border-emerald-700 hover:bg-red-900/50 hover:text-red-300 hover:border-red-700"
-              : "bg-gray-800 text-gray-400 border-gray-700 hover:bg-emerald-900/50 hover:text-emerald-300 hover:border-emerald-700"
-          }`}
-        >
-          {sa.is_active ? t("active") : t("inactive")}
-        </button>
+      field: "client_id",
+      headerName: t("clientId"),
+      minWidth: 260,
+      flex: 1.2,
+      sortable: false,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.client_id}
+        </Typography>
       ),
     },
     {
-      key: "created_at",
-      label: t("createdAt"),
-      sortKey: "created_at",
-      render: (sa) => <span className="text-gray-400 text-xs">{formatDate(sa.created_at, locale)}</span>,
+      field: "scopes",
+      headerName: t("scopes"),
+      minWidth: 240,
+      flex: 1.2,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }) =>
+        row.scopes.length === 0 ? (
+          <Chip size="small" variant="outlined" label={t("noScopes")} />
+        ) : (
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", height: "100%" }}>
+            {row.scopes.map((s) => <Chip key={s} size="small" color="info" label={s} />)}
+          </Stack>
+        ),
     },
     {
-      key: "expires_at",
-      label: t("expiresAt"),
-      sortKey: "expires_at",
-      render: (sa) => {
-        if (!sa.expires_at) return <Badge variant="muted">{t("noExpiry")}</Badge>;
-        const expired = new Date(sa.expires_at) < new Date();
+      field: "is_active",
+      headerName: t("status"),
+      minWidth: 130,
+      flex: 0.6,
+      renderCell: ({ row }) => (
+        <Chip
+          size="small"
+          color={row.is_active ? "success" : "default"}
+          label={row.is_active ? t("active") : t("inactive")}
+          onClick={() => handleToggleStatus(row)}
+          clickable
+          title={row.is_active ? t("deactivateHint") : t("activateHint")}
+        />
+      ),
+    },
+    {
+      field: "created_at",
+      headerName: t("createdAt"),
+      minWidth: 150,
+      flex: 0.7,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDate(row.created_at, locale)}
+        </Typography>
+      ),
+    },
+    {
+      field: "expires_at",
+      headerName: t("expiresAt"),
+      minWidth: 150,
+      flex: 0.7,
+      renderCell: ({ row }) => {
+        if (!row.expires_at) return <Chip size="small" variant="outlined" label={t("noExpiry")} />;
+        const expired = new Date(row.expires_at) < new Date();
         return expired
-          ? <Badge variant="danger">{t("expired")}</Badge>
-          : <span className="text-gray-300 text-xs">{formatDate(sa.expires_at, locale)}</span>;
+          ? <Chip size="small" color="error" label={t("expired")} />
+          : (
+            <Typography variant="caption" color="text.secondary">
+              {formatDate(row.expires_at, locale)}
+            </Typography>
+          );
       },
     },
     {
-      key: "actions",
-      label: "",
-      className: "text-right",
-      render: (sa) => (
-        <Button variant="danger" size="sm" onClick={() => handleRevoke(sa)}>
+      field: "actions",
+      headerName: "",
+      sortable: false,
+      filterable: false,
+      align: "right",
+      width: 120,
+      renderCell: ({ row }) => (
+        <Button color="error" size="small" onClick={() => handleRevoke(row)}>
           {t("revoke")}
         </Button>
       ),
@@ -189,136 +218,132 @@ export default function ServiceAccountsPage() {
     });
   }
 
-  if (!isAdmin) {
-    return <div className="p-8"><p className="text-red-400">{t("accessDenied")}</p></div>;
-  }
-
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const minDate = tomorrow.toISOString().slice(0, 10);
 
   return (
-    <div className="flex flex-col h-full px-8 py-6 gap-4">
-      <div className="shrink-0 flex justify-end">
-        <Button onClick={() => { resetForm(); setShowCreate(true); }}>
-          + {t("create")}
-        </Button>
-      </div>
-
-      <DataTable
+    <>
+      <ResourceTablePage
         columns={columns}
         tabs={tabs}
         fetcher={fetcher}
-        rowKey={(sa) => sa.id}
+        getRowId={(sa) => sa.id}
+        accessDenied={!isAdmin}
+        accessDeniedMessage={t("accessDenied")}
+        action={(
+          <Button variant="contained" onClick={() => { resetForm(); setShowCreate(true); }}>
+            + {t("create")}
+          </Button>
+        )}
         defaultSortKey="created_at"
         defaultSortDir="desc"
         pageSizeOptions={[10, 25, 50]}
         defaultPageSize={25}
       />
 
-      {/* Create modal */}
-      <Dialog open={showCreate} onOpenChange={(open) => { if (!open) setShowCreate(false); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("createTitle")}</DialogTitle>
-          </DialogHeader>
-
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div>
-              <Label htmlFor="sa-name">{t("name")}</Label>
-              <Input
+      <Dialog open={showCreate} onClose={() => setShowCreate(false)} fullWidth maxWidth="sm">
+        <Box component="form" onSubmit={handleCreate}>
+          <DialogTitle>{t("createTitle")}</DialogTitle>
+          <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
+              <TextField
                 id="sa-name"
+                label={t("name")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 placeholder={t("name")}
+                fullWidth
               />
-            </div>
 
-            <div>
-              <Label>{t("scopes")}</Label>
-              <div className="mt-1.5 space-y-2 bg-gray-800/50 border border-gray-700/60 rounded-lg p-3">
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t("scopes")}</Typography>
+                <Box sx={{ display: "grid", gap: 0.5, mt: 0.5 }}>
                 {ALL_SCOPES.map((scope) => (
-                  <label key={scope} className="flex items-center gap-2.5 cursor-pointer group">
-                    <input
-                      type="checkbox"
+                  <FormControlLabel
+                    key={scope}
+                    control={(
+                      <Checkbox
+                        size="small"
                       checked={selectedScopes.includes(scope)}
                       onChange={() => toggleScope(scope)}
-                      className="w-3.5 h-3.5 accent-indigo-500 shrink-0"
-                    />
-                    <span className="text-xs text-gray-300 font-mono group-hover:text-white transition-colors">
-                      {scope}
-                    </span>
-                  </label>
+                      />
+                    )}
+                    label={<Typography variant="caption" sx={{ fontFamily: "monospace" }}>{scope}</Typography>}
+                  />
                 ))}
-              </div>
-            </div>
+                </Box>
+              </Box>
 
-            <div>
-              <Label htmlFor="sa-expires">
-                {t("expiresAt")} <span className="text-gray-600">({t("noExpiry")})</span>
-              </Label>
-              <Input
+              <TextField
                 id="sa-expires"
+                label={`${t("expiresAt")} (${t("noExpiry")})`}
                 type="date"
                 value={expiresAt}
-                min={minDate}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="[color-scheme:dark]"
+                InputLabelProps={{ shrink: true }}
+                slotProps={{ htmlInput: { min: minDate } }}
               />
-            </div>
 
             {createError && (
-              <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg px-4 py-2">
+              <Alert severity="error">
                 {createError}
-              </p>
+              </Alert>
             )}
-
-            <DialogFooter className="justify-end">
-              <Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>
-                {tCommon("cancel")}
-              </Button>
-              <Button type="submit" disabled={creating}>
-                {creating ? t("creating") : t("create")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Secret reveal modal */}
-      <Dialog open={!!newSecret} onOpenChange={(open) => { if (!open) setNewSecret(null); }}>
-        <DialogContent showClose={false}>
-          <DialogHeader>
-            <DialogTitle>{t("secretTitle")}</DialogTitle>
-            <DialogDescription className="text-yellow-400/90">
-              {t("secretWarning")}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <Label>{t("secretLabel")}</Label>
-            <div className="relative">
-              <div className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 font-mono text-sm text-emerald-300 break-all select-all pr-10">
-                {newSecret?.client_secret}
-              </div>
-              <button
-                onClick={handleCopy}
-                title="Copy"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-              >
-                {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              </button>
-            </div>
-          </div>
-
-          <DialogFooter className="mt-2">
-            <Button className="w-full" onClick={() => setNewSecret(null)}>
-              {t("done")}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3 }}>
+            <Button onClick={() => setShowCreate(false)}>{tCommon("cancel")}</Button>
+            <Button type="submit" variant="contained" disabled={creating}>
+              {creating ? t("creating") : t("create")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
+          </DialogActions>
+        </Box>
       </Dialog>
-    </div>
+
+      <Dialog open={!!newSecret} onClose={() => setNewSecret(null)} fullWidth maxWidth="sm">
+        <DialogTitle>{t("secretTitle")}</DialogTitle>
+        <DialogContent sx={{ display: "grid", gap: 2 }}>
+          <DialogContentText color="warning.main">
+            {t("secretWarning")}
+          </DialogContentText>
+
+          <Box>
+            <Typography variant="caption" color="text.secondary">{t("secretLabel")}</Typography>
+            <Box
+              sx={{
+                alignItems: "center",
+                bgcolor: "background.default",
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1,
+                color: "success.main",
+                display: "flex",
+                fontFamily: "monospace",
+                gap: 1,
+                mt: 0.5,
+                p: 1.5,
+              }}
+            >
+              <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere", fontFamily: "monospace" }}>
+                {newSecret?.client_secret}
+              </Typography>
+              <Tooltip title="Copy">
+                <IconButton
+                  size="small"
+                  onClick={handleCopy}
+                >
+                  {copied ? <Check color="success" fontSize="small" /> : <ContentCopy fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button variant="contained" fullWidth onClick={() => setNewSecret(null)}>
+            {t("done")}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }

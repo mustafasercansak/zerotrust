@@ -73,7 +73,8 @@
     "mfa": "İki Faktörlü",
     "users": "Kullanıcılar",
     "audit": "Denetim Günlüğü",
-    "serviceAccounts": "Servis Hesapları"
+    "serviceAccounts": "Servis Hesapları",
+    "settings": "Ayarlar"
   },
   "dashboard": {
     "title": "Kontrol Paneli",
@@ -159,6 +160,20 @@
     "errors": {
       "invalid_code": "Geçersiz kod. Lütfen tekrar deneyin.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
+    }
+  },
+  "settings": {
+    "title": "Sistem Ayarları",
+    "maxSessions": "Maksimum Eş Zamanlı Oturum",
+    "maxSessionsDesc": "Kullanıcı başına izin verilen maksimum aktif oturum sayısı (1–20). Sınır aşıldığında en eski oturumlar sonlandırılır.",
+    "save": "Değişiklikleri Kaydet",
+    "saving": "Kaydediliyor...",
+    "saved": "Ayarlar kaydedildi.",
+    "accessDenied": "Bu sayfaya erişim yetkiniz yok.",
+    "errors": {
+      "internal_error": "Sunucu hatası. Lütfen tekrar deneyin.",
+      "invalid_value": "Geçersiz değer.",
+      "unknown_setting": "Bilinmeyen ayar anahtarı."
     }
   },
   "serviceAccounts": {

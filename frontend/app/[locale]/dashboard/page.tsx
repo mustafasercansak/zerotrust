@@ -2,7 +2,10 @@
 
 import { useTranslations, useLocale } from "next-intl";
 import { useMeContext } from "./context";
-import { Badge } from "@/components/ui/badge";
+import Box from "@mui/material/Box";
+import Chip from "@mui/material/Chip";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
@@ -12,30 +15,30 @@ export default function DashboardPage() {
   if (!me) return null;
 
   return (
-    <div className="h-full overflow-auto px-8 py-8 max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-white">{t("title")}</h1>
+    <Box sx={{ height: "100%", maxWidth: 720, overflow: "auto", p: 4 }}>
+      <Typography variant="h5" fontWeight={700} sx={{ mb: 3 }}>{t("title")}</Typography>
 
-      <div className="rounded-xl bg-gray-900 border border-gray-800 p-6 space-y-3">
-        <p className="text-gray-300">{t("welcome", { email: me.email })}</p>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
-          <span className="text-sm text-green-400">{t("verified")}</span>
-        </div>
-      </div>
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+        <Typography color="text.secondary">{t("welcome", { email: me.email })}</Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1.5 }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "success.main" }} />
+          <Typography variant="body2" color="success.main">{t("verified")}</Typography>
+        </Box>
+      </Paper>
 
-      <div className="rounded-xl bg-gray-900 border border-gray-800 p-6 space-y-2">
-        <p className="text-xs text-gray-500 uppercase tracking-wider">{t("securityStatus")}</p>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <span className="text-gray-400">User ID</span>
-          <span className="text-gray-200 font-mono text-xs truncate">{me.user_id}</span>
-          <span className="text-gray-400">{t("locale")}</span>
-          <span className="text-gray-200">{locale.toUpperCase()}</span>
-          <span className="text-gray-400">{t("roles")}</span>
-          <div className="flex flex-wrap gap-1">
-            {me.roles.map((r) => <Badge key={r} variant="indigo">{r}</Badge>)}
-          </div>
-        </div>
-      </div>
-    </div>
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Typography variant="overline" color="text.secondary">{t("securityStatus")}</Typography>
+        <Box sx={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 1.25, mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">User ID</Typography>
+          <Typography variant="caption" noWrap sx={{ fontFamily: "monospace" }}>{me.user_id}</Typography>
+          <Typography variant="body2" color="text.secondary">{t("locale")}</Typography>
+          <Typography variant="body2">{locale.toUpperCase()}</Typography>
+          <Typography variant="body2" color="text.secondary">{t("roles")}</Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+            {me.roles.map((r) => <Chip key={r} size="small" color="primary" label={r} />)}
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
   );
 }

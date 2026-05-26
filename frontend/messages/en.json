@@ -73,7 +73,8 @@
     "mfa": "Two-Factor Auth",
     "users": "Users",
     "audit": "Audit Log",
-    "serviceAccounts": "Service Accounts"
+    "serviceAccounts": "Service Accounts",
+    "settings": "Settings"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -159,6 +160,20 @@
     "errors": {
       "invalid_code": "Invalid code. Please try again.",
       "internal_error": "Server error. Please try again."
+    }
+  },
+  "settings": {
+    "title": "System Settings",
+    "maxSessions": "Max Concurrent Sessions",
+    "maxSessionsDesc": "Maximum number of active sessions allowed per user account (1–20). Oldest sessions are evicted when the limit is reached.",
+    "save": "Save Changes",
+    "saving": "Saving...",
+    "saved": "Settings saved.",
+    "accessDenied": "You do not have permission to access this page.",
+    "errors": {
+      "internal_error": "Server error. Please try again.",
+      "invalid_value": "Invalid value.",
+      "unknown_setting": "Unknown setting key."
     }
   },
   "serviceAccounts": {

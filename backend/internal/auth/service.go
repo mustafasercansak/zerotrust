@@ -38,6 +38,16 @@ type SessionStore interface {
 	// generate is called under a row lock with the owning userID.
 	RotateSession(ctx context.Context, oldHash string, generate func(userID string) (newHash, ip, ua string, expiresAt time.Time, err error)) error
 	Revoke(ctx context.Context, hash string) error
+	// EvictExcessSessions keeps the `keep` most-recently-active sessions and
+	// revokes the rest. Call with keep = maxAllowed-1 before creating a new
+	// session to enforce a per-user session cap.
+	EvictExcessSessions(ctx context.Context, userID string, keep int) error
+	// CheckReuse returns the owning userID if the hash belongs to an already-
+	// rotated session, indicating a stolen token is being replayed.
+	CheckReuse(ctx context.Context, hash string) (string, error)
+	// RevokeAllForUser terminates every active session for the user. Used as
+	// the security response when token reuse is detected.
+	RevokeAllForUser(ctx context.Context, userID string) error
 }
 
 // ServiceAccountRecord is the data auth.Service needs when issuing service tokens.
@@ -54,6 +64,12 @@ type ServiceAccountRecord struct {
 type ServiceAccountStore interface {
 	FindByClientID(ctx context.Context, clientID string) (*ServiceAccountRecord, error)
 	CheckSecret(hash, secret string) bool
+}
+
+// SettingReader provides cached access to system settings. nil disables the
+// feature and the caller falls back to a hardcoded default.
+type SettingReader interface {
+	GetInt(ctx context.Context, key string, defaultVal int) int
 }
 
 const (
@@ -100,13 +116,14 @@ type Service struct {
 	users    UserReader
 	sessions SessionStore
 	saSvc    ServiceAccountStore
-	mfa      MFAChecker // nil when MFA is globally disabled
+	mfa      MFAChecker    // nil when MFA is globally disabled
+	settings SettingReader // nil falls back to hardcoded defaults
 	rdb      *redis.Client
 	ks       *KeyStore
 }
 
-func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountStore, rdb *redis.Client, ks *KeyStore, mfa MFAChecker) *Service {
-	return &Service{users: users, sessions: sessions, saSvc: saSvc, mfa: mfa, rdb: rdb, ks: ks}
+func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountStore, rdb *redis.Client, ks *KeyStore, mfa MFAChecker, settings SettingReader) *Service {
+	return &Service{users: users, sessions: sessions, saSvc: saSvc, mfa: mfa, settings: settings, rdb: rdb, ks: ks}
 }
 
 // Login authenticates a user. If MFA is enabled for the account it returns a
@@ -193,6 +210,15 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 	if err != nil {
 		return nil, err
 	}
+	// Enforce per-user session cap: keep the N-1 most recently active sessions,
+	// evict any older ones, then create the new session (total stays at ≤N).
+	maxSessionsPerUser := 5
+	if s.settings != nil {
+		maxSessionsPerUser = s.settings.GetInt(ctx, "max_sessions_per_user", 5)
+	}
+	if err := s.sessions.EvictExcessSessions(ctx, u.ID, maxSessionsPerUser-1); err != nil {
+		slog.Error("failed to evict excess sessions on login", "user_id", u.ID, "error", err)
+	}
 	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, time.Now().Add(RefreshTTL)); err != nil {
 		return nil, err
 	}
@@ -205,7 +231,8 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string) (*TokenPair, error) {
 	var pair *TokenPair
 
-	err := s.sessions.RotateSession(ctx, hashToken(refreshToken),
+	tokenHash := hashToken(refreshToken)
+	err := s.sessions.RotateSession(ctx, tokenHash,
 		func(userID string) (string, string, string, time.Time, error) {
 			u, err := s.users.FindByID(ctx, userID)
 			if err != nil {
@@ -225,6 +252,16 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 		},
 	)
 	if err != nil {
+		// Check whether this was a revoked token being replayed (token theft).
+		// If so, revoke every remaining session to force the legitimate user to
+		// re-authenticate — they will notice the unexpected logout.
+		if userID, cerr := s.sessions.CheckReuse(ctx, tokenHash); cerr == nil && userID != "" {
+			if rerr := s.sessions.RevokeAllForUser(ctx, userID); rerr != nil {
+				slog.Error("failed to revoke sessions after token reuse", "user_id", userID, "error", rerr)
+			}
+			slog.Warn("refresh token reuse detected — possible session hijack, all sessions revoked",
+				"user_id", userID)
+		}
 		return nil, ErrInvalidToken
 	}
 	return pair, nil

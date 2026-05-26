@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
+import { AuthPage } from "@/components/AuthPage";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import MuiLink from "@mui/material/Link";
+import TextField from "@mui/material/TextField";
 
 type Stage = "credentials" | "mfa";
 
@@ -69,109 +75,91 @@ export default function LoginPage() {
 
   if (stage === "mfa") {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
-        <div className="w-full max-w-sm space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-white">{t("mfaTitle")}</h1>
-            <p className="text-sm text-gray-400 mt-1">{t("mfaSubtitle")}</p>
-          </div>
-
-          <form onSubmit={handleMFA} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">{t("mfaCode")}</label>
-              <input
+      <AuthPage title={t("mfaTitle")} subtitle={t("mfaSubtitle")}>
+          <Box component="form" onSubmit={handleMFA} sx={{ display: "grid", gap: 2 }}>
+              <TextField
+                label={t("mfaCode")}
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
                 autoFocus
                 required
                 value={totpCode}
                 onChange={(e) => setTotpCode(e.target.value)}
                 placeholder="000000"
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 font-mono text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                slotProps={{ htmlInput: { maxLength: 6, style: { textAlign: "center", fontFamily: "monospace" } } }}
               />
-            </div>
 
             {error && (
-              <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg px-4 py-2">
+              <Alert severity="error">
                 {error}
-              </p>
+              </Alert>
             )}
 
-            <button
+            <Button
               type="submit"
+              variant="contained"
               disabled={loading || totpCode.length !== 6}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition-colors"
             >
               {loading ? "..." : t("mfaButton")}
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
               onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); }}
-              className="w-full text-sm text-gray-400 hover:text-white transition-colors"
+              color="inherit"
             >
               {t("backToLogin")}
-            </button>
-          </form>
-        </div>
-      </main>
+            </Button>
+          </Box>
+      </AuthPage>
     );
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-white">{t("loginTitle")}</h1>
-        </div>
-
-        <form onSubmit={handleCredentials} className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">{t("email")}</label>
-            <input
+    <AuthPage title={t("loginTitle")}>
+        <Box component="form" onSubmit={handleCredentials} sx={{ display: "grid", gap: 2 }}>
+            <TextField
+              label={t("email")}
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              fullWidth
             />
-          </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm text-gray-400">{t("password")}</label>
-              <Link
-                href={`/${locale}/auth/forgot-password`}
-                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                {t("forgotLink")}
-              </Link>
-            </div>
-            <input
+            <TextField
+              label={t("password")}
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              fullWidth
+              helperText={(
+                <MuiLink
+                  component={Link}
+                  href={`/${locale}/auth/forgot-password`}
+                  underline="hover"
+                  variant="caption"
+                >
+                  {t("forgotLink")}
+                </MuiLink>
+              )}
             />
-          </div>
 
           {error && (
-            <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg px-4 py-2">
+            <Alert severity="error">
               {error}
-            </p>
+            </Alert>
           )}
 
-          <button
+          <Button
             type="submit"
+            variant="contained"
             disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition-colors"
           >
             {loading ? "..." : t("loginButton")}
-          </button>
-        </form>
-      </div>
-    </main>
+          </Button>
+        </Box>
+    </AuthPage>
   );
 }

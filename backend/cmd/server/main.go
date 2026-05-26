@@ -25,6 +25,7 @@ import (
 	"github.com/zerotrust/backend/internal/passwdreset"
 	"github.com/zerotrust/backend/internal/serviceaccount"
 	"github.com/zerotrust/backend/internal/session"
+	"github.com/zerotrust/backend/internal/settings"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 	"github.com/zerotrust/backend/pkg/mailer"
@@ -120,11 +121,15 @@ func main() {
 	prRepo := passwdreset.NewRepository(db)
 	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
 
+	settingsRepo := settings.NewRepository(db)
+	settingsCache := settings.NewCache(settingsRepo)
+	settingsHandler := settings.NewHandler(settingsRepo)
+
 	var mfaChecker auth.MFAChecker
 	if mfaSvc != nil {
 		mfaChecker = mfaSvc
 	}
-	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker)
+	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	adminHandler := admin.NewHandler(userSvc)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
@@ -147,7 +152,7 @@ func main() {
 	}))
 	r.Use(chimiddleware.RequestID)
 	r.Use(authmw.TrustedClientIP(trustedCIDRs))
-	r.Use(globalRL.Middleware())
+	r.Use(skipPaths(globalRL.Middleware(), "/health"))
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
@@ -237,6 +242,10 @@ func main() {
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "write")).Post("/admin/users", adminHandler.CreateUser)
 			r.With(authmw.RequirePermission("users", "write")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
+
+			// System settings — admin role only
+			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
+			r.With(authmw.RequireRole("admin")).Patch("/admin/settings", settingsHandler.Update)
 
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
@@ -344,6 +353,24 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func skipPaths(mw func(http.Handler) http.Handler, paths ...string) func(http.Handler) http.Handler {
+	skipped := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		skipped[path] = struct{}{}
+	}
+
+	return func(next http.Handler) http.Handler {
+		wrapped := mw(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := skipped[r.URL.Path]; ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			wrapped.ServeHTTP(w, r)
+		})
+	}
 }
 
 // runSessionCleanup deletes expired and revoked sessions every hour.

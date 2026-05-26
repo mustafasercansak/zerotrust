@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { api } from "@/lib/api";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
+import Link from "@mui/material/Link";
+import Paper from "@mui/material/Paper";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 
 type Status = "loading" | "disabled" | "pending" | "enabled";
 
@@ -65,97 +74,94 @@ export default function MFAPage() {
   }
 
   return (
-    <div className="h-full overflow-auto px-8 py-8 max-w-lg space-y-6">
-      {status === "loading" && <p className="text-gray-400 text-sm">...</p>}
+    <Box sx={{ height: "100%", maxWidth: 560, overflow: "auto", p: 4 }}>
+      {status === "loading" && <CircularProgress size={20} />}
 
       {status === "enabled" && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300 border border-emerald-700">
-              {t("statusEnabled")}
-            </span>
-            <span className="text-sm text-gray-400">{t("enabledDesc")}</span>
-          </div>
-          <form onSubmit={handleDisable} className="space-y-3">
-            <p className="text-sm text-gray-400">{t("disablePrompt")}</p>
-            <input
+        <Paper variant="outlined" sx={{ display: "grid", gap: 2, p: 3 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Chip size="small" color="success" label={t("statusEnabled")} />
+            <Typography variant="body2" color="text.secondary">{t("enabledDesc")}</Typography>
+          </Box>
+          <Box component="form" onSubmit={handleDisable} sx={{ display: "grid", gap: 1.5, justifyItems: "start" }}>
+            <Typography variant="body2" color="text.secondary">{t("disablePrompt")}</Typography>
+            <TextField
               type="text"
               inputMode="numeric"
-              maxLength={6}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="000000"
-              className="w-40 rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2 font-mono text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              sx={{ width: 160 }}
+              slotProps={{ htmlInput: { maxLength: 6, style: { textAlign: "center", fontFamily: "monospace" } } }}
             />
-            {error && <p className="text-red-400 text-xs">{error}</p>}
-            <button
+            {error && <Alert severity="error">{error}</Alert>}
+            <Button
               type="submit"
+              color="error"
+              variant="contained"
               disabled={submitting || code.length !== 6}
-              className="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
             >
               {t("disableButton")}
-            </button>
-          </form>
-        </div>
+            </Button>
+          </Box>
+        </Paper>
       )}
 
       {status === "disabled" && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
-              {t("statusDisabled")}
-            </span>
-          </div>
-          <p className="text-sm text-gray-400">{t("disabledDesc")}</p>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-          <button
+        <Paper variant="outlined" sx={{ display: "grid", gap: 2, justifyItems: "start", p: 3 }}>
+          <Chip size="small" variant="outlined" label={t("statusDisabled")} />
+          <Typography variant="body2" color="text.secondary">{t("disabledDesc")}</Typography>
+          {error && <Alert severity="error">{error}</Alert>}
+          <Button
             onClick={handleSetup}
+            variant="contained"
             disabled={submitting}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
           >
             {t("setupButton")}
-          </button>
-        </div>
+          </Button>
+        </Paper>
       )}
 
       {status === "pending" && setupData && (
-        <div className="space-y-5">
-          <p className="text-sm text-gray-400">{t("setupInstructions")}</p>
+        <Paper variant="outlined" sx={{ display: "grid", gap: 2.5, p: 3 }}>
+          <Typography variant="body2" color="text.secondary">{t("setupInstructions")}</Typography>
 
-          <div className="rounded-xl border border-gray-700 p-4 space-y-3 bg-gray-900">
-            <p className="text-xs text-gray-400 uppercase tracking-wider">{t("secretLabel")}</p>
-            <p className="font-mono text-sm text-emerald-300 break-all select-all">{setupData.secret}</p>
-            <a
+          <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
+            <Typography variant="overline" color="text.secondary">{t("secretLabel")}</Typography>
+            <Typography variant="body2" color="success.main" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
+              {setupData.secret}
+            </Typography>
+            <Link
               href={setupData.otp_auth_url}
-              className="block text-xs text-indigo-400 hover:text-indigo-300 break-all"
+              sx={{ display: "block", mt: 1, overflowWrap: "anywhere" }}
             >
               {t("openInApp")}
-            </a>
-          </div>
+            </Link>
+          </Box>
 
-          <form onSubmit={handleVerify} className="space-y-3">
-            <p className="text-sm text-gray-400">{t("verifyPrompt")}</p>
-            <input
+          <Box component="form" onSubmit={handleVerify} sx={{ display: "grid", gap: 1.5, justifyItems: "start" }}>
+            <Typography variant="body2" color="text.secondary">{t("verifyPrompt")}</Typography>
+            <TextField
               type="text"
               inputMode="numeric"
-              maxLength={6}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="000000"
               autoFocus
-              className="w-40 rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2 font-mono text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              sx={{ width: 160 }}
+              slotProps={{ htmlInput: { maxLength: 6, style: { textAlign: "center", fontFamily: "monospace" } } }}
             />
-            {error && <p className="text-red-400 text-xs">{error}</p>}
-            <button
+            {error && <Alert severity="error">{error}</Alert>}
+            <Button
               type="submit"
+              variant="contained"
               disabled={submitting || code.length !== 6}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
             >
               {submitting ? "..." : t("verifyButton")}
-            </button>
-          </form>
-        </div>
+            </Button>
+          </Box>
+        </Paper>
       )}
-    </div>
+    </Box>
   );
 }

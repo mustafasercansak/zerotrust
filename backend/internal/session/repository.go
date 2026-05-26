@@ -116,12 +116,50 @@ func (r *Repository) Revoke(ctx context.Context, hash string) error {
 	return err
 }
 
+// CheckReuse looks up whether the given token hash belongs to a session that
+// was previously rotated (is_revoked = true). If so, it returns the owning
+// userID — the caller should treat this as evidence of token theft and revoke
+// all remaining sessions for that user.
+func (r *Repository) CheckReuse(ctx context.Context, hash string) (string, error) {
+	var userID string
+	err := r.db.QueryRow(ctx, `
+		SELECT user_id FROM sessions
+		WHERE refresh_token_hash = $1 AND is_revoked = true
+		LIMIT 1
+	`, hash).Scan(&userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return userID, nil
+}
+
 // RevokeAllForUser revokes every active session belonging to the given user.
 func (r *Repository) RevokeAllForUser(ctx context.Context, userID string) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE sessions SET is_revoked = true
 		WHERE user_id = $1 AND is_revoked = false
 	`, userID)
+	return err
+}
+
+// EvictExcessSessions keeps only the `keep` most recently active sessions for
+// the user and revokes the rest. Call with keep = maxAllowed-1 before creating
+// a new session so the total never exceeds maxAllowed.
+func (r *Repository) EvictExcessSessions(ctx context.Context, userID string, keep int) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE sessions SET is_revoked = true
+		WHERE user_id = $1
+		  AND is_revoked = false
+		  AND id NOT IN (
+		      SELECT id FROM sessions
+		      WHERE user_id = $1 AND is_revoked = false
+		      ORDER BY COALESCE(last_used_at, created_at) DESC
+		      LIMIT $2
+		  )
+	`, userID, keep)
 	return err
 }
 

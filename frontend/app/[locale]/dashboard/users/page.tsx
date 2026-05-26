@@ -5,17 +5,19 @@ import { useTranslations, useLocale } from "next-intl";
 import { api, ApiError, type PageParams, type UserData } from "@/lib/api";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "../context";
-import { DataTable, type Column, type Tab } from "@/components/DataTable";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { ResourceTablePage } from "@/components/ResourceTablePage";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import type { GridColDef } from "@mui/x-data-grid";
 
 const AVAILABLE_ROLES = ["admin", "user"];
 
@@ -40,47 +42,59 @@ export default function UsersPage() {
     [refresh],
   );
 
-  const tabs = useMemo<Tab[]>(() => [
+  const tabs = useMemo(() => [
     { key: "all",      label: tCommon("filterAll") },
     { key: "active",   label: tCommon("filterActive"),   preset: { status: "active" } },
     { key: "inactive", label: tCommon("filterInactive"), preset: { status: "inactive" } },
   ], [tCommon]);
 
-  const columns = useMemo<Column<UserData>[]>(() => [
+  const columns = useMemo<GridColDef<UserData>[]>(() => [
     {
-      key: "email",
-      label: t("email"),
-      sortKey: "email",
-      filterKey: "email",
-      render: (u) => <span className="text-gray-200">{u.email}</span>,
+      field: "email",
+      headerName: t("email"),
+      minWidth: 260,
+      flex: 1.3,
+      renderCell: ({ row }) => <Typography variant="body2">{row.email}</Typography>,
     },
     {
-      key: "roles",
-      label: t("roles"),
-      render: (u) =>
-        u.roles.length === 0 ? (
-          <Badge variant="muted">{t("noRoles")}</Badge>
+      field: "roles",
+      headerName: t("roles"),
+      minWidth: 180,
+      flex: 0.9,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }) =>
+        row.roles.length === 0 ? (
+          <Chip size="small" variant="outlined" label={t("noRoles")} />
         ) : (
-          <div className="flex flex-wrap gap-1">
-            {u.roles.map((r) => <Badge key={r} variant="indigo">{r}</Badge>)}
-          </div>
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", height: "100%" }}>
+            {row.roles.map((r) => <Chip key={r} size="small" color="primary" label={r} />)}
+          </Stack>
         ),
     },
     {
-      key: "status",
-      label: t("status"),
-      sortKey: "is_active",
-      render: (u) => (
-        <Badge variant={u.is_active ? "success" : "danger"}>
-          {u.is_active ? t("active") : t("inactive")}
-        </Badge>
+      field: "is_active",
+      headerName: t("status"),
+      minWidth: 130,
+      flex: 0.6,
+      renderCell: ({ row }) => (
+        <Chip
+          size="small"
+          color={row.is_active ? "success" : "error"}
+          label={row.is_active ? t("active") : t("inactive")}
+        />
       ),
     },
     {
-      key: "created_at",
-      label: t("createdAt"),
-      sortKey: "created_at",
-      render: (u) => <span className="text-gray-400 text-xs">{formatDate(u.created_at, locale)}</span>,
+      field: "created_at",
+      headerName: t("createdAt"),
+      minWidth: 160,
+      flex: 0.8,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDate(row.created_at, locale)}
+        </Typography>
+      ),
     },
   ], [t, locale]);
 
@@ -114,98 +128,72 @@ export default function UsersPage() {
     }
   }
 
-  if (!isAdmin) {
-    return <div className="px-8 py-8"><p className="text-red-400">{t("accessDenied")}</p></div>;
-  }
-
   return (
-    <div className="flex flex-col h-full px-8 py-6 gap-4">
-      <div className="shrink-0 flex justify-end">
-        <Button onClick={openModal}>+ {t("createUser")}</Button>
-      </div>
-
-      <DataTable
+    <>
+      <ResourceTablePage
         columns={columns}
         tabs={tabs}
         fetcher={fetcher}
-        rowKey={(u) => u.id}
+        getRowId={(u) => u.id}
+        accessDenied={!isAdmin}
+        accessDeniedMessage={t("accessDenied")}
+        action={<Button variant="contained" onClick={openModal}>+ {t("createUser")}</Button>}
         defaultSortKey="created_at"
         defaultSortDir="desc"
         pageSizeOptions={[10, 25, 50]}
         defaultPageSize={25}
       />
 
-      <Dialog open={showModal} onOpenChange={(open) => { if (!open) setShowModal(false); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("createUserTitle")}</DialogTitle>
-          </DialogHeader>
-
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div>
-              <Label htmlFor="email">{t("email")}</Label>
-              <Input
+      <Dialog open={showModal} onClose={() => setShowModal(false)} fullWidth maxWidth="xs">
+        <Box component="form" onSubmit={handleCreate}>
+          <DialogTitle>{t("createUserTitle")}</DialogTitle>
+          <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
+              <TextField
                 id="email"
+                label={t("email")}
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                fullWidth
               />
-            </div>
 
-            <div>
-              <Label htmlFor="password">{t("password")}</Label>
-              <Input
+              <TextField
                 id="password"
+                label={t("password")}
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                fullWidth
               />
-            </div>
 
-            <div>
-              <Label>{t("roles")}</Label>
-              <div className="flex gap-2 mt-1">
+              <Stack direction="row" spacing={1}>
                 {AVAILABLE_ROLES.map((role) => (
-                  <button
+                  <Chip
                     key={role}
-                    type="button"
+                    label={role}
+                    color={selectedRoles.includes(role) ? "primary" : "default"}
+                    variant={selectedRoles.includes(role) ? "filled" : "outlined"}
                     onClick={() => toggleRole(role)}
-                    className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                      selectedRoles.includes(role)
-                        ? "bg-indigo-600 border-indigo-500 text-white"
-                        : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
-                    }`}
-                  >
-                    {role}
-                  </button>
+                  />
                 ))}
-              </div>
-            </div>
+              </Stack>
 
             {formError && (
-              <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg px-4 py-2">
+              <Alert severity="error">
                 {formError}
-              </p>
+              </Alert>
             )}
-
-            <DialogFooter>
-              <Button type="submit" disabled={creating} className="flex-1">
-                {creating ? t("creating") : t("create")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setShowModal(false)}
-              >
-                {tCommon("cancel")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3 }}>
+            <Button onClick={() => setShowModal(false)}>{tCommon("cancel")}</Button>
+            <Button type="submit" variant="contained" disabled={creating}>
+              {creating ? t("creating") : t("create")}
+            </Button>
+          </DialogActions>
+        </Box>
       </Dialog>
-    </div>
+    </>
   );
 }

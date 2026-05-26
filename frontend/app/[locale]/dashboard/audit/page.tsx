@@ -4,9 +4,11 @@ import { useTranslations, useLocale } from "next-intl";
 import { useCallback, useMemo } from "react";
 import { api, type PageParams } from "@/lib/api";
 import { useMeContext } from "../context";
-import { DataTable, type Column } from "@/components/DataTable";
+import { ResourceTablePage } from "@/components/ResourceTablePage";
 import type { AuditEntry } from "@/lib/api";
 import { formatDateTime } from "@/lib/dateUtils";
+import Typography from "@mui/material/Typography";
+import type { GridColDef } from "@mui/x-data-grid";
 
 export default function AuditPage() {
   const t = useTranslations("audit");
@@ -16,55 +18,76 @@ export default function AuditPage() {
 
   const fetcher = useCallback((p: PageParams) => api.listAuditLog(p), []);
 
-  const columns = useMemo<Column<AuditEntry>[]>(() => [
+  const columns = useMemo<GridColDef<AuditEntry>[]>(() => [
     {
-      key: "action",
-      label: t("action"),
-      sortKey: "action",
-      filterKey: "action",
-      render: (e) => <span className="font-mono text-xs text-indigo-300">{e.action}</span>,
+      field: "action",
+      headerName: t("action"),
+      minWidth: 180,
+      flex: 1,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="primary" sx={{ fontFamily: "monospace" }}>
+          {row.action}
+        </Typography>
+      ),
     },
     {
-      key: "resource",
-      label: t("resource"),
-      filterKey: "resource",
-      render: (e) => <span className="text-gray-400 text-xs font-mono">{e.resource}</span>,
+      field: "resource",
+      headerName: t("resource"),
+      minWidth: 180,
+      flex: 1,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.resource}
+        </Typography>
+      ),
     },
     {
-      key: "user_id",
-      label: t("user"),
-      filterKey: "user_id",
-      render: (e) => <span className="text-gray-400 text-xs font-mono">{e.user_id ?? "—"}</span>,
+      field: "user_id",
+      headerName: t("user"),
+      minWidth: 220,
+      flex: 1,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.user_id ?? "—"}
+        </Typography>
+      ),
     },
     {
-      key: "ip_address",
-      label: t("ip"),
-      render: (e) => <span className="text-gray-400 text-xs font-mono">{e.ip_address ?? "—"}</span>,
+      field: "ip_address",
+      headerName: t("ip"),
+      minWidth: 140,
+      flex: 0.7,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.ip_address ?? "—"}
+        </Typography>
+      ),
     },
     {
-      key: "created_at",
-      label: t("time"),
-      sortKey: "created_at",
-      render: (e) => <span className="text-gray-400 text-xs">{formatDateTime(e.created_at, locale)}</span>,
+      field: "created_at",
+      headerName: t("time"),
+      minWidth: 180,
+      flex: 0.8,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDateTime(row.created_at, locale)}
+        </Typography>
+      ),
     },
   ], [t, locale]);
 
-  if (!isAdmin) {
-    return <div className="p-8"><p className="text-red-400">{t("accessDenied")}</p></div>;
-  }
-
   return (
-    <div className="flex flex-col h-full px-8 py-6 gap-4">
-      <DataTable
-        columns={columns}
-        fetcher={fetcher}
-        rowKey={(e) => e.id}
-        defaultSortKey="created_at"
-        defaultSortDir="desc"
-        emptyMessage={t("noEntries")}
-        pageSizeOptions={[10, 25, 50]}
-        defaultPageSize={25}
-      />
-    </div>
+    <ResourceTablePage
+      columns={columns}
+      fetcher={fetcher}
+      getRowId={(e) => e.id}
+      accessDenied={!isAdmin}
+      accessDeniedMessage={t("accessDenied")}
+      defaultSortKey="created_at"
+      defaultSortDir="desc"
+      emptyMessage={t("noEntries")}
+      pageSizeOptions={[10, 25, 50]}
+      defaultPageSize={25}
+    />
   );
 }

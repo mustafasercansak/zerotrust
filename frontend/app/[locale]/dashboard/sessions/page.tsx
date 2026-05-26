@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
-import { api, Session } from "@/lib/api";
+import { api, type PageParams, type PagedResult, type Session } from "@/lib/api";
 import { cancelRefresh } from "@/lib/tokenManager";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ResourceTablePage } from "@/components/ResourceTablePage";
 import { formatDateTime } from "@/lib/dateUtils";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import Typography from "@mui/material/Typography";
+import type { GridColDef } from "@mui/x-data-grid";
 
 function parseUA(ua: string): string {
   if (!ua) return "Unknown";
@@ -34,16 +38,105 @@ export default function SessionsPage() {
   const locale = useLocale();
   const router = useRouter();
 
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loadError, setLoadError] = useState("");
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
 
-  useEffect(() => {
-    api
-      .listSessions()
-      .then(setSessions)
-      .catch(() => setLoadError(t("errors.internal_error")));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const fetcher = useCallback(
+    async (p: PageParams): Promise<PagedResult<Session>> => {
+      void refresh;
+      const all = await api.listSessions();
+
+      const filtered = all.filter((session) =>
+        Object.entries(p.filters).every(([key, value]) => {
+          const haystack = String(session[key as keyof Session] ?? "").toLowerCase();
+          return haystack.includes(value.toLowerCase());
+        }),
+      );
+
+      const sorted = [...filtered].sort((a, b) => {
+        if (!p.sortKey) return 0;
+        const left = String(a[p.sortKey as keyof Session] ?? "");
+        const right = String(b[p.sortKey as keyof Session] ?? "");
+        const result = left.localeCompare(right);
+        return p.sortDir === "desc" ? -result : result;
+      });
+
+      const start = p.page * p.pageSize;
+      return {
+        data: sorted.slice(start, start + p.pageSize),
+        total: sorted.length,
+      };
+    },
+    [refresh],
+  );
+
+  const columns = useMemo<GridColDef<Session>[]>(() => [
+    {
+      field: "user_agent",
+      headerName: t("device"),
+      flex: 1.4,
+      minWidth: 220,
+      renderCell: ({ row }) => (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, height: "100%" }}>
+          <Typography variant="body2">{parseUA(row.user_agent)}</Typography>
+          {row.is_current ? <Chip size="small" color="primary" label={t("thisDevice")} /> : null}
+        </Box>
+      ),
+    },
+    {
+      field: "ip_address",
+      headerName: t("ip"),
+      flex: 0.8,
+      minWidth: 150,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.ip_address || "—"}
+        </Typography>
+      ),
+    },
+    {
+      field: "last_used_at",
+      headerName: t("lastActive"),
+      flex: 0.8,
+      minWidth: 160,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDateTime(row.last_used_at, locale, t("never"))}
+        </Typography>
+      ),
+    },
+    {
+      field: "created_at",
+      headerName: t("signedIn"),
+      flex: 0.8,
+      minWidth: 160,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDateTime(row.created_at, locale)}
+        </Typography>
+      ),
+    },
+    {
+      field: "actions",
+      headerName: "",
+      sortable: false,
+      filterable: false,
+      width: 150,
+      align: "right",
+      renderCell: ({ row }) => (
+        <Button
+          color="error"
+          variant="contained"
+          size="small"
+          onClick={() => handleRevoke(row)}
+          disabled={revoking === row.id}
+        >
+          {row.is_current ? t("signOutThisDevice") : t("signOut")}
+        </Button>
+      ),
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, locale, revoking]);
 
   async function handleRevoke(session: Session) {
     const msg = session.is_current ? t("signOutThisConfirm") : t("signOutConfirm");
@@ -58,74 +151,24 @@ export default function SessionsPage() {
         return;
       }
       await api.revokeSession(session.id);
-      setSessions((prev) => prev.filter((s) => s.id !== session.id));
+      setRefresh((n) => n + 1);
     } catch {
-      setLoadError(t("errors.internal_error"));
+      alert(t("errors.internal_error"));
     } finally {
       setRevoking(null);
     }
   }
 
   return (
-    <div className="flex flex-col h-full px-8 py-6 gap-4">
-      {loadError && <p className="shrink-0 text-red-400 text-sm">{loadError}</p>}
-
-      <div className="flex-1 min-h-0 rounded-xl border border-gray-800 overflow-hidden">
-        <div className="overflow-auto h-full">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10">
-              <tr className="border-b border-gray-800 bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
-                <th className="px-4 py-3 text-left">{t("device")}</th>
-                <th className="px-4 py-3 text-left">{t("ip")}</th>
-                <th className="px-4 py-3 text-left">{t("lastActive")}</th>
-                <th className="px-4 py-3 text-left">{t("signedIn")}</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.length === 0 && !loadError && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-gray-500">
-                    {t("noSessions")}
-                  </td>
-                </tr>
-              )}
-              {sessions.map((s) => (
-                <tr
-                  key={s.id}
-                  className="border-b border-gray-800/50 last:border-0 bg-gray-950 hover:bg-gray-900/60 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-white">{parseUA(s.user_agent)}</span>
-                      {s.is_current && <Badge variant="indigo">{t("thisDevice")}</Badge>}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 font-mono text-xs">
-                    {s.ip_address || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">
-                    {formatDateTime(s.last_used_at, locale, t("never"))}
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">
-                    {formatDateTime(s.created_at, locale)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleRevoke(s)}
-                      disabled={revoking === s.id}
-                    >
-                      {s.is_current ? t("signOutThisDevice") : t("signOut")}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <ResourceTablePage
+      columns={columns}
+      fetcher={fetcher}
+      getRowId={(s) => s.id}
+      defaultSortKey="last_used_at"
+      defaultSortDir="desc"
+      emptyMessage={t("noSessions")}
+      pageSizeOptions={[10, 25, 50]}
+      defaultPageSize={25}
+    />
   );
 }

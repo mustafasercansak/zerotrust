@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
+import { AuthPage } from "@/components/AuthPage";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import MuiLink from "@mui/material/Link";
+import TextField from "@mui/material/TextField";
 
 export default function ResetPasswordPage() {
   const t = useTranslations("auth");
@@ -18,10 +24,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    if (!token) setError(t("errors.invalid_token"));
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const visibleError = error ?? (!token ? t("errors.invalid_token") : null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,64 +51,54 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-white">{t("resetTitle")}</h1>
-        </div>
-
+    <AuthPage title={t("resetTitle")}>
         {done ? (
-          <p className="text-sm text-emerald-400 bg-emerald-950/50 border border-emerald-800 rounded-lg px-4 py-3 text-center">
+          <Alert severity="success">
             {t("resetDone")}
-          </p>
+          </Alert>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">{t("newPassword")}</label>
-              <input
+          <Box component="form" onSubmit={handleSubmit} sx={{ display: "grid", gap: 2 }}>
+              <TextField
+                label={t("newPassword")}
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                fullWidth
               />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">{t("confirmPassword")}</label>
-              <input
+              <TextField
+                label={t("confirmPassword")}
                 type="password"
                 required
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                fullWidth
               />
-            </div>
 
-            {error && (
-              <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg px-4 py-2">
-                {error}
-              </p>
+            {visibleError && (
+              <Alert severity="error">
+                {visibleError}
+              </Alert>
             )}
 
-            <button
+            <Button
               type="submit"
+              variant="contained"
               disabled={loading || !token}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition-colors"
             >
               {loading ? "..." : t("resetButton")}
-            </button>
+            </Button>
 
-            <div className="text-center">
-              <Link
+              <MuiLink
+                component={Link}
                 href={`/${locale}/auth/login`}
-                className="text-sm text-gray-400 hover:text-white transition-colors"
+                underline="hover"
+                sx={{ justifySelf: "center" }}
               >
                 {t("backToLogin")}
-              </Link>
-            </div>
-          </form>
+              </MuiLink>
+          </Box>
         )}
-      </div>
-    </main>
+    </AuthPage>
   );
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
+import AppThemeProvider from "@/components/mui/AppThemeProvider";
 import TokenRefreshProvider from "@/components/TokenRefreshProvider";
 import "../globals.css";
 
@@ -21,12 +23,16 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale}>
-      <body className="font-sans antialiased">
-        <NextIntlClientProvider messages={messages}>
-          <TokenRefreshProvider>
-            {children}
-          </TokenRefreshProvider>
-        </NextIntlClientProvider>
+      <body>
+        <AppRouterCacheProvider options={{ enableCssLayer: true }}>
+          <AppThemeProvider>
+            <NextIntlClientProvider messages={messages}>
+              <TokenRefreshProvider>
+                {children}
+              </TokenRefreshProvider>
+            </NextIntlClientProvider>
+          </AppThemeProvider>
+        </AppRouterCacheProvider>
       </body>
     </html>
   );

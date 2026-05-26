@@ -58,7 +58,7 @@ export interface AuditEntry {
   created_at: string;
 }
 
-// Shared pagination / sort / filter params used by DataTable and API fetchers.
+// Shared pagination / sort / filter params used by resource table fetchers.
 export interface PageParams {
   page: number;
   pageSize: number;
@@ -259,6 +259,15 @@ export const api = {
     revokeServiceAccount: (id: string) =>
       request<void>(`/api/v1/admin/service-accounts/${id}`, {
         method: "DELETE",
+      }),
+
+    getSettings: () =>
+      request<Record<string, string>>("/api/v1/admin/settings"),
+
+    updateSettings: (patch: Record<string, string>) =>
+      request<void>("/api/v1/admin/settings", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
       }),
   },
 };

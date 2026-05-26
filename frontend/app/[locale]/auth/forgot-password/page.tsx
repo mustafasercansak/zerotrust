@@ -4,6 +4,12 @@ import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { AuthPage } from "@/components/AuthPage";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import MuiLink from "@mui/material/Link";
+import TextField from "@mui/material/TextField";
 
 export default function ForgotPasswordPage() {
   const t = useTranslations("auth");
@@ -24,57 +30,49 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-white">{t("forgotTitle")}</h1>
-          <p className="text-sm text-gray-400 mt-1">{t("forgotSubtitle")}</p>
-        </div>
-
+    <AuthPage title={t("forgotTitle")} subtitle={t("forgotSubtitle")}>
         {submitted ? (
-          <div className="text-center space-y-4">
-            <p className="text-sm text-emerald-400 bg-emerald-950/50 border border-emerald-800 rounded-lg px-4 py-3">
+          <Box sx={{ display: "grid", gap: 2, textAlign: "center" }}>
+            <Alert severity="success">
               {t("forgotSent")}
-            </p>
-            <Link
+            </Alert>
+            <MuiLink
+              component={Link}
               href={`/${locale}/auth/login`}
-              className="block text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+              underline="hover"
             >
               {t("backToLogin")}
-            </Link>
-          </div>
+            </MuiLink>
+          </Box>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">{t("email")}</label>
-              <input
+          <Box component="form" onSubmit={handleSubmit} sx={{ display: "grid", gap: 2 }}>
+              <TextField
+                label={t("email")}
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                fullWidth
               />
-            </div>
 
-            <button
+            <Button
               type="submit"
+              variant="contained"
               disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition-colors"
             >
               {loading ? "..." : t("forgotButton")}
-            </button>
+            </Button>
 
-            <div className="text-center">
-              <Link
+              <MuiLink
+                component={Link}
                 href={`/${locale}/auth/login`}
-                className="text-sm text-gray-400 hover:text-white transition-colors"
+                underline="hover"
+                sx={{ justifySelf: "center" }}
               >
                 {t("backToLogin")}
-              </Link>
-            </div>
-          </form>
+              </MuiLink>
+          </Box>
         )}
-      </div>
-    </main>
+    </AuthPage>
   );
 }
