@@ -25,7 +25,8 @@ services:
       frontend:
         condition: service_started
     networks:
-      - internal
+      internal:
+        ipv4_address: 192.168.200.2
 
   backend:
     ports: []          # remove direct port exposure — only nginx reaches backend
@@ -43,7 +44,7 @@ services:
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
       PUBLIC_APP_URL: "${PUBLIC_ORIGIN:-https://localhost}"
-      TRUSTED_PROXIES: "172.16.0.0/12"
+      TRUSTED_PROXIES: "192.168.200.2/32"
     secrets:
       - jwt_ec_primary
     networks:
@@ -70,6 +71,9 @@ services:
 networks:
   internal:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.200.0/28
 
 secrets:
   jwt_ec_primary:
