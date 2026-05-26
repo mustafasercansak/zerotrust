@@ -57,6 +57,7 @@ services:
       SMTP_FROM: ""
       SMTP_USER: ""
       SMTP_PASSWORD: ""
+      PUBLIC_APP_URL: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy

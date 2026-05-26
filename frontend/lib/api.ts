@@ -179,7 +179,7 @@ export const api = {
   mfaStatus: () => request<{ enabled: boolean }>("/api/v1/mfa/status"),
 
   mfaSetup: () =>
-    request<{ otp_auth_url: string; secret: string }>("/api/v1/mfa/setup"),
+    request<{ otp_auth_url: string; secret: string }>("/api/v1/mfa/setup", { method: "POST" }),
 
   mfaVerify: (code: string) =>
     request<{ ok: boolean }>("/api/v1/mfa/verify", {

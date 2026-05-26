@@ -28,9 +28,10 @@ type Handler struct {
 	passwordResetter    PasswordResetter // nil when not configured
 	cookiesSecure       bool
 	registrationEnabled bool
+	publicAppURL        string // base URL for password-reset links (from config, never from request)
 }
 
-func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Repository, cookiesSecure, registrationEnabled bool, pr PasswordResetter) *Handler {
+func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Repository, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string) *Handler {
 	return &Handler{
 		authSvc:             authSvc,
 		userSvc:             userSvc,
@@ -38,6 +39,7 @@ func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Reposi
 		passwordResetter:    pr,
 		cookiesSecure:       cookiesSecure,
 		registrationEnabled: registrationEnabled,
+		publicAppURL:        publicAppURL,
 	}
 }
 
@@ -273,12 +275,8 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	baseURL := r.Header.Get("Origin")
-	if baseURL == "" {
-		baseURL = "http://localhost:3000"
-	}
 	// Always respond 200 — never reveal whether the email exists.
-	go h.passwordResetter.SendReset(context.Background(), req.Email, baseURL)
+	go h.passwordResetter.SendReset(context.Background(), req.Email, h.publicAppURL)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }

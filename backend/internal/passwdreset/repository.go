@@ -53,14 +53,24 @@ type tokenRow struct {
 	UsedAt    *time.Time
 }
 
-// Consume validates a raw token, marks it used, and returns the owning user ID.
+// Consume atomically validates a raw token and marks it used, returning the
+// owning user ID. A SELECT FOR UPDATE inside a transaction ensures that two
+// concurrent requests cannot both see the token as valid.
 func (r *Repository) Consume(ctx context.Context, rawToken string) (string, error) {
 	hash := hashToken(rawToken)
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var row tokenRow
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT id::text, user_id::text, expires_at, used_at
 		FROM password_reset_tokens
 		WHERE token_hash = $1
+		FOR UPDATE
 	`, hash).Scan(&row.ID, &row.UserID, &row.ExpiresAt, &row.UsedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -75,10 +85,14 @@ func (r *Repository) Consume(ctx context.Context, rawToken string) (string, erro
 		return "", ErrExpired
 	}
 
-	_, err = r.db.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1
 	`, row.ID)
 	if err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return row.UserID, nil

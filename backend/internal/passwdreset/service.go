@@ -13,14 +13,20 @@ import (
 	"github.com/zerotrust/backend/pkg/mailer"
 )
 
-type Service struct {
-	repo  *Repository
-	users *user.Service
-	mail  mailer.Mailer
+// SessionRevoker is implemented by session.Repository.
+type SessionRevoker interface {
+	RevokeAllForUser(ctx context.Context, userID string) error
 }
 
-func NewService(repo *Repository, users *user.Service, mail mailer.Mailer) *Service {
-	return &Service{repo: repo, users: users, mail: mail}
+type Service struct {
+	repo     *Repository
+	users    *user.Service
+	mail     mailer.Mailer
+	sessions SessionRevoker
+}
+
+func NewService(repo *Repository, users *user.Service, mail mailer.Mailer, sessions SessionRevoker) *Service {
+	return &Service{repo: repo, users: users, mail: mail, sessions: sessions}
 }
 
 // SendReset looks up the user and, if found, emails a reset link.
@@ -36,11 +42,16 @@ func (s *Service) SendReset(ctx context.Context, email, baseURL string) error {
 		return err
 	}
 
-	resetURL := fmt.Sprintf("%s/en/auth/reset-password?token=%s", baseURL, token)
+	locale := u.Locale
+	if locale == "" {
+		locale = "en"
+	}
+	resetURL := fmt.Sprintf("%s/%s/auth/reset-password?token=%s", baseURL, locale, token)
 	return s.mail.SendPasswordReset(ctx, email, resetURL)
 }
 
-// Reset validates the token and replaces the user's password with a bcrypt hash of newPassword.
+// Reset validates the token, replaces the user's password, and revokes all
+// existing sessions so a compromised account cannot reuse stale refresh tokens.
 func (s *Service) Reset(ctx context.Context, rawToken, newPassword string) error {
 	userID, err := s.repo.Consume(ctx, rawToken)
 	if err != nil {
@@ -54,7 +65,13 @@ func (s *Service) Reset(ctx context.Context, rawToken, newPassword string) error
 	if err != nil {
 		return err
 	}
-	return s.users.UpdatePassword(ctx, userID, string(hash))
+	if err := s.users.UpdatePassword(ctx, userID, string(hash)); err != nil {
+		return err
+	}
+
+	// Revoke all sessions so stale refresh tokens cannot be reused.
+	_ = s.sessions.RevokeAllForUser(ctx, userID)
+	return nil
 }
 
 func generateToken() (string, error) {

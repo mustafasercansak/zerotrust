@@ -58,12 +58,13 @@ export default function SessionsPage() {
 
     setRevoking(session.id);
     try {
-      await api.revokeSession(session.id);
       if (session.is_current) {
         cancelRefresh();
+        await api.logout(); // revokes session, blocks JTI, clears all cookies
         router.push(`/${locale}/auth/login`);
         return;
       }
+      await api.revokeSession(session.id);
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
     } catch {
       setLoadError(t("errors.internal_error"));

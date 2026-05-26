@@ -113,10 +113,10 @@ func main() {
 		slog.Warn("SMTP_HOST not set — password reset emails will be logged only")
 	}
 	prRepo := passwdreset.NewRepository(db)
-	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
+	prSvc := passwdreset.NewService(prRepo, userSvc, ml, sessionRepo)
 
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaSvc)
-	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc)
+	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	adminHandler := admin.NewHandler(userSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -196,7 +196,7 @@ func main() {
 			// MFA management — any authenticated user
 			if mfaHandler != nil {
 				r.Get("/mfa/status", mfaHandler.Status)
-				r.Get("/mfa/setup", mfaHandler.Setup)
+				r.Post("/mfa/setup", mfaHandler.Setup)
 				r.Post("/mfa/verify", mfaHandler.Verify)
 				r.Post("/mfa/disable", mfaHandler.Disable)
 			}
@@ -207,7 +207,7 @@ func main() {
 			r.With(authmw.RequirePermission("users", "write")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 
 			// Audit log
-			r.With(authmw.RequirePermission("users", "read")).Get("/admin/audit", auditHandler.List)
+			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
@@ -263,6 +263,7 @@ type config struct {
 	SMTPFrom                 string
 	SMTPUser                 string
 	SMTPPassword             string
+	PublicAppURL             string
 }
 
 func loadConfig() config {
@@ -300,6 +301,7 @@ func loadConfig() config {
 		SMTPFrom:                 getEnv("SMTP_FROM", "noreply@localhost"),
 		SMTPUser:                 getEnv("SMTP_USER", ""),
 		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
+		PublicAppURL:             getEnv("PUBLIC_APP_URL", "http://localhost:3000"),
 	}
 }
 

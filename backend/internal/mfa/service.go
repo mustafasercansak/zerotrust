@@ -27,8 +27,9 @@ func NewService(repo *Repository, encKey []byte) *Service {
 	return &Service{repo: repo, encKey: encKey}
 }
 
-// Setup generates a new TOTP secret, stores it encrypted, and returns the setup info.
-// The record is not yet enabled — the user must call VerifyAndEnable with a valid code.
+// Setup generates a new TOTP secret and stores it as a *pending* candidate.
+// The active secret (and enabled_at) are untouched until VerifyAndEnable succeeds,
+// so calling Setup on an already-enabled account does not break existing MFA.
 func (s *Service) Setup(ctx context.Context, userID, email string) (*SetupResult, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "ZeroTrust",
@@ -43,7 +44,7 @@ func (s *Service) Setup(ctx context.Context, userID, email string) (*SetupResult
 		return nil, err
 	}
 
-	if err := s.repo.Upsert(ctx, userID, hex.EncodeToString(enc)); err != nil {
+	if err := s.repo.UpsertPending(ctx, userID, hex.EncodeToString(enc)); err != nil {
 		return nil, err
 	}
 
@@ -53,10 +54,11 @@ func (s *Service) Setup(ctx context.Context, userID, email string) (*SetupResult
 	}, nil
 }
 
-// VerifyAndEnable validates a TOTP code against the stored secret and, if valid,
-// marks MFA as enabled for the user.
+// VerifyAndEnable validates a TOTP code against the *pending* secret and, if
+// valid, atomically promotes it to the active secret. Returns an error if
+// the code is wrong or there is no pending setup in progress.
 func (s *Service) VerifyAndEnable(ctx context.Context, userID, code string) error {
-	secret, err := s.decryptSecret(ctx, userID)
+	secret, err := s.decryptPendingSecret(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -97,6 +99,18 @@ func (s *Service) decryptSecret(ctx context.Context, userID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	return s.decryptHex(encHex)
+}
+
+func (s *Service) decryptPendingSecret(ctx context.Context, userID string) (string, error) {
+	encHex, err := s.repo.PendingSecretEnc(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	return s.decryptHex(encHex)
+}
+
+func (s *Service) decryptHex(encHex string) (string, error) {
 	enc, err := hex.DecodeString(encHex)
 	if err != nil {
 		return "", err
@@ -105,7 +119,6 @@ func (s *Service) decryptSecret(ctx context.Context, userID string) (string, err
 	if err != nil {
 		return "", err
 	}
-	// Normalise: pquerna/otp generates uppercase base32; ensure it stays uppercase.
 	return strings.ToUpper(string(plain)), nil
 }
 

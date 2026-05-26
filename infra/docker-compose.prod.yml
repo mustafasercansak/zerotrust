@@ -42,6 +42,7 @@ services:
       SMTP_FROM: "${SMTP_FROM}"
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
+      PUBLIC_APP_URL: "${PUBLIC_ORIGIN:-https://localhost}"
     secrets:
       - jwt_ec_primary
     networks:

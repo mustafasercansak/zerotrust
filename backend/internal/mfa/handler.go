@@ -15,7 +15,8 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// GET /api/v1/mfa/setup — generate a new TOTP secret (overwrites any pending setup)
+// POST /api/v1/mfa/setup — generate a new TOTP secret as a pending candidate.
+// The active secret is untouched until the user verifies and calls /mfa/verify.
 func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 	claims := authmw.ClaimsFrom(r.Context())
 	if claims == nil {
