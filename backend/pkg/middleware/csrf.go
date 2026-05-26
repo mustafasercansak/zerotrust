@@ -1,6 +1,9 @@
 package middleware
 
-import "net/http"
+import (
+	"crypto/subtle"
+	"net/http"
+)
 
 // CSRF enforces the double-submit cookie pattern for browser sessions.
 // Requests carrying Authorization: Bearer are exempt (API / service-account clients).
@@ -35,7 +38,7 @@ func CSRF() func(http.Handler) http.Handler {
 				writeError(w, http.StatusForbidden, "csrf_missing")
 				return
 			}
-			if r.Header.Get("X-CSRF-Token") != c.Value {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(c.Value)) != 1 {
 				writeError(w, http.StatusForbidden, "csrf_invalid")
 				return
 			}

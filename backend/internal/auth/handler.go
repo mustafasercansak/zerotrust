@@ -103,7 +103,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				"retry_after": int(lockedErr.RetryAfter.Seconds()),
 			})
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
-			go h.auditRepo.Log(context.Background(), audit.Entry{
+			h.asyncLog(r.Context(), audit.Entry{
 				Action:    "auth.login_failed",
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
@@ -117,7 +117,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.auditRepo.Log(context.Background(), audit.Entry{
+	h.asyncLog(r.Context(), audit.Entry{
 		Action:    "auth.login_success",
 		Resource:  "/api/v1/auth/login",
 		IPAddress: r.RemoteAddr,
@@ -237,7 +237,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.auditRepo.Log(context.Background(), audit.Entry{
+	h.asyncLog(r.Context(), audit.Entry{
 		UserID:    &u.ID,
 		Action:    "auth.register",
 		Resource:  "/api/v1/auth/register",
@@ -372,6 +372,18 @@ func newCSRFToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// asyncLog fires an audit log entry in a goroutine that is decoupled from the
+// HTTP request lifetime but still inherits its values (trace IDs, etc.).
+// context.WithoutCancel ensures the log write is not aborted when the handler
+// returns; the 5-second timeout prevents goroutine leaks on slow DB paths.
+func (h *Handler) asyncLog(parent context.Context, entry audit.Entry) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	go func() {
+		defer cancel()
+		h.auditRepo.Log(ctx, entry)
+	}()
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
