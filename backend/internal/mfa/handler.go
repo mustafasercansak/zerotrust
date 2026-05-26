@@ -17,6 +17,7 @@ func NewHandler(svc *Service) *Handler {
 
 // POST /api/v1/mfa/setup — generate a new TOTP secret as a pending candidate.
 // The active secret is untouched until the user verifies and calls /mfa/verify.
+// If MFA is already enabled, the request body must include {"current_code":"..."}.
 func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 	claims := authmw.ClaimsFrom(r.Context())
 	if claims == nil {
@@ -24,8 +25,18 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email)
+	var req struct {
+		CurrentCode string `json:"current_code"`
+	}
+	// Ignore decode errors — current_code is optional for first-time setup.
+	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+
+	result, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
 	if err != nil {
+		if err.Error() == "invalid_code" || err.Error() == "current_code_required" {
+			writeError(w, http.StatusBadRequest, "invalid_code")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}

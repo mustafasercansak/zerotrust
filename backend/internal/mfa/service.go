@@ -28,9 +28,24 @@ func NewService(repo *Repository, encKey []byte) *Service {
 }
 
 // Setup generates a new TOTP secret and stores it as a *pending* candidate.
-// The active secret (and enabled_at) are untouched until VerifyAndEnable succeeds,
-// so calling Setup on an already-enabled account does not break existing MFA.
-func (s *Service) Setup(ctx context.Context, userID, email string) (*SetupResult, error) {
+// The active secret (and enabled_at) are untouched until VerifyAndEnable succeeds.
+//
+// If MFA is already enabled, currentCode must be the user's live TOTP code to
+// prevent a stolen session from rotating MFA to an attacker-controlled device.
+func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) (*SetupResult, error) {
+	if s.repo.IsEnabled(ctx, userID) {
+		if currentCode == "" {
+			return nil, errors.New("current_code_required")
+		}
+		secret, err := s.decryptSecret(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !totp.Validate(currentCode, secret) {
+			return nil, errors.New("invalid_code")
+		}
+	}
+
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "ZeroTrust",
 		AccountName: email,

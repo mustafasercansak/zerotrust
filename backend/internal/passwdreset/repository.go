@@ -53,15 +53,16 @@ type tokenRow struct {
 	UsedAt    *time.Time
 }
 
-// Consume atomically validates a raw token and marks it used, returning the
-// owning user ID. A SELECT FOR UPDATE inside a transaction ensures that two
-// concurrent requests cannot both see the token as valid.
-func (r *Repository) Consume(ctx context.Context, rawToken string) (string, error) {
+// ConsumeAndReset atomically validates the reset token, marks it used, updates
+// the user's password hash, and revokes all their sessions in a single
+// transaction. bcrypt hashing must be done by the caller before this call.
+// If any step fails the transaction is rolled back and the token remains valid.
+func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPasswordHash string) error {
 	hash := hashToken(rawToken)
 
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
@@ -74,28 +75,36 @@ func (r *Repository) Consume(ctx context.Context, rawToken string) (string, erro
 	`, hash).Scan(&row.ID, &row.UserID, &row.ExpiresAt, &row.UsedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrNotFound
+			return ErrNotFound
 		}
-		return "", err
+		return err
 	}
 	if row.UsedAt != nil {
-		return "", ErrUsed
+		return ErrUsed
 	}
 	if time.Now().After(row.ExpiresAt) {
-		return "", ErrExpired
+		return ErrExpired
 	}
 
-	_, err = tx.Exec(ctx, `
+	if _, err = tx.Exec(ctx, `
 		UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1
-	`, row.ID)
-	if err != nil {
-		return "", err
+	`, row.ID); err != nil {
+		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return "", err
+	if _, err = tx.Exec(ctx, `
+		UPDATE users SET password_hash = $1 WHERE id = $2::uuid
+	`, newPasswordHash, row.UserID); err != nil {
+		return err
 	}
-	return row.UserID, nil
+
+	if _, err = tx.Exec(ctx, `
+		UPDATE sessions SET is_revoked = true WHERE user_id = $1::uuid AND is_revoked = false
+	`, row.UserID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func hashToken(raw string) string {

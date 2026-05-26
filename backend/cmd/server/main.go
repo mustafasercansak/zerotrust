@@ -113,7 +113,7 @@ func main() {
 		slog.Warn("SMTP_HOST not set — password reset emails will be logged only")
 	}
 	prRepo := passwdreset.NewRepository(db)
-	prSvc := passwdreset.NewService(prRepo, userSvc, ml, sessionRepo)
+	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
 
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaSvc)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)

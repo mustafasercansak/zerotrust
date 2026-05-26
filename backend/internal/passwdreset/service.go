@@ -13,20 +13,14 @@ import (
 	"github.com/zerotrust/backend/pkg/mailer"
 )
 
-// SessionRevoker is implemented by session.Repository.
-type SessionRevoker interface {
-	RevokeAllForUser(ctx context.Context, userID string) error
-}
-
 type Service struct {
-	repo     *Repository
-	users    *user.Service
-	mail     mailer.Mailer
-	sessions SessionRevoker
+	repo  *Repository
+	users *user.Service
+	mail  mailer.Mailer
 }
 
-func NewService(repo *Repository, users *user.Service, mail mailer.Mailer, sessions SessionRevoker) *Service {
-	return &Service{repo: repo, users: users, mail: mail, sessions: sessions}
+func NewService(repo *Repository, users *user.Service, mail mailer.Mailer) *Service {
+	return &Service{repo: repo, users: users, mail: mail}
 }
 
 // SendReset looks up the user and, if found, emails a reset link.
@@ -50,27 +44,21 @@ func (s *Service) SendReset(ctx context.Context, email, baseURL string) error {
 	return s.mail.SendPasswordReset(ctx, email, resetURL)
 }
 
-// Reset validates the token, replaces the user's password, and revokes all
-// existing sessions so a compromised account cannot reuse stale refresh tokens.
+// Reset validates the token, updates the password, and revokes all sessions in
+// one atomic transaction. If any step fails the token is not consumed and the
+// user can retry with the same link.
 func (s *Service) Reset(ctx context.Context, rawToken, newPassword string) error {
-	userID, err := s.repo.Consume(ctx, rawToken)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
 	if err != nil {
+		return err
+	}
+
+	if err := s.repo.ConsumeAndReset(ctx, rawToken, string(hash)); err != nil {
 		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrExpired) || errors.Is(err, ErrUsed) {
 			return errors.New("invalid_token")
 		}
 		return err
 	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
-	if err != nil {
-		return err
-	}
-	if err := s.users.UpdatePassword(ctx, userID, string(hash)); err != nil {
-		return err
-	}
-
-	// Revoke all sessions so stale refresh tokens cannot be reused.
-	_ = s.sessions.RevokeAllForUser(ctx, userID)
 	return nil
 }
 
