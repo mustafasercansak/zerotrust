@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -182,7 +183,10 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 // completeLogin generates tokens and creates a session row. Called after all
 // authentication factors have been verified.
 func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string) (*TokenPair, error) {
-	perms, _ := s.users.GetPermissions(ctx, u.ID)
+	perms, err := s.users.GetPermissions(ctx, u.ID)
+	if err != nil {
+		slog.Error("failed to load permissions", "user_id", u.ID, "error", err)
+	}
 	pair, err := GenerateTokenPair(s.ks, u.ID, u.Email, u.Locale, u.Roles, perms, AccessTTL)
 	if err != nil {
 		return nil, err
@@ -205,7 +209,10 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 			if err != nil {
 				return "", "", "", time.Time{}, ErrInvalidToken
 			}
-			perms, _ := s.users.GetPermissions(ctx, u.ID)
+			perms, err := s.users.GetPermissions(ctx, u.ID)
+			if err != nil {
+				slog.Error("failed to load permissions", "user_id", u.ID, "error", err)
+			}
 
 			p, err := GenerateTokenPair(s.ks, u.ID, u.Email, u.Locale, u.Roles, perms, AccessTTL)
 			if err != nil {

@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,6 +17,7 @@ func NewService(repo *Repository) *Service {
 }
 
 func (s *Service) Register(ctx context.Context, email, password, locale string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -24,6 +26,7 @@ func (s *Service) Register(ctx context.Context, email, password, locale string) 
 }
 
 func (s *Service) RegisterWithRoles(ctx context.Context, email, password, locale string, roles []string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -32,7 +35,7 @@ func (s *Service) RegisterWithRoles(ctx context.Context, email, password, locale
 }
 
 func (s *Service) FindByEmail(ctx context.Context, email string) (*User, error) {
-	return s.repo.FindByEmail(ctx, email)
+	return s.repo.FindByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
 }
 
 func (s *Service) FindByID(ctx context.Context, id string) (*User, error) {

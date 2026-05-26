@@ -49,6 +49,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer pingCancel()
+	if err := db.Ping(pingCtx); err != nil {
+		slog.Error("database ping failed", "error", err)
+		os.Exit(1)
+	}
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,

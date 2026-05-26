@@ -12,7 +12,7 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := ClaimsFrom(r.Context())
 			if claims == nil {
-				writeForbidden(w, "unauthorized")
+				writeForbidden(w, "forbidden")
 				return
 			}
 			for _, required := range roles {
@@ -36,7 +36,7 @@ func RequirePermission(resource, action string) func(http.Handler) http.Handler 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := ClaimsFrom(r.Context())
 			if claims == nil {
-				writeForbidden(w, "unauthorized")
+				writeForbidden(w, "forbidden")
 				return
 			}
 			if claims.HasPermission(resource, action) {
@@ -50,10 +50,6 @@ func RequirePermission(resource, action string) func(http.Handler) http.Handler 
 
 func writeForbidden(w http.ResponseWriter, code string) {
 	w.Header().Set("Content-Type", "application/json")
-	if code == "unauthorized" {
-		w.WriteHeader(http.StatusUnauthorized)
-	} else {
-		w.WriteHeader(http.StatusForbidden)
-	}
+	w.WriteHeader(http.StatusForbidden)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
