@@ -251,14 +251,11 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !result.MFARequired {
+		h.writeCookies(w, result.Pair)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if result.MFARequired {
-		// Can't happen for a brand-new account; handle gracefully.
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-		return
-	}
-	h.writeCookies(w, result.Pair)
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 

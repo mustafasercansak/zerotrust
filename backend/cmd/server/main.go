@@ -120,7 +120,11 @@ func main() {
 	prRepo := passwdreset.NewRepository(db)
 	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
 
-	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaSvc)
+	var mfaChecker auth.MFAChecker
+	if mfaSvc != nil {
+		mfaChecker = mfaSvc
+	}
+	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	adminHandler := admin.NewHandler(userSvc)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
@@ -140,9 +144,9 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
-	r.Use(globalRL.Middleware())
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
+	r.Use(globalRL.Middleware())
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))

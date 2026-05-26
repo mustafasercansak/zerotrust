@@ -141,7 +141,9 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (*L
 			return nil, err
 		}
 		data, _ := json.Marshal(map[string]string{"uid": u.ID, "ip": ip, "ua": ua})
-		s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL)
+		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
+			return nil, err
+		}
 		return &LoginResult{MFARequired: true, MFAPendingToken: token}, nil
 	}
 

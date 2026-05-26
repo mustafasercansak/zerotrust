@@ -65,11 +65,5 @@ func (rl *RateLimiter) increment(ctx context.Context, key string) (int, error) {
 }
 
 func realIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return ip
-	}
 	return r.RemoteAddr
 }
