@@ -27,7 +27,8 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-// Create stores a new reset token and returns the raw (unhashed) token.
+// Create invalidates any existing unused reset tokens for the user, then
+// inserts a fresh one — ensuring only the most recently sent link is valid.
 func (r *Repository) Create(ctx context.Context, userID string) (string, error) {
 	raw, err := generateToken()
 	if err != nil {
@@ -36,11 +37,29 @@ func (r *Repository) Create(ctx context.Context, userID string) (string, error) 
 	hash := hashToken(raw)
 	expiresAt := time.Now().Add(tokenTTL)
 
-	_, err = r.db.Exec(ctx, `
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Cancel any previous unused tokens so old links cannot be replayed.
+	if _, err = tx.Exec(ctx, `
+		UPDATE password_reset_tokens
+		SET used_at = NOW()
+		WHERE user_id = $1 AND used_at IS NULL AND expires_at > NOW()
+	`, userID); err != nil {
+		return "", err
+	}
+
+	if _, err = tx.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
 		VALUES ($1, $2, $3)
-	`, userID, hash, expiresAt)
-	if err != nil {
+	`, userID, hash, expiresAt); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return raw, nil
@@ -93,7 +112,7 @@ func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPasswordH
 	}
 
 	if _, err = tx.Exec(ctx, `
-		UPDATE users SET password_hash = $1 WHERE id = $2::uuid
+		UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid
 	`, newPasswordHash, row.UserID); err != nil {
 		return err
 	}

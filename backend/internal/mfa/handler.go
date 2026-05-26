@@ -2,6 +2,8 @@ package mfa
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	authmw "github.com/zerotrust/backend/pkg/middleware"
@@ -28,8 +30,10 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CurrentCode string `json:"current_code"`
 	}
-	// Ignore decode errors — current_code is optional for first-time setup.
-	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
 
 	result, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
 	if err != nil {
