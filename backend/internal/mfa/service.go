@@ -5,12 +5,18 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pquerna/otp/totp"
+	"github.com/redis/go-redis/v9"
 
 	appCrypto "github.com/zerotrust/backend/pkg/crypto"
 )
+
+// usedCodeTTL covers the ±1 TOTP window the library validates (3×30 s).
+const usedCodeTTL = 90 * time.Second
 
 // SetupResult is returned when the user initiates MFA setup.
 type SetupResult struct {
@@ -32,10 +38,23 @@ type store interface {
 type Service struct {
 	repo   store
 	encKey []byte // 32-byte AES-256 key
+	rdb    *redis.Client
 }
 
-func NewService(repo *Repository, encKey []byte) *Service {
-	return &Service{repo: repo, encKey: encKey}
+func NewService(repo *Repository, encKey []byte, rdb *redis.Client) *Service {
+	return &Service{repo: repo, encKey: encKey, rdb: rdb}
+}
+
+// markUsed records a TOTP code as used for replay prevention.
+// Returns false if the code was already used within usedCodeTTL.
+// Returns true (fail-open) when Redis is unavailable.
+func (s *Service) markUsed(ctx context.Context, userID, code string) bool {
+	if s.rdb == nil {
+		return true
+	}
+	key := fmt.Sprintf("mfa:used:%s:%s", userID, code)
+	ok, err := s.rdb.SetNX(ctx, key, "1", usedCodeTTL).Result()
+	return err != nil || ok
 }
 
 // Setup generates a new TOTP secret and stores it as a *pending* candidate.
@@ -54,6 +73,9 @@ func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) 
 		}
 		if !totp.Validate(currentCode, secret) {
 			return nil, errors.New("invalid_code")
+		}
+		if !s.markUsed(ctx, userID, currentCode) {
+			return nil, errors.New("code_already_used")
 		}
 	}
 
@@ -103,6 +125,9 @@ func (s *Service) Disable(ctx context.Context, userID, code string) error {
 	if !totp.Validate(code, secret) {
 		return errors.New("invalid_code")
 	}
+	if !s.markUsed(ctx, userID, code) {
+		return errors.New("code_already_used")
+	}
 	return s.repo.Delete(ctx, userID)
 }
 
@@ -117,7 +142,10 @@ func (s *Service) Validate(ctx context.Context, userID, code string) bool {
 	if err != nil {
 		return false
 	}
-	return totp.Validate(code, secret)
+	if !totp.Validate(code, secret) {
+		return false
+	}
+	return s.markUsed(ctx, userID, code)
 }
 
 func (s *Service) decryptSecret(ctx context.Context, userID string) (string, error) {

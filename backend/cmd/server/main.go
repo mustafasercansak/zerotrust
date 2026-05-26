@@ -96,7 +96,7 @@ func main() {
 	var mfaHandler *mfa.Handler
 	if len(cfg.MFAEncryptionKey) == 32 {
 		mfaRepo := mfa.NewRepository(db)
-		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey)
+		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb)
 		mfaHandler = mfa.NewHandler(mfaSvc)
 		slog.Info("MFA enabled")
 	} else {
