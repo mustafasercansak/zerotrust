@@ -1,6 +1,7 @@
 package serviceaccount
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,16 +10,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zerotrust/backend/internal/auth"
+	"github.com/zerotrust/backend/pkg/middleware"
 )
 
 type Handler struct {
-	svc *Service
-	hub *EventHub
-	ks  *auth.KeyStore
+	svc     *Service
+	hub     *EventHub
+	ks      *auth.KeyStore
+	authSvc *auth.Service
 }
 
-func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore) *Handler {
-	return &Handler{svc: svc, hub: hub, ks: ks}
+func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore, authSvc *auth.Service) *Handler {
+	return &Handler{svc: svc, hub: hub, ks: ks, authSvc: authSvc}
 }
 
 type saResponse struct {
@@ -99,13 +102,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		expiresAt = &eod
 	}
 
-	sa, secret, err := h.svc.Create(r.Context(), req.Name, "", req.Scopes, expiresAt)
+	caller := middleware.ClaimsFrom(r.Context())
+	sa, secret, err := h.svc.Create(r.Context(), req.Name, "", caller, req.Scopes, expiresAt)
 	if err != nil {
-		if errors.Is(err, ErrNameTaken) {
+		switch {
+		case errors.Is(err, ErrNameTaken):
 			writeError(w, http.StatusConflict, "name_taken")
-			return
+		case errors.Is(err, ErrUnknownScope):
+			writeError(w, http.StatusUnprocessableEntity, "unknown_scope")
+		case errors.Is(err, ErrForbiddenScope):
+			writeError(w, http.StatusForbidden, "forbidden_scope")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 
@@ -181,10 +190,23 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := h.hub.Subscribe()
 	defer unsub()
 
+	// Bound the stream lifetime to the token's expiry.
+	ctx, cancel := context.WithDeadline(r.Context(), claims.ExpiresAt.Time)
+	defer cancel()
+
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
+		case <-tick.C:
+			if h.authSvc.IsRevoked(ctx, claims.ID) {
+				fmt.Fprintf(w, "data: revoked\n\n")
+				flusher.Flush()
+				return
+			}
 		case <-ch:
 			fmt.Fprintf(w, "data: change\n\n")
 			flusher.Flush()

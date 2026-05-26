@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,7 @@ import (
 
 var ErrNotFound = errors.New("user_not_found")
 var ErrEmailTaken = errors.New("email_taken")
+var ErrUnknownRole = errors.New("unknown_role")
 
 type Repository struct {
 	db *pgxpool.Pool
@@ -39,6 +41,50 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, locale str
 	return u, nil
 }
 
+// CreateWithRoles creates a user and assigns roles atomically.
+func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, locale string, roleNames []string) (*User, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	u := &User{}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash, locale)
+		VALUES ($1, $2, $3)
+		RETURNING id, email, password_hash, locale, is_active, created_at, updated_at
+	`, email, passwordHash, locale).Scan(
+		&u.ID, &u.Email, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrEmailTaken
+		}
+		return nil, err
+	}
+
+	for _, name := range roleNames {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO user_roles (user_id, role_id)
+			SELECT $1, id FROM roles WHERE name = $2
+		`, u.ID, name)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, fmt.Errorf("%w: %q", ErrUnknownRole, name)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	u.Roles = roleNames
+	return u, nil
+}
+
 func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
@@ -53,7 +99,11 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 		}
 		return nil, err
 	}
-	u.Roles, _ = r.getRoles(ctx, u.ID)
+	roles, err := r.getRoles(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	u.Roles = roles
 	return u, nil
 }
 
@@ -71,7 +121,11 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 		}
 		return nil, err
 	}
-	u.Roles, _ = r.getRoles(ctx, u.ID)
+	roles, err := r.getRoles(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	u.Roles = roles
 	return u, nil
 }
 
@@ -128,12 +182,15 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 		return err
 	}
 	for _, name := range roleNames {
-		if _, err := tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			INSERT INTO user_roles (user_id, role_id)
 			SELECT $1, id FROM roles WHERE name = $2
-			ON CONFLICT DO NOTHING
-		`, userID, name); err != nil {
+		`, userID, name)
+		if err != nil {
 			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: %q", ErrUnknownRole, name)
 		}
 	}
 	return tx.Commit(ctx)

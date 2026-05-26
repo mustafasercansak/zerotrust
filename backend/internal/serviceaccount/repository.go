@@ -141,6 +141,24 @@ func (r *Repository) CheckSecret(hash, secret string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)) == nil
 }
 
+// allPermissions returns the set of resource:action strings from the permissions table.
+func (r *Repository) allPermissions(ctx context.Context) (map[string]bool, error) {
+	rows, err := r.db.Query(ctx, `SELECT CONCAT(resource, ':', action) FROM permissions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := make(map[string]bool)
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		set[p] = true
+	}
+	return set, rows.Err()
+}
+
 func (r *Repository) getScopes(ctx context.Context, id string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `SELECT scope FROM service_account_scopes WHERE service_account_id = $1 ORDER BY scope`, id)
 	if err != nil {

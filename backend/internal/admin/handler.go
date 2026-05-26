@@ -83,22 +83,17 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Locale = "tr"
 	}
 
-	u, err := h.userSvc.Register(r.Context(), req.Email, req.Password, req.Locale)
+	u, err := h.userSvc.RegisterWithRoles(r.Context(), req.Email, req.Password, req.Locale, req.Roles)
 	if err != nil {
-		if errors.Is(err, user.ErrEmailTaken) {
+		switch {
+		case errors.Is(err, user.ErrEmailTaken):
 			writeError(w, http.StatusConflict, "email_taken")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error")
-		return
-	}
-
-	if len(req.Roles) > 0 {
-		if err := h.userSvc.SetRoles(r.Context(), u.ID, req.Roles); err != nil {
+		case errors.Is(err, user.ErrUnknownRole):
+			writeError(w, http.StatusUnprocessableEntity, "unknown_role")
+		default:
 			writeError(w, http.StatusInternalServerError, "internal_error")
-			return
 		}
-		u.Roles = req.Roles
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -119,6 +114,10 @@ func (h *Handler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.userSvc.SetRoles(r.Context(), userID, req.Roles); err != nil {
+		if errors.Is(err, user.ErrUnknownRole) {
+			writeError(w, http.StatusUnprocessableEntity, "unknown_role")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}

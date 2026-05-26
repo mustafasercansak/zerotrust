@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/subtle"
 	"net/http"
+	"strings"
 )
 
 // CSRF enforces the double-submit cookie pattern for browser sessions.
@@ -19,7 +20,7 @@ func CSRF() func(http.Handler) http.Handler {
 			}
 
 			// Bearer token = API client; CSRF is not applicable.
-			if r.Header.Get("Authorization") != "" {
+			if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 				next.ServeHTTP(w, r)
 				return
 			}

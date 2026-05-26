@@ -83,7 +83,6 @@ func main() {
 	saSvc := serviceaccount.NewService(saRepo)
 	saHub := serviceaccount.NewEventHub()
 	go saHub.ListenForChanges(context.Background(), cfg.DatabaseURL)
-	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks)
 
 	sessionRepo := session.NewRepository(db)
 	sessionHandler := session.NewHandler(sessionRepo)
@@ -118,6 +117,7 @@ func main() {
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaSvc)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	adminHandler := admin.NewHandler(userSvc)
+	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
 	tokenRL := authmw.NewRateLimiter(rdb, "token", 30, time.Minute)

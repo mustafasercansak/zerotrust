@@ -23,6 +23,14 @@ func (s *Service) Register(ctx context.Context, email, password, locale string) 
 	return s.repo.Create(ctx, email, string(hash), locale)
 }
 
+func (s *Service) RegisterWithRoles(ctx context.Context, email, password, locale string, roles []string) (*User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.CreateWithRoles(ctx, email, string(hash), locale, roles)
+}
+
 func (s *Service) FindByEmail(ctx context.Context, email string) (*User, error) {
 	return s.repo.FindByEmail(ctx, email)
 }
