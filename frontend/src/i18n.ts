@@ -8,8 +8,7 @@ import tr from "./locales/tr.json";
 const savedLocale = localStorage.getItem("locale") ?? "tr";
 
 i18n.use(initReactI18next).init({
-  // Each top-level key in the JSON files becomes an i18next namespace, matching
-  // the next-intl namespace convention so component code barely changes.
+  // Each top-level key in the JSON files becomes an i18next namespace.
   resources: { en, tr },
   lng: savedLocale,
   fallbackLng: "tr",

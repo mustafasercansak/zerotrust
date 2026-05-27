@@ -44,7 +44,7 @@ services:
           target: /app
           ignore:
             - node_modules/
-            - .next/
+            - dist/
         - path: ../frontend/package.json
           action: rebuild
         - path: ../frontend/package-lock.json

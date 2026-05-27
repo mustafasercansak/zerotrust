@@ -1,6 +1,6 @@
 # ZeroTrust
 
-A security-focused Zero Trust authentication and authorization platform built with Go, Next.js, PostgreSQL, Redis, and Docker.
+A security-focused Zero Trust authentication and authorization platform built with Go, React, Vite, PostgreSQL, Redis, and Docker.
 
 > **Status:** Active development. This project is designed as a serious learning and portfolio project for modern auth/security engineering. It has not been independently audited and should not be treated as production-ready without further review, testing, and hardening.
 
@@ -8,7 +8,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│  Next.js 16 │────▶│  Go Backend │────▶│  PostgreSQL  │
+│ React + Vite│────▶│  Go Backend │────▶│  PostgreSQL  │
 │  (port 3000)│     │  (port 8080)│     │  (port 5432) │
 └─────────────┘     └──────┬──────┘     └──────────────┘
                            │
@@ -20,7 +20,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
                     └──────────────┘
 ```
 
-Next.js proxies all `/api/*` requests to the backend, so cookies work on the same origin without HTTPS in development.
+Vite proxies all `/api/*` requests to the backend in development, so cookies work on the same origin without HTTPS.
 
 ## Security Features
 
@@ -92,7 +92,7 @@ Save the admin password shown in the output — **it will not be displayed again
 # Development-style HTTP run
 make up
 
-# Development — hot reload (Air + Next.js HMR)
+# Development — hot reload (Air + Vite HMR)
 make dev
 
 # Production-style local HTTPS run through nginx
@@ -127,11 +127,13 @@ zerotrust/
 │       ├── middleware/         # Auth, CSRF, RBAC, rate limiting, headers
 │       └── validation/         # Email and password rules
 ├── frontend/
-│   ├── app/[locale]/           # Next.js App Router (TR/EN)
-│   │   ├── auth/               # Login, register, password reset
-│   │   └── dashboard/          # Dashboard, users, audit, MFA, sessions, service accounts
-│   ├── lib/                    # API client, token manager, useAuth hook
-│   └── messages/               # i18n translation files (en, tr)
+│   ├── src/
+│   │   ├── pages/              # Auth and dashboard routes
+│   │   ├── components/         # Shared UI/layout/table components
+│   │   ├── lib/                # API client, token manager, useAuth hook
+│   │   └── locales/            # i18n translation files (en, tr)
+│   ├── index.html              # Vite entry document
+│   └── vite.config.ts          # Dev server + API proxy
 ├── infra/
 │   ├── docker-compose.yml      # Production
 │   ├── docker-compose.dev.yml  # Development override
@@ -162,7 +164,11 @@ zerotrust/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/me` | Current user info |
+| PATCH | `/api/v1/me/profile` | Update current user's name fields |
+| PATCH | `/api/v1/me/locale` | Update current user's language |
 | GET | `/api/v1/sessions` | List active sessions |
+| GET | `/api/v1/sessions/events` | Session change event stream |
+| DELETE | `/api/v1/sessions` | Revoke all other sessions |
 | DELETE | `/api/v1/sessions/{id}` | Revoke a session |
 | GET | `/api/v1/mfa/status` | Read MFA status |
 | POST | `/api/v1/mfa/setup` | Create a pending TOTP setup |
@@ -177,6 +183,9 @@ zerotrust/
 | POST | `/api/v1/admin/users` | `users:create` |
 | PATCH | `/api/v1/admin/users/{id}/roles` | `users:update` |
 | PATCH | `/api/v1/admin/users/{id}/status` | `users:update` |
+| GET | `/api/v1/admin/users/{id}/sessions` | `users:read` |
+| DELETE | `/api/v1/admin/users/{id}/sessions` | `users:update` |
+| DELETE | `/api/v1/admin/users/{id}/sessions/{sessionId}` | `users:update` |
 | GET | `/api/v1/admin/audit` | `audit:read` |
 | GET | `/api/v1/admin/service-accounts` | `service_accounts:read` |
 | POST | `/api/v1/admin/service-accounts` | `service_accounts:create` |
