@@ -14,7 +14,7 @@ import (
 
 var ErrNotFound = errors.New("session_not_found")
 
-const activeSessionWindowSQL = "2 minutes"
+const activeSessionWindowSQL = "5 minutes"
 
 type Repository struct {
 	db  *pgxpool.Pool
@@ -88,7 +88,7 @@ func (r *Repository) FindUserIDByHash(ctx context.Context, hash string) (string,
 func (r *Repository) RotateSession(
 	ctx context.Context,
 	oldHash string,
-	generate func(userID string) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error),
+	generate func(userID string, lastActiveAt, currentExpiresAt time.Time) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error),
 ) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -97,14 +97,15 @@ func (r *Repository) RotateSession(
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var userID string
+	var lastActiveAt time.Time
+	var currentExpiresAt time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT user_id FROM sessions
+		SELECT user_id, COALESCE(last_used_at, created_at), expires_at FROM sessions
 		WHERE refresh_token_hash = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
-		  AND COALESCE(last_used_at, created_at) > now() - $2::interval
 		FOR UPDATE
-	`, oldHash, activeSessionWindowSQL).Scan(&userID)
+	`, oldHash).Scan(&userID, &lastActiveAt, &currentExpiresAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -112,7 +113,7 @@ func (r *Repository) RotateSession(
 		return err
 	}
 
-	newHash, ip, ua, deviceInfo, expiresAt, err := generate(userID)
+	newHash, ip, ua, deviceInfo, expiresAt, err := generate(userID, lastActiveAt, currentExpiresAt)
 	if err != nil {
 		return err
 	}

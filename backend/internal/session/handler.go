@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,12 +13,18 @@ import (
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
 
+type store interface {
+	ListForUser(ctx context.Context, userID, currentHash string) ([]SessionInfo, error)
+	RevokeByID(ctx context.Context, id, userID string) error
+	RevokeOtherSessions(ctx context.Context, userID, currentHash string) error
+}
+
 type Handler struct {
-	repo *Repository
+	repo store
 	hub  *EventHub
 }
 
-func NewHandler(repo *Repository, hub *EventHub) *Handler {
+func NewHandler(repo store, hub *EventHub) *Handler {
 	return &Handler{repo: repo, hub: hub}
 }
 

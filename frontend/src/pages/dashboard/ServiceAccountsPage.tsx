@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type PageParams, type ServiceAccount, type ServiceAccountCreated, type ServiceProbeResult, type ServiceTokenResponse } from "@/lib/api";
+import { api, ApiError, type PageParams, type ServiceAccount, type ServiceAccountCreated, type ServiceProbeResult, type ServiceTokenResponse } from "@/lib/api";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
@@ -281,7 +281,8 @@ export default function ServiceAccountsPage() {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const created = await api.admin.createServiceAccount({ name: name.trim(), scopes: selectedScopes, expires_at: expiresAt || undefined });
+      const run = () => api.admin.createServiceAccount({ name: name.trim(), scopes: selectedScopes, expires_at: expiresAt || undefined });
+      const created = await runWithStepUp(run);
       setNewSecret(created);
       setShowCreate(false);
       reset();
@@ -300,12 +301,13 @@ export default function ServiceAccountsPage() {
     setEditError("");
     setUpdating(true);
     try {
-      await api.admin.updateServiceAccount(editing.id, {
+      const run = () => api.admin.updateServiceAccount(editing.id, {
         name: editName.trim(),
         scopes: editScopes,
         expires_at: editExpiresAt || null,
         is_active: editActive,
       });
+      await runWithStepUp(run);
       setEditing(null);
       setRefresh((n) => n + 1);
     } catch (err) {
@@ -319,6 +321,24 @@ export default function ServiceAccountsPage() {
   function handleCopy() {
     if (!newSecret) return;
     navigator.clipboard.writeText(newSecret.client_secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  }
+
+  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
+        throw err;
+      }
+
+      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
+      if (!code) {
+        throw err;
+      }
+
+      await api.mfaStepUp(code);
+      return action();
+    }
   }
 
   async function handleTokenTest() {

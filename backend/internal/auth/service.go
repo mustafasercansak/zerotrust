@@ -36,8 +36,9 @@ type SessionStore interface {
 	Create(ctx context.Context, userID, tokenHash, ip, userAgent string, deviceInfo map[string]string, expiresAt time.Time) error
 	RevokeForDevice(ctx context.Context, userID, ip, userAgent string, deviceInfo map[string]string) error
 	// RotateSession revokes the old session and atomically creates a new one.
-	// generate is called under a row lock with the owning userID.
-	RotateSession(ctx context.Context, oldHash string, generate func(userID string) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error)) error
+	// generate is called under a row lock with the owning userID, the old
+	// session's last-active timestamp and its fixed absolute expiry.
+	RotateSession(ctx context.Context, oldHash string, generate func(userID string, lastActiveAt, currentExpiresAt time.Time) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error)) error
 	Revoke(ctx context.Context, hash string) error
 	// EvictExcessSessions keeps the `keep` most-recently-active sessions and
 	// revokes the rest. Call with keep = maxAllowed-1 before creating a new
@@ -75,9 +76,17 @@ type SettingReader interface {
 
 const (
 	AccessTTL       = 1 * time.Minute
-	RefreshTTL      = 7 * 24 * time.Hour
+	RefreshTTL      = 8 * time.Hour
 	serviceTokenTTL = 5 * time.Minute
 	mfaPendingTTL   = 5 * time.Minute
+
+	defaultSessionIdleTimeout      = 5 * time.Minute
+	defaultAdminSessionIdleTimeout = 3 * time.Minute
+	defaultSessionAbsoluteTimeout  = 8 * time.Hour
+
+	settingSessionIdleTimeoutSec      = "session_idle_timeout_seconds"
+	settingSessionIdleTimeoutAdminSec = "session_idle_timeout_seconds_admin"
+	settingSessionAbsoluteTimeoutSec  = "session_absolute_timeout_seconds"
 )
 
 var (
@@ -228,7 +237,7 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 	if err := s.sessions.EvictExcessSessions(ctx, u.ID, maxSessionsPerUser-1); err != nil {
 		slog.Error("failed to evict excess sessions on login", "user_id", u.ID, "error", err)
 	}
-	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, deviceInfo, time.Now().Add(RefreshTTL)); err != nil {
+	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, deviceInfo, time.Now().Add(s.sessionAbsoluteTimeout(ctx))); err != nil {
 		return nil, err
 	}
 	return pair, nil
@@ -242,11 +251,23 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 
 	tokenHash := hashToken(refreshToken)
 	err := s.sessions.RotateSession(ctx, tokenHash,
-		func(userID string) (string, string, string, map[string]string, time.Time, error) {
+		func(userID string, lastActiveAt, currentExpiresAt time.Time) (string, string, string, map[string]string, time.Time, error) {
 			u, err := s.users.FindByID(ctx, userID)
 			if err != nil {
 				return "", "", "", nil, time.Time{}, ErrInvalidToken
 			}
+
+			idleLimit := s.sessionIdleTimeout(ctx)
+			if hasAdminRole(u.Roles) {
+				idleLimit = s.adminSessionIdleTimeout(ctx)
+			}
+			if idleLimit > 0 && time.Since(lastActiveAt) > idleLimit {
+				return "", "", "", nil, time.Time{}, ErrInvalidToken
+			}
+			if !currentExpiresAt.After(time.Now()) {
+				return "", "", "", nil, time.Time{}, ErrInvalidToken
+			}
+
 			perms, err := s.users.GetPermissions(ctx, u.ID)
 			if err != nil {
 				slog.Error("failed to load permissions", "user_id", u.ID, "error", err)
@@ -257,7 +278,8 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 				return "", "", "", nil, time.Time{}, err
 			}
 			pair = p
-			return hashToken(p.RefreshToken), ip, ua, deviceInfo, time.Now().Add(RefreshTTL), nil
+			// Keep the original absolute expiry fixed for the session chain.
+			return hashToken(p.RefreshToken), ip, ua, deviceInfo, currentExpiresAt, nil
 		},
 	)
 	if err != nil {
@@ -356,4 +378,46 @@ func lockoutKey(email string) string {
 
 func failKey(email string) string {
 	return fmt.Sprintf("login:fails:%x", sha256.Sum256([]byte(email)))
+}
+
+func (s *Service) sessionIdleTimeout(ctx context.Context) time.Duration {
+	if s.settings == nil {
+		return defaultSessionIdleTimeout
+	}
+	seconds := s.settings.GetInt(ctx, settingSessionIdleTimeoutSec, int(defaultSessionIdleTimeout.Seconds()))
+	if seconds <= 0 {
+		return defaultSessionIdleTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (s *Service) adminSessionIdleTimeout(ctx context.Context) time.Duration {
+	if s.settings == nil {
+		return defaultAdminSessionIdleTimeout
+	}
+	seconds := s.settings.GetInt(ctx, settingSessionIdleTimeoutAdminSec, int(defaultAdminSessionIdleTimeout.Seconds()))
+	if seconds <= 0 {
+		return defaultAdminSessionIdleTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (s *Service) sessionAbsoluteTimeout(ctx context.Context) time.Duration {
+	if s.settings == nil {
+		return defaultSessionAbsoluteTimeout
+	}
+	seconds := s.settings.GetInt(ctx, settingSessionAbsoluteTimeoutSec, int(defaultSessionAbsoluteTimeout.Seconds()))
+	if seconds <= 0 {
+		return defaultSessionAbsoluteTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func hasAdminRole(roles []string) bool {
+	for _, role := range roles {
+		if role == "admin" {
+			return true
+		}
+	}
+	return false
 }

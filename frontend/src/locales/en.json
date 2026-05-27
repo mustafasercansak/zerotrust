@@ -127,6 +127,7 @@
       "password_no_digit": "Password must contain at least one digit.",
       "password_no_special": "Password must contain at least one special character.",
       "invalid_profile": "First and last name must be 80 characters or fewer.",
+      "mfa_required": "This action requires a recent MFA verification.",
       "internal_error": "Server error. Please try again."
     }
   },
@@ -224,6 +225,7 @@
     "getToken": "Get Token",
     "probeTarget": "Endpoint to probe",
     "runProbe": "Run Probe",
+    "mfaPrompt": "Enter your 6-digit MFA code to continue this sensitive action.",
     "tokenReady": "Token ready",
     "tokenMeta": "subject: {{subject}} · expires: {{expires}}",
     "probePassed": "Request allowed",
@@ -262,6 +264,7 @@
       "not_found": "Service account not found.",
       "unknown_scope": "An unknown scope was selected.",
       "forbidden_scope": "You cannot assign a permission you do not have.",
+      "mfa_required": "This action requires a recent MFA verification.",
       "invalid_client": "Client ID or secret is invalid, inactive, or expired.",
       "forbidden": "You do not have permission to perform this action.",
       "unauthorized": "Session expired. Please sign in again.",

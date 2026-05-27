@@ -102,10 +102,11 @@ func main() {
 	// MFA
 	var mfaSvc *mfa.Service
 	var mfaHandler *mfa.Handler
+	const stepUpMFAWindow = 10 * time.Minute
 	if len(cfg.MFAEncryptionKey) == 32 {
 		mfaRepo := mfa.NewRepository(db)
 		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb)
-		mfaHandler = mfa.NewHandler(mfaSvc)
+		mfaHandler = mfa.NewHandler(mfaSvc, rdb, stepUpMFAWindow)
 		slog.Info("MFA enabled")
 	} else {
 		slog.Warn("MFA_ENCRYPTION_KEY not set or invalid — MFA disabled")
@@ -130,6 +131,7 @@ func main() {
 	if mfaSvc != nil {
 		mfaChecker = mfaSvc
 	}
+	stepUpMFA := authmw.RequireRecentMFA(mfaChecker, rdb, stepUpMFAWindow)
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
@@ -279,12 +281,13 @@ func main() {
 				r.Post("/mfa/setup", mfaHandler.Setup)
 				r.Post("/mfa/verify", mfaHandler.Verify)
 				r.Post("/mfa/disable", mfaHandler.Disable)
+				r.Post("/mfa/step-up", mfaHandler.StepUp)
 			}
 
 			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
-			r.With(authmw.RequirePermission("users", "update")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 			r.With(authmw.RequirePermission("users", "update")).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)
 			r.With(authmw.RequirePermission("users", "update")).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
@@ -299,8 +302,8 @@ func main() {
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
-			r.With(authmw.RequirePermission("service_accounts", "create")).Post("/admin/service-accounts", saHandler.Create)
-			r.With(authmw.RequirePermission("service_accounts", "update")).Patch("/admin/service-accounts/{id}", saHandler.Update)
+			r.With(authmw.RequirePermission("service_accounts", "create"), stepUpMFA).Post("/admin/service-accounts", saHandler.Create)
+			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}", saHandler.Update)
 			r.With(authmw.RequirePermission("service_accounts", "update")).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
 			r.With(authmw.RequirePermission("service_accounts", "delete")).Delete("/admin/service-accounts/{id}", saHandler.Revoke)
 		})

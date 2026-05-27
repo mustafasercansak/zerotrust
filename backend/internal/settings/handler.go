@@ -12,6 +12,18 @@ var allowedKeys = map[string]func(string) bool{
 		n, err := strconv.Atoi(v)
 		return err == nil && n >= 1 && n <= 20
 	},
+	"session_idle_timeout_seconds": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 60 && n <= 3600
+	},
+	"session_idle_timeout_seconds_admin": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 60 && n <= 1800
+	},
+	"session_absolute_timeout_seconds": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1800 && n <= 172800
+	},
 }
 
 type Handler struct {

@@ -127,6 +127,7 @@
       "password_no_digit": "Şifre en az bir rakam içermelidir.",
       "password_no_special": "Şifre en az bir özel karakter içermelidir.",
       "invalid_profile": "Ad ve soyad en fazla 80 karakter olmalıdır.",
+      "mfa_required": "Bu işlem için yakın zamanda MFA doğrulaması gerekir.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
     }
   },
@@ -224,7 +225,8 @@
     "getToken": "Token Al",
     "probeTarget": "Denecek endpoint",
     "runProbe": "İsteği Dene",
-    "tokenReady": "Token hazır",
+      "mfaPrompt": "Hassas işlemi sürdürmek için 6 haneli MFA kodunuzu girin.",
+      "tokenReady": "Token hazır",
     "tokenMeta": "subject: {{subject}} · expires: {{expires}}",
     "probePassed": "İstek başarılı",
     "probeBlocked": "İstek engellendi",
@@ -262,6 +264,7 @@
       "not_found": "Servis hesabı bulunamadı.",
       "unknown_scope": "Bilinmeyen yetki seçildi.",
       "forbidden_scope": "Sahip olmadığınız bir yetkiyi servis hesabına veremezsiniz.",
+      "mfa_required": "Bu işlem için yakın zamanda MFA doğrulaması gerekir.",
       "invalid_client": "Client ID veya secret geçersiz, hesap pasif ya da süresi dolmuş.",
       "forbidden": "Bu işlemi gerçekleştirme yetkiniz yok.",
       "unauthorized": "Oturum süresi doldu. Lütfen tekrar giriş yapın.",

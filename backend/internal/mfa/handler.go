@@ -5,16 +5,21 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
 
 type Handler struct {
-	svc *Service
+	svc          *Service
+	rdb          *redis.Client
+	recentWindow time.Duration
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, rdb *redis.Client, recentWindow time.Duration) *Handler {
+	return &Handler{svc: svc, rdb: rdb, recentWindow: recentWindow}
 }
 
 // POST /api/v1/mfa/setup — generate a new TOTP secret as a pending candidate.
@@ -113,6 +118,46 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	enabled := h.svc.IsEnabled(r.Context(), claims.UserID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"enabled": enabled})
+}
+
+// POST /api/v1/mfa/step-up — verifies a live TOTP code and marks this session
+// as recently MFA-verified for sensitive operations.
+func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
+	claims := authmw.ClaimsFrom(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if h.rdb == nil {
+		writeError(w, http.StatusServiceUnavailable, "mfa_unavailable")
+		return
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if !h.svc.Validate(r.Context(), claims.UserID, req.Code) {
+		writeError(w, http.StatusBadRequest, "invalid_code")
+		return
+	}
+
+	rt, err := r.Cookie("refresh_token")
+	if err != nil || rt.Value == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	if err := authmw.MarkRecentMFACookie(r.Context(), h.rdb, claims.UserID, rt.Value, h.recentWindow); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

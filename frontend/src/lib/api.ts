@@ -288,6 +288,12 @@ export const api = {
       body: JSON.stringify({ code }),
     }),
 
+  mfaStepUp: (code: string) =>
+    request<{ ok: boolean }>("/api/v1/mfa/step-up", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
   admin: {
     listUsers: (p: PageParams) =>
       request<PagedResult<UserData>>(`/api/v1/admin/users${buildQuery(p)}`),
