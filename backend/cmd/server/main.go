@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -91,8 +92,8 @@ func main() {
 	saHub := serviceaccount.NewEventHub()
 	go saHub.ListenForChanges(context.Background(), cfg.DatabaseURL)
 
-	sessionRepo := session.NewRepository(db)
-	sessionHandler := session.NewHandler(sessionRepo)
+	sessionHub := session.NewEventHub()
+	sessionRepo := session.NewRepository(db, sessionHub)
 	go runSessionCleanup(sessionRepo)
 
 	auditRepo := audit.NewRepository(db)
@@ -131,7 +132,8 @@ func main() {
 	}
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
-	adminHandler := admin.NewHandler(userSvc)
+	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
+	adminHandler := admin.NewHandler(userSvc, sessionRepo)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -146,7 +148,7 @@ func main() {
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"X-RateLimit-Limit", "X-RateLimit-Remaining"},
+		ExposedHeaders:   []string{"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -190,7 +192,12 @@ func main() {
 
 			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
 				claims := authmw.ClaimsFrom(r.Context())
-				roles := claims.Roles
+				profile, err := userRepo.FindByID(r.Context(), claims.UserID)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				roles := profile.Roles
 				if roles == nil {
 					roles = []string{}
 				}
@@ -201,8 +208,42 @@ func main() {
 				w.Header().Set("Content-Type", "application/json")
 				rolesJSON, _ := json.Marshal(roles)
 				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"locale":%q,"roles":%s,"permissions":%s}`,
-					claims.UserID, claims.Email, claims.Locale, rolesJSON, permsJSON)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+			})
+
+			r.Patch("/me/profile", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				var req struct {
+					FirstName string `json:"first_name"`
+					LastName  string `json:"last_name"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				profile, err := userSvc.UpdateProfile(r.Context(), claims.UserID, req.FirstName, req.LastName)
+				if err != nil {
+					if errors.Is(err, user.ErrInvalidProfile) {
+						http.Error(w, `{"error":"invalid_profile"}`, http.StatusBadRequest)
+						return
+					}
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				roles := profile.Roles
+				if roles == nil {
+					roles = []string{}
+				}
+				perms := claims.Permissions
+				if perms == nil {
+					perms = []string{}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				rolesJSON, _ := json.Marshal(roles)
+				permsJSON, _ := json.Marshal(perms)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
 			})
 
 			r.Patch("/me/locale", func(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +269,8 @@ func main() {
 
 			// Session management — any authenticated user manages their own sessions
 			r.Get("/sessions", sessionHandler.List)
+			r.Get("/sessions/events", sessionHandler.Events)
+			r.Delete("/sessions", sessionHandler.RevokeOthers)
 			r.Delete("/sessions/{id}", sessionHandler.Revoke)
 
 			// MFA management — any authenticated user
@@ -240,8 +283,12 @@ func main() {
 
 			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
-			r.With(authmw.RequirePermission("users", "write")).Post("/admin/users", adminHandler.CreateUser)
-			r.With(authmw.RequirePermission("users", "write")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
+			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
+			r.With(authmw.RequirePermission("users", "update")).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
+			r.With(authmw.RequirePermission("users", "update")).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
+			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)
+			r.With(authmw.RequirePermission("users", "update")).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
+			r.With(authmw.RequirePermission("users", "update")).Delete("/admin/users/{id}/sessions/{sessionId}", adminHandler.RevokeUserSession)
 
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
@@ -252,8 +299,9 @@ func main() {
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
-			r.With(authmw.RequirePermission("service_accounts", "write")).Post("/admin/service-accounts", saHandler.Create)
-			r.With(authmw.RequirePermission("service_accounts", "write")).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
+			r.With(authmw.RequirePermission("service_accounts", "create")).Post("/admin/service-accounts", saHandler.Create)
+			r.With(authmw.RequirePermission("service_accounts", "update")).Patch("/admin/service-accounts/{id}", saHandler.Update)
+			r.With(authmw.RequirePermission("service_accounts", "update")).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
 			r.With(authmw.RequirePermission("service_accounts", "delete")).Delete("/admin/service-accounts/{id}", saHandler.Revoke)
 		})
 	})
@@ -373,16 +421,33 @@ func skipPaths(mw func(http.Handler) http.Handler, paths ...string) func(http.Ha
 	}
 }
 
-// runSessionCleanup deletes expired and revoked sessions every hour.
+// runSessionCleanup runs two periodic tasks:
+//   - Every 30 s: revoke sessions whose access token was never refreshed (abandoned
+//     logins, bots, closed tabs). Other connected clients see a real-time "change"
+//     event and show a snackbar.
+//   - Every hour: delete rows that are expired or already revoked.
 func runSessionCleanup(repo *session.Repository) {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
-		n, err := repo.DeleteExpired(context.Background())
-		if err != nil {
-			slog.Error("session cleanup failed", "error", err)
-		} else if n > 0 {
-			slog.Info("session cleanup", "deleted", n)
+	staleTicker := time.NewTicker(30 * time.Second)
+	purgeTicker := time.NewTicker(time.Hour)
+	defer staleTicker.Stop()
+	defer purgeTicker.Stop()
+
+	for {
+		select {
+		case <-staleTicker.C:
+			n, err := repo.RevokeStaleInitialSessions(context.Background())
+			if err != nil {
+				slog.Error("stale session revocation failed", "error", err)
+			} else if n > 0 {
+				slog.Info("stale initial sessions revoked", "count", n)
+			}
+		case <-purgeTicker.C:
+			n, err := repo.DeleteExpired(context.Background())
+			if err != nil {
+				slog.Error("session cleanup failed", "error", err)
+			} else if n > 0 {
+				slog.Info("session cleanup", "deleted", n)
+			}
 		}
 	}
 }

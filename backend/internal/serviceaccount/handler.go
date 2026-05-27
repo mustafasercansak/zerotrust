@@ -26,13 +26,13 @@ func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore, authSvc *auth.Se
 }
 
 type saResponse struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	ClientID  string  `json:"client_id"`
-	IsActive  bool    `json:"is_active"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	ClientID  string   `json:"client_id"`
+	IsActive  bool     `json:"is_active"`
 	Scopes    []string `json:"scopes"`
-	CreatedAt string  `json:"created_at"`
-	ExpiresAt *string `json:"expires_at"`
+	CreatedAt string   `json:"created_at"`
+	ExpiresAt *string  `json:"expires_at"`
 }
 
 // createResponse is returned only on creation — includes the plaintext secret shown once.
@@ -96,6 +96,13 @@ type createRequest struct {
 	ExpiresAt *string  `json:"expires_at"`
 }
 
+type updateRequest struct {
+	Name      string   `json:"name"`
+	Scopes    []string `json:"scopes"`
+	ExpiresAt *string  `json:"expires_at"`
+	IsActive  bool     `json:"is_active"`
+}
+
 // POST /api/v1/admin/service-accounts
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
@@ -138,6 +145,50 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		saResponse:   toResponse(sa),
 		ClientSecret: secret,
 	})
+}
+
+// PATCH /api/v1/admin/service-accounts/{id} — edits metadata and scopes.
+// client_id and secret are immutable; secret rotation should be a separate flow.
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req updateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
+		t, err := time.Parse("2006-01-02", *req.ExpiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_expires_at")
+			return
+		}
+		eod := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.UTC)
+		expiresAt = &eod
+	}
+
+	caller := middleware.ClaimsFrom(r.Context())
+	sa, err := h.svc.Update(r.Context(), id, req.Name, caller, req.Scopes, expiresAt, req.IsActive)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNameTaken):
+			writeError(w, http.StatusConflict, "name_taken")
+		case errors.Is(err, ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found")
+		case errors.Is(err, ErrUnknownScope):
+			writeError(w, http.StatusUnprocessableEntity, "unknown_scope")
+		case errors.Is(err, ErrForbiddenScope):
+			writeError(w, http.StatusForbidden, "forbidden_scope")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error")
+		}
+		return
+	}
+	h.hub.Broadcast()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toResponse(sa))
 }
 
 // DELETE /api/v1/admin/service-accounts/{id} — permanently removes the account

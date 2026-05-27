@@ -36,6 +36,7 @@ services:
       dockerfile: Dockerfile.dev
     environment:
       NODE_ENV: development
+      BACKEND_INTERNAL_URL: "http://backend:8080"
     develop:
       watch:
         - path: ../frontend

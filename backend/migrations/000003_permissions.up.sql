@@ -32,11 +32,13 @@ CREATE TABLE service_account_scopes (
 -- Seed permissions
 INSERT INTO permissions (resource, action) VALUES
     ('users',            'read'),
-    ('users',            'write'),
+    ('users',            'create'),
+    ('users',            'update'),
     ('users',            'delete'),
     ('audit',            'read'),
     ('service_accounts', 'read'),
-    ('service_accounts', 'write'),
+    ('service_accounts', 'create'),
+    ('service_accounts', 'update'),
     ('service_accounts', 'delete'),
     ('tokens',           'validate');
 

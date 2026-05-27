@@ -54,6 +54,19 @@ func (s *Service) SetRoles(ctx context.Context, userID string, roles []string) e
 	return s.repo.SetRoles(ctx, userID, roles)
 }
 
+func (s *Service) SetActive(ctx context.Context, userID string, active bool) error {
+	return s.repo.SetActive(ctx, userID, active)
+}
+
+func (s *Service) UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error) {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	if len([]rune(firstName)) > 80 || len([]rune(lastName)) > 80 {
+		return nil, ErrInvalidProfile
+	}
+	return s.repo.UpdateProfile(ctx, userID, firstName, lastName)
+}
+
 func (s *Service) GetPermissions(ctx context.Context, userID string) ([]string, error) {
 	return s.repo.GetPermissions(ctx, userID)
 }

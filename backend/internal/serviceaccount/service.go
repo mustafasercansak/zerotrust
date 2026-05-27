@@ -25,22 +25,39 @@ func NewService(repo *Repository) *Service {
 // The secret is shown only once — store it immediately.
 // Each requested scope must exist in the permissions table, and the caller must hold it.
 func (s *Service) Create(ctx context.Context, name, createdBy string, caller *auth.Claims, scopes []string, expiresAt *time.Time) (*ServiceAccount, string, error) {
+	if err := s.validateScopes(ctx, caller, scopes); err != nil {
+		return nil, "", err
+	}
+	return s.repo.Create(ctx, name, createdBy, scopes, expiresAt)
+}
+
+func (s *Service) Update(ctx context.Context, id, name string, caller *auth.Claims, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error) {
+	if err := s.validateScopes(ctx, caller, scopes); err != nil {
+		return nil, err
+	}
+	return s.repo.Update(ctx, id, name, scopes, expiresAt, active)
+}
+
+func (s *Service) validateScopes(ctx context.Context, caller *auth.Claims, scopes []string) error {
 	if len(scopes) > 0 {
 		known, err := s.repo.allPermissions(ctx)
 		if err != nil {
-			return nil, "", err
+			return err
 		}
 		for _, scope := range scopes {
 			if !known[scope] {
-				return nil, "", fmt.Errorf("%w: %q", ErrUnknownScope, scope)
+				return fmt.Errorf("%w: %q", ErrUnknownScope, scope)
 			}
 			parts := strings.SplitN(scope, ":", 2)
+			if caller == nil || len(parts) != 2 {
+				return fmt.Errorf("%w: %q", ErrForbiddenScope, scope)
+			}
 			if !caller.HasPermission(parts[0], parts[1]) {
-				return nil, "", fmt.Errorf("%w: %q", ErrForbiddenScope, scope)
+				return fmt.Errorf("%w: %q", ErrForbiddenScope, scope)
 			}
 		}
 	}
-	return s.repo.Create(ctx, name, createdBy, scopes, expiresAt)
+	return nil
 }
 
 func (s *Service) FindByClientID(ctx context.Context, clientID string) (*ServiceAccount, error) {

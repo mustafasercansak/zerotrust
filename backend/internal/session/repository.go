@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
@@ -13,20 +14,45 @@ import (
 
 var ErrNotFound = errors.New("session_not_found")
 
+const activeSessionWindowSQL = "2 minutes"
+
 type Repository struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	hub *EventHub
 }
 
-func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *pgxpool.Pool, hub *EventHub) *Repository {
+	return &Repository{db: db, hub: hub}
 }
 
 // Create inserts a new session. ip is the client address (host:port or bare host).
-func (r *Repository) Create(ctx context.Context, userID, tokenHash, ip, userAgent string, expiresAt time.Time) error {
+func (r *Repository) Create(ctx context.Context, userID, tokenHash, ip, userAgent string, deviceInfo map[string]string, expiresAt time.Time) error {
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO sessions (user_id, refresh_token_hash, ip_address, user_agent, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`, userID, tokenHash, parseAddr(ip), userAgent, expiresAt)
+		INSERT INTO sessions (user_id, refresh_token_hash, ip_address, user_agent, device_info, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, userID, tokenHash, parseAddr(ip), userAgent, normalizeDeviceInfo(deviceInfo), expiresAt)
+	if err == nil {
+		r.hub.Broadcast(userID)
+	}
+	return err
+}
+
+// RevokeForDevice closes older active sessions from the same device fingerprint
+// before a new login creates the replacement session.
+func (r *Repository) RevokeForDevice(ctx context.Context, userID, ip, userAgent string, deviceInfo map[string]string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE sessions
+		SET is_revoked = true, last_used_at = now()
+		WHERE user_id = $1
+		  AND is_revoked = false
+		  AND expires_at > now()
+		  AND ip_address IS NOT DISTINCT FROM $2
+		  AND user_agent = $3
+		  AND COALESCE(device_info, '{}'::jsonb) = $4::jsonb
+	`, userID, parseAddr(ip), userAgent, normalizeDeviceInfo(deviceInfo))
+	if err == nil && tag.RowsAffected() > 0 {
+		r.hub.Broadcast(userID)
+	}
 	return err
 }
 
@@ -40,7 +66,8 @@ func (r *Repository) FindUserIDByHash(ctx context.Context, hash string) (string,
 		WHERE refresh_token_hash = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
-	`, hash).Scan(&userID)
+		  AND COALESCE(last_used_at, created_at) > now() - $2::interval
+	`, hash, activeSessionWindowSQL).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
@@ -55,13 +82,13 @@ func (r *Repository) FindUserIDByHash(ctx context.Context, hash string) (string,
 //
 // The row is locked with SELECT … FOR UPDATE for the duration of the transaction.
 // generate is called inside the transaction with the owning userID; it must
-// return the new token hash, IP, user-agent and expiry to store.
+// return the new token hash, IP, user-agent, device info and expiry to store.
 // If generate returns an error, or any DB step fails, the transaction is rolled
 // back and the old session remains valid.
 func (r *Repository) RotateSession(
 	ctx context.Context,
 	oldHash string,
-	generate func(userID string) (newHash, ip, ua string, expiresAt time.Time, err error),
+	generate func(userID string) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error),
 ) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -75,8 +102,9 @@ func (r *Repository) RotateSession(
 		WHERE refresh_token_hash = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
+		  AND COALESCE(last_used_at, created_at) > now() - $2::interval
 		FOR UPDATE
-	`, oldHash).Scan(&userID)
+	`, oldHash, activeSessionWindowSQL).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -84,7 +112,7 @@ func (r *Repository) RotateSession(
 		return err
 	}
 
-	newHash, ip, ua, expiresAt, err := generate(userID)
+	newHash, ip, ua, deviceInfo, expiresAt, err := generate(userID)
 	if err != nil {
 		return err
 	}
@@ -96,10 +124,12 @@ func (r *Repository) RotateSession(
 		return err
 	}
 
+	// last_used_at = now() marks this as a rotated (confirmed-active) session so
+	// the stale-session cleanup can distinguish it from a never-refreshed initial login.
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO sessions (user_id, refresh_token_hash, ip_address, user_agent, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`, userID, newHash, parseAddr(ip), ua, expiresAt); err != nil {
+		INSERT INTO sessions (user_id, refresh_token_hash, ip_address, user_agent, device_info, expires_at, last_used_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
+	`, userID, newHash, parseAddr(ip), ua, normalizeDeviceInfo(deviceInfo), expiresAt); err != nil {
 		return err
 	}
 
@@ -108,11 +138,21 @@ func (r *Repository) RotateSession(
 
 // Revoke marks a session as revoked and records the last-used timestamp.
 func (r *Repository) Revoke(ctx context.Context, hash string) error {
-	_, err := r.db.Exec(ctx, `
+	var userID string
+	err := r.db.QueryRow(ctx, `
 		UPDATE sessions
 		SET is_revoked = true, last_used_at = now()
 		WHERE refresh_token_hash = $1
-	`, hash)
+		  AND is_revoked = false
+		RETURNING user_id
+	`, hash).Scan(&userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	r.hub.Broadcast(userID)
 	return err
 }
 
@@ -142,6 +182,25 @@ func (r *Repository) RevokeAllForUser(ctx context.Context, userID string) error 
 		UPDATE sessions SET is_revoked = true
 		WHERE user_id = $1 AND is_revoked = false
 	`, userID)
+	if err == nil {
+		r.hub.BroadcastRevokedAll(userID)
+	}
+	return err
+}
+
+// RevokeOtherSessions revokes every active session for userID EXCEPT the one
+// identified by currentHash. Used for "sign out all other devices".
+func (r *Repository) RevokeOtherSessions(ctx context.Context, userID, currentHash string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		WHERE user_id = $1
+		  AND is_revoked = false
+		  AND expires_at > now()
+		  AND refresh_token_hash != $2
+	`, userID, currentHash)
+	if err == nil && tag.RowsAffected() > 0 {
+		r.hub.BroadcastRevokedOthers(userID, currentHash)
+	}
 	return err
 }
 
@@ -160,17 +219,21 @@ func (r *Repository) EvictExcessSessions(ctx context.Context, userID string, kee
 		      LIMIT $2
 		  )
 	`, userID, keep)
+	if err == nil {
+		r.hub.Broadcast(userID)
+	}
 	return err
 }
 
 // SessionInfo is the read model for session listing (no token hash exposed).
 type SessionInfo struct {
-	ID         string     `json:"id"`
-	IPAddress  string     `json:"ip_address"`
-	UserAgent  string     `json:"user_agent"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	IsCurrent  bool       `json:"is_current"`
+	ID         string            `json:"id"`
+	IPAddress  string            `json:"ip_address"`
+	UserAgent  string            `json:"user_agent"`
+	DeviceInfo map[string]string `json:"device_info"`
+	CreatedAt  time.Time         `json:"created_at"`
+	LastUsedAt *time.Time        `json:"last_used_at"`
+	IsCurrent  bool              `json:"is_current"`
 }
 
 // ListForUser returns all active sessions for a user.
@@ -181,6 +244,7 @@ func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string
 		SELECT id::text,
 		       COALESCE(ip_address::text, ''),
 		       user_agent,
+		       COALESCE(device_info, '{}'::jsonb),
 		       created_at,
 		       last_used_at,
 		       (refresh_token_hash = $2) AS is_current
@@ -188,9 +252,10 @@ func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string
 		WHERE user_id = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
+		  AND COALESCE(last_used_at, created_at) > now() - $3::interval
 		ORDER BY (refresh_token_hash = $2) DESC,
 		         COALESCE(last_used_at, created_at) DESC
-	`, userID, currentHash)
+	`, userID, currentHash, activeSessionWindowSQL)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +265,12 @@ func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string
 	for rows.Next() {
 		var s SessionInfo
 		var lastUsed *time.Time
-		if err := rows.Scan(&s.ID, &s.IPAddress, &s.UserAgent, &s.CreatedAt, &lastUsed, &s.IsCurrent); err != nil {
+		var deviceInfo []byte
+		if err := rows.Scan(&s.ID, &s.IPAddress, &s.UserAgent, &deviceInfo, &s.CreatedAt, &lastUsed, &s.IsCurrent); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal(deviceInfo, &s.DeviceInfo); err != nil {
+			s.DeviceInfo = map[string]string{}
 		}
 		s.LastUsedAt = lastUsed
 		sessions = append(sessions, s)
@@ -209,27 +278,99 @@ func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string
 	return sessions, rows.Err()
 }
 
+func normalizeDeviceInfo(deviceInfo map[string]string) []byte {
+	if len(deviceInfo) == 0 {
+		return []byte("{}")
+	}
+
+	clean := make(map[string]string, len(deviceInfo))
+	for key, value := range deviceInfo {
+		if key == "" || len(key) > 40 || len(value) > 80 {
+			continue
+		}
+		clean[key] = value
+	}
+	if len(clean) == 0 {
+		return []byte("{}")
+	}
+
+	b, err := json.Marshal(clean)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
 // RevokeByID revokes a specific session owned by userID. Returns ErrNotFound if
 // the session does not exist, is already revoked, or belongs to a different user.
 func (r *Repository) RevokeByID(ctx context.Context, id, userID string) error {
-	tag, err := r.db.Exec(ctx, `
+	var tokenHash string
+	err := r.db.QueryRow(ctx, `
 		UPDATE sessions SET is_revoked = true, last_used_at = now()
 		WHERE id = $1 AND user_id = $2 AND is_revoked = false
-	`, id, userID)
+		RETURNING refresh_token_hash
+	`, id, userID).Scan(&tokenHash)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
+	r.hub.BroadcastRevoked(userID, tokenHash)
+	r.hub.Broadcast(userID)
 	return nil
+}
+
+// staleInitialCutoffSQL is the time window after which a session whose access
+// token was never refreshed is considered stale and will be force-revoked.
+// AccessTTL = 1 min; frontend refreshes at 80% (~48 s); 90 s gives a generous
+// buffer for slow clients while still catching abandoned/bot logins quickly.
+const staleInitialCutoffSQL = "90 seconds"
+
+// RevokeStaleInitialSessions finds sessions that were created more than
+// staleInitialCutoffSQL ago and whose last_used_at is still NULL — meaning the
+// access token was never refreshed. These are abandoned logins (e.g. the browser
+// tab closed immediately, or a credential-stuffing bot that never followed up).
+// For each revoked session BroadcastRevoked is called so any still-open SSE
+// connection is notified; other sessions for the same user see a "change" event
+// (via the SSE handler fall-through) and can update their session list.
+func (r *Repository) RevokeStaleInitialSessions(ctx context.Context) (int64, error) {
+	rows, err := r.db.Query(ctx, `
+		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		WHERE is_revoked = false
+		  AND expires_at > now()
+		  AND last_used_at IS NULL
+		  AND created_at < now() - $1::interval
+		  AND created_at > now() - interval '10 minutes'
+		RETURNING user_id, refresh_token_hash
+	`, staleInitialCutoffSQL)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var count int64
+	for rows.Next() {
+		var userID, tokenHash string
+		if err := rows.Scan(&userID, &tokenHash); err != nil {
+			return count, err
+		}
+		count++
+		// Notify the stale session itself (if SSE still open) and all other
+		// sessions for this user (they'll see "change" → refresh list → snackbar).
+		r.hub.BroadcastRevoked(userID, tokenHash)
+	}
+	return count, rows.Err()
 }
 
 // DeleteExpired removes all expired and revoked sessions. Run periodically.
 func (r *Repository) DeleteExpired(ctx context.Context) (int64, error) {
 	tag, err := r.db.Exec(ctx, `
-		DELETE FROM sessions WHERE expires_at < now() OR is_revoked = true
-	`)
+		DELETE FROM sessions
+		WHERE expires_at < now()
+		   OR is_revoked = true
+		   OR COALESCE(last_used_at, created_at) <= now() - $1::interval
+	`, activeSessionWindowSQL)
 	if err != nil {
 		return 0, err
 	}

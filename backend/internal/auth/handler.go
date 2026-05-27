@@ -79,8 +79,9 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email      string            `json:"email"`
+		Password   string            `json:"password"`
+		ClientInfo map[string]string `json:"client_info"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
@@ -91,7 +92,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
 	if err != nil {
 		var lockedErr *AccountLockedError
 		switch {
@@ -108,7 +109,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  map[string]any{"email": req.Email, "reason": err.Error()},
+				Metadata:  authMetadata(req.Email, err.Error(), req.ClientInfo),
 			})
 			writeError(w, http.StatusUnauthorized, err.Error())
 		default:
@@ -122,7 +123,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Resource:  "/api/v1/auth/login",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
-		Metadata:  map[string]any{"email": req.Email},
+		Metadata:  authMetadata(req.Email, "", req.ClientInfo),
 	})
 
 	if result.MFARequired {
@@ -137,6 +138,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	h.writeCookies(w, result.Pair)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func authMetadata(email, reason string, clientInfo map[string]string) map[string]any {
+	metadata := map[string]any{"email": email}
+	if reason != "" {
+		metadata["reason"] = reason
+	}
+	if len(clientInfo) > 0 {
+		metadata["client_info"] = clientInfo
+	}
+	return metadata
 }
 
 // POST /api/v1/auth/mfa/challenge — second factor after Login returned mfa_required
@@ -166,13 +178,18 @@ func (h *Handler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientInfo map[string]string `json:"client_info"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
 	c, err := r.Cookie("refresh_token")
 	if err != nil || c.Value == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
-	pair, err := h.authSvc.RefreshTokens(r.Context(), c.Value, r.RemoteAddr, r.Header.Get("User-Agent"))
+	pair, err := h.authSvc.RefreshTokens(r.Context(), c.Value, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
 	if err != nil {
 		h.clearCookies(w)
 		writeError(w, http.StatusUnauthorized, "invalid_token")
@@ -207,9 +224,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Locale   string `json:"locale"`
+		Email      string            `json:"email"`
+		Password   string            `json:"password"`
+		Locale     string            `json:"locale"`
+		ClientInfo map[string]string `json:"client_info"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
@@ -243,9 +261,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Resource:  "/api/v1/auth/register",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  authMetadata(req.Email, "", req.ClientInfo),
 	})
 
-	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"))
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return

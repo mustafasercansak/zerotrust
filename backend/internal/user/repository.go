@@ -28,9 +28,9 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, locale str
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO users (email, password_hash, locale)
 		VALUES ($1, $2, $3)
-		RETURNING id, email, password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
 	`, email, passwordHash, locale).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -53,9 +53,9 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 	err = tx.QueryRow(ctx, `
 		INSERT INTO users (email, password_hash, locale)
 		VALUES ($1, $2, $3)
-		RETURNING id, email, password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
 	`, email, passwordHash, locale).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -88,10 +88,10 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, email, password_hash, locale, is_active, created_at, updated_at
+		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
 		FROM users WHERE id = $1
 	`, id).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -115,13 +115,37 @@ func (r *Repository) UpdateLocale(ctx context.Context, userID, locale string) er
 	return err
 }
 
+func (r *Repository) UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error) {
+	u := &User{}
+	err := r.db.QueryRow(ctx, `
+		UPDATE users
+		SET first_name = $1, last_name = $2, updated_at = NOW()
+		WHERE id = $3
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+	`, firstName, lastName, userID).Scan(
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	roles, err := r.getRoles(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	u.Roles = roles
+	return u, nil
+}
+
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, email, password_hash, locale, is_active, created_at, updated_at
+		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
 		FROM users WHERE email = $1
 	`, email).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -149,8 +173,9 @@ type ListParams struct {
 
 // ListResult holds one page of users and the unfiltered total count.
 type ListResult struct {
-	Users []*User
-	Total int
+	Users          []*User
+	ActiveSessions map[string]int // userID → active session count
+	Total          int
 }
 
 var userSortCols = map[string]string{
@@ -208,8 +233,14 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 
 	dataArgs := append(append([]any{}, args...), p.Limit, p.Offset)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT u.id, u.email, u.locale, u.is_active, u.created_at, u.updated_at,
-		       COALESCE(string_agg(ro.name, ',' ORDER BY ro.name), '') AS roles
+		SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_object_key <> '', u.locale, u.is_active, u.created_at, u.updated_at,
+		       COALESCE(string_agg(ro.name, ',' ORDER BY ro.name), '') AS roles,
+		       (SELECT COUNT(*)
+		        FROM sessions s
+		        WHERE s.user_id = u.id
+		          AND s.is_revoked = false
+		          AND s.expires_at > now()
+		          AND COALESCE(s.last_used_at, s.created_at) > now() - interval '2 minutes') AS active_sessions
 		FROM users u
 		LEFT JOIN user_roles ur ON u.id = ur.user_id
 		LEFT JOIN roles ro ON ur.role_id = ro.id
@@ -224,10 +255,12 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	defer rows.Close()
 
 	users := make([]*User, 0)
+	activeSessions := make(map[string]int)
 	for rows.Next() {
 		u := &User{}
 		var rolesStr string
-		if err := rows.Scan(&u.ID, &u.Email, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &rolesStr); err != nil {
+		var sessionCount int
+		if err := rows.Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &rolesStr, &sessionCount); err != nil {
 			return ListResult{}, err
 		}
 		if rolesStr != "" {
@@ -236,8 +269,9 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 			u.Roles = []string{}
 		}
 		users = append(users, u)
+		activeSessions[u.ID] = sessionCount
 	}
-	return ListResult{Users: users, Total: total}, rows.Err()
+	return ListResult{Users: users, ActiveSessions: activeSessions, Total: total}, rows.Err()
 }
 
 // AssignRoleByName assigns a named role to a user (idempotent).
@@ -274,6 +308,21 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// SetActive activates or deactivates a user account.
+func (r *Repository) SetActive(ctx context.Context, userID string, active bool) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		active, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpdatePassword replaces the stored password hash for a user.

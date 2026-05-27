@@ -174,12 +174,14 @@ zerotrust/
 | Method | Endpoint | Permission |
 |--------|----------|------------|
 | GET | `/api/v1/admin/users` | `users:read` |
-| POST | `/api/v1/admin/users` | `users:write` |
-| PATCH | `/api/v1/admin/users/{id}/roles` | `users:write` |
+| POST | `/api/v1/admin/users` | `users:create` |
+| PATCH | `/api/v1/admin/users/{id}/roles` | `users:update` |
+| PATCH | `/api/v1/admin/users/{id}/status` | `users:update` |
 | GET | `/api/v1/admin/audit` | `audit:read` |
 | GET | `/api/v1/admin/service-accounts` | `service_accounts:read` |
-| POST | `/api/v1/admin/service-accounts` | `service_accounts:write` |
-| PATCH | `/api/v1/admin/service-accounts/{id}/status` | `service_accounts:write` |
+| POST | `/api/v1/admin/service-accounts` | `service_accounts:create` |
+| PATCH | `/api/v1/admin/service-accounts/{id}` | `service_accounts:update` |
+| PATCH | `/api/v1/admin/service-accounts/{id}/status` | `service_accounts:update` |
 | DELETE | `/api/v1/admin/service-accounts/{id}` | `service_accounts:delete` |
 
 ## Environment Variables

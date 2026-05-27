@@ -33,10 +33,11 @@ type MFAChecker interface {
 // SessionStore persists refresh-token sessions.
 // Defined here to keep auth self-contained; implemented by session.Repository.
 type SessionStore interface {
-	Create(ctx context.Context, userID, tokenHash, ip, userAgent string, expiresAt time.Time) error
+	Create(ctx context.Context, userID, tokenHash, ip, userAgent string, deviceInfo map[string]string, expiresAt time.Time) error
+	RevokeForDevice(ctx context.Context, userID, ip, userAgent string, deviceInfo map[string]string) error
 	// RotateSession revokes the old session and atomically creates a new one.
 	// generate is called under a row lock with the owning userID.
-	RotateSession(ctx context.Context, oldHash string, generate func(userID string) (newHash, ip, ua string, expiresAt time.Time, err error)) error
+	RotateSession(ctx context.Context, oldHash string, generate func(userID string) (newHash, ip, ua string, deviceInfo map[string]string, expiresAt time.Time, err error)) error
 	Revoke(ctx context.Context, hash string) error
 	// EvictExcessSessions keeps the `keep` most-recently-active sessions and
 	// revokes the rest. Call with keep = maxAllowed-1 before creating a new
@@ -129,7 +130,7 @@ func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountSto
 // Login authenticates a user. If MFA is enabled for the account it returns a
 // LoginResult with MFARequired=true and a short-lived pending token; otherwise
 // it returns a full TokenPair.
-func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (*LoginResult, error) {
+func (s *Service) Login(ctx context.Context, email, password, ip, ua string, deviceInfo map[string]string) (*LoginResult, error) {
 	if err := s.checkLockout(ctx, email); err != nil {
 		return nil, err
 	}
@@ -157,14 +158,14 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (*L
 		if err != nil {
 			return nil, err
 		}
-		data, _ := json.Marshal(map[string]string{"uid": u.ID, "ip": ip, "ua": ua})
+		data, _ := json.Marshal(map[string]any{"uid": u.ID, "ip": ip, "ua": ua, "device_info": deviceInfo})
 		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
 			return nil, err
 		}
 		return &LoginResult{MFARequired: true, MFAPendingToken: token}, nil
 	}
 
-	pair, err := s.completeLogin(ctx, u, ip, ua)
+	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +182,17 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 		return nil, ErrInvalidCredentials
 	}
 
-	var m map[string]string
+	var m struct {
+		UID        string            `json:"uid"`
+		IP         string            `json:"ip"`
+		UA         string            `json:"ua"`
+		DeviceInfo map[string]string `json:"device_info"`
+	}
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
-	userID := m["uid"]
+	userID := m.UID
 	if s.mfa == nil || !s.mfa.Validate(ctx, userID, totpCode) {
 		return nil, ErrInvalidCredentials
 	}
@@ -196,12 +202,12 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 		return nil, ErrInvalidCredentials
 	}
 
-	return s.completeLogin(ctx, u, m["ip"], m["ua"])
+	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
 }
 
 // completeLogin generates tokens and creates a session row. Called after all
 // authentication factors have been verified.
-func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string) (*TokenPair, error) {
+func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
 	perms, err := s.users.GetPermissions(ctx, u.ID)
 	if err != nil {
 		slog.Error("failed to load permissions", "user_id", u.ID, "error", err)
@@ -216,10 +222,13 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 	if s.settings != nil {
 		maxSessionsPerUser = s.settings.GetInt(ctx, "max_sessions_per_user", 5)
 	}
+	if err := s.sessions.RevokeForDevice(ctx, u.ID, ip, ua, deviceInfo); err != nil {
+		slog.Error("failed to revoke existing same-device sessions on login", "user_id", u.ID, "error", err)
+	}
 	if err := s.sessions.EvictExcessSessions(ctx, u.ID, maxSessionsPerUser-1); err != nil {
 		slog.Error("failed to evict excess sessions on login", "user_id", u.ID, "error", err)
 	}
-	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, time.Now().Add(RefreshTTL)); err != nil {
+	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, deviceInfo, time.Now().Add(RefreshTTL)); err != nil {
 		return nil, err
 	}
 	return pair, nil
@@ -228,15 +237,15 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 // RefreshTokens atomically rotates the refresh token inside a single DB transaction.
 // The FOR UPDATE lock inside RotateSession prevents two concurrent requests from
 // both succeeding with the same refresh token.
-func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string) (*TokenPair, error) {
+func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
 	var pair *TokenPair
 
 	tokenHash := hashToken(refreshToken)
 	err := s.sessions.RotateSession(ctx, tokenHash,
-		func(userID string) (string, string, string, time.Time, error) {
+		func(userID string) (string, string, string, map[string]string, time.Time, error) {
 			u, err := s.users.FindByID(ctx, userID)
 			if err != nil {
-				return "", "", "", time.Time{}, ErrInvalidToken
+				return "", "", "", nil, time.Time{}, ErrInvalidToken
 			}
 			perms, err := s.users.GetPermissions(ctx, u.ID)
 			if err != nil {
@@ -245,10 +254,10 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 
 			p, err := GenerateTokenPair(s.ks, u.ID, u.Email, u.Locale, u.Roles, perms, AccessTTL)
 			if err != nil {
-				return "", "", "", time.Time{}, err
+				return "", "", "", nil, time.Time{}, err
 			}
 			pair = p
-			return hashToken(p.RefreshToken), ip, ua, time.Now().Add(RefreshTTL), nil
+			return hashToken(p.RefreshToken), ip, ua, deviceInfo, time.Now().Add(RefreshTTL), nil
 		},
 	)
 	if err != nil {

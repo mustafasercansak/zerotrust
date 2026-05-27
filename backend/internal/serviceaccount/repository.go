@@ -209,6 +209,50 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *Repository) Update(ctx context.Context, id, name string, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	sa := &ServiceAccount{}
+	err = tx.QueryRow(ctx, `
+		UPDATE service_accounts
+		SET name = $2, is_active = $3, expires_at = $4
+		WHERE id = $1
+		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at
+	`, id, name, active, expiresAt).Scan(
+		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if strings.Contains(err.Error(), "unique") {
+			return nil, ErrNameTaken
+		}
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM service_account_scopes WHERE service_account_id = $1`, id); err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO service_account_scopes (service_account_id, scope) VALUES ($1, $2)
+		`, id, scope); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	sa.Scopes = scopes
+	return sa, nil
+}
+
 func (r *Repository) SetActive(ctx context.Context, id string, active bool) error {
 	_, err := r.db.Exec(ctx, `UPDATE service_accounts SET is_active = $2 WHERE id = $1`, id, active)
 	return err

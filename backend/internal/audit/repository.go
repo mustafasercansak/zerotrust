@@ -39,13 +39,15 @@ func (r *Repository) Log(ctx context.Context, e Entry) {
 
 // EntryRow is the read model for audit log listing.
 type EntryRow struct {
-	ID        string  `json:"id"`
-	UserID    *string `json:"user_id"`
-	Action    string  `json:"action"`
-	Resource  string  `json:"resource"`
-	IPAddress *string `json:"ip_address"`
-	UserAgent *string `json:"user_agent"`
-	CreatedAt string  `json:"created_at"`
+	ID        string         `json:"id"`
+	UserID    *string        `json:"user_id"`
+	UserEmail *string        `json:"user_email"`
+	Action    string         `json:"action"`
+	Resource  string         `json:"resource"`
+	IPAddress *string        `json:"ip_address"`
+	UserAgent *string        `json:"user_agent"`
+	Metadata  map[string]any `json:"metadata"`
+	CreatedAt string         `json:"created_at"`
 }
 
 // ListParams configures pagination, sorting, and filtering for List.
@@ -91,17 +93,17 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	n := 1
 
 	if p.Action != "" {
-		conds = append(conds, fmt.Sprintf("action ILIKE $%d", n))
+		conds = append(conds, fmt.Sprintf("a.action ILIKE $%d", n))
 		args = append(args, "%"+p.Action+"%")
 		n++
 	}
 	if p.UserID != "" {
-		conds = append(conds, fmt.Sprintf("user_id::text = $%d", n))
+		conds = append(conds, fmt.Sprintf("a.user_id::text = $%d", n))
 		args = append(args, p.UserID)
 		n++
 	}
 	if p.Resource != "" {
-		conds = append(conds, fmt.Sprintf("resource ILIKE $%d", n))
+		conds = append(conds, fmt.Sprintf("a.resource ILIKE $%d", n))
 		args = append(args, "%"+p.Resource+"%")
 		n++
 	}
@@ -113,7 +115,7 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 
 	var total int
 	if err := r.db.QueryRow(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM audit_logs %s`, where),
+		fmt.Sprintf(`SELECT COUNT(*) FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id %s`, where),
 		args...,
 	).Scan(&total); err != nil {
 		return ListResult{}, err
@@ -121,16 +123,19 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 
 	dataArgs := append(append([]any{}, args...), p.Limit, p.Offset)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT id::text,
-		       user_id::text,
-		       action,
-		       resource,
-		       ip_address::text,
-		       user_agent,
-		       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-		FROM audit_logs
+		SELECT a.id::text,
+		       a.user_id::text,
+		       u.email,
+		       a.action,
+		       a.resource,
+		       a.ip_address::text,
+		       a.user_agent,
+		       COALESCE(a.metadata, '{}'::jsonb),
+		       to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM audit_logs a
+		LEFT JOIN users u ON u.id = a.user_id
 		%s
-		ORDER BY %s %s
+		ORDER BY a.%s %s
 		LIMIT $%d OFFSET $%d
 	`, where, col, dir, n, n+1), dataArgs...)
 	if err != nil {
@@ -141,8 +146,12 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	entries := make([]EntryRow, 0)
 	for rows.Next() {
 		var e EntryRow
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.IPAddress, &e.UserAgent, &e.CreatedAt); err != nil {
+		var metadata []byte
+		if err := rows.Scan(&e.ID, &e.UserID, &e.UserEmail, &e.Action, &e.Resource, &e.IPAddress, &e.UserAgent, &metadata, &e.CreatedAt); err != nil {
 			return ListResult{}, err
+		}
+		if err := json.Unmarshal(metadata, &e.Metadata); err != nil {
+			e.Metadata = map[string]any{}
 		}
 		entries = append(entries, e)
 	}
