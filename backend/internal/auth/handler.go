@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,17 +22,29 @@ type PasswordResetter interface {
 	Reset(ctx context.Context, token, newPassword string) error
 }
 
+type auditLogger interface {
+	Log(context.Context, audit.Entry) error
+}
+
+type authService interface {
+	ClientCredentials(ctx context.Context, clientID, secret string) (*ServiceTokenResponse, error)
+	Login(ctx context.Context, email, password, ip, ua string, deviceInfo map[string]string) (*LoginResult, error)
+	MFAChallenge(ctx context.Context, pendingToken, totpCode string) (*TokenPair, error)
+	RefreshTokens(ctx context.Context, refreshToken, ip, ua string, deviceInfo map[string]string) (*TokenPair, error)
+	Logout(ctx context.Context, refreshToken, accessToken string) error
+}
+
 type Handler struct {
-	authSvc             *Service
+	authSvc             authService
 	userSvc             *user.Service
-	auditRepo           *audit.Repository
+	auditRepo           auditLogger
 	passwordResetter    PasswordResetter // nil when not configured
 	cookiesSecure       bool
 	registrationEnabled bool
 	publicAppURL        string // base URL for password-reset links (from config, never from request)
 }
 
-func NewHandler(authSvc *Service, userSvc *user.Service, auditRepo *audit.Repository, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string) *Handler {
+func NewHandler(authSvc authService, userSvc *user.Service, auditRepo auditLogger, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string) *Handler {
 	return &Handler{
 		authSvc:             authSvc,
 		userSvc:             userSvc,
@@ -65,9 +78,24 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.authSvc.ClientCredentials(r.Context(), req.ClientID, req.ClientSecret)
 	if err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.client_credentials_failed",
+			Resource:  "/api/v1/auth/token",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  serviceTokenMetadata(req.ClientID, "invalid_client", http.StatusUnauthorized),
+		}, true)
 		writeError(w, http.StatusUnauthorized, "invalid_client")
 		return
 	}
+
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.client_credentials_success",
+		Resource:  "/api/v1/auth/token",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  serviceTokenMetadata(req.ClientID, "", http.StatusOK),
+	}, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
@@ -97,6 +125,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		var lockedErr *AccountLockedError
 		switch {
 		case errors.As(err, &lockedErr):
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_failed",
+				Resource:  "/api/v1/auth/login",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata(req.Email, "account_locked", http.StatusTooManyRequests, req.ClientInfo),
+			}, true)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(map[string]any{
@@ -104,13 +139,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				"retry_after": int(lockedErr.RetryAfter.Seconds()),
 			})
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
-			h.asyncLog(r.Context(), audit.Entry{
+			h.logAudit(r.Context(), audit.Entry{
 				Action:    "auth.login_failed",
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, err.Error(), req.ClientInfo),
-			})
+				Metadata:  authMetadata(req.Email, err.Error(), http.StatusUnauthorized, req.ClientInfo),
+			}, true)
 			writeError(w, http.StatusUnauthorized, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error")
@@ -118,13 +153,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.asyncLog(r.Context(), audit.Entry{
+	h.logAudit(r.Context(), audit.Entry{
 		Action:    "auth.login_success",
 		Resource:  "/api/v1/auth/login",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
-		Metadata:  authMetadata(req.Email, "", req.ClientInfo),
-	})
+		Metadata:  authMetadata(req.Email, "", http.StatusOK, req.ClientInfo),
+	}, true)
 
 	if result.MFARequired {
 		w.Header().Set("Content-Type", "application/json")
@@ -140,13 +175,36 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
-func authMetadata(email, reason string, clientInfo map[string]string) map[string]any {
-	metadata := map[string]any{"email": email}
+func authMetadata(email, reason string, status int, clientInfo map[string]string) map[string]any {
+	metadata := map[string]any{
+		"email":   email,
+		"status":  status,
+		"outcome": auditOutcome(status),
+	}
 	if reason != "" {
 		metadata["reason"] = reason
 	}
 	if len(clientInfo) > 0 {
 		metadata["client_info"] = clientInfo
+	}
+	return metadata
+}
+
+func serviceTokenMetadata(clientID, reason string, status int) map[string]any {
+	metadata := statusMetadata(reason, status)
+	if clientID != "" {
+		metadata["client_id"] = clientID
+	}
+	return metadata
+}
+
+func statusMetadata(reason string, status int) map[string]any {
+	metadata := map[string]any{
+		"status":  status,
+		"outcome": auditOutcome(status),
+	}
+	if reason != "" {
+		metadata["reason"] = reason
 	}
 	return metadata
 }
@@ -168,9 +226,24 @@ func (h *Handler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.authSvc.MFAChallenge(r.Context(), req.MFAToken, req.TOTPCode)
 	if err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.mfa_challenge_failed",
+			Resource:  "/api/v1/auth/mfa/challenge",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  statusMetadata("invalid_credentials", http.StatusUnauthorized),
+		}, true)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return
 	}
+
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.mfa_challenge_success",
+		Resource:  "/api/v1/auth/mfa/challenge",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  statusMetadata("", http.StatusOK),
+	}, true)
 
 	h.writeCookies(w, pair)
 	w.Header().Set("Content-Type", "application/json")
@@ -191,6 +264,13 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.authSvc.RefreshTokens(r.Context(), c.Value, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
 	if err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.refresh_failed",
+			Resource:  "/api/v1/auth/refresh",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  statusMetadata("invalid_token", http.StatusUnauthorized),
+		}, true)
 		h.clearCookies(w)
 		writeError(w, http.StatusUnauthorized, "invalid_token")
 		return
@@ -213,6 +293,13 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if rt != "" || at != "" {
 		h.authSvc.Logout(r.Context(), rt, at)
 	}
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.logout",
+		Resource:  "/api/v1/auth/logout",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  auditMetadataFromHeader(r, http.StatusNoContent),
+	}, true)
 	h.clearCookies(w)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -255,14 +342,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.asyncLog(r.Context(), audit.Entry{
+	h.logAudit(r.Context(), audit.Entry{
 		UserID:    &u.ID,
 		Action:    "auth.register",
 		Resource:  "/api/v1/auth/register",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
-		Metadata:  authMetadata(req.Email, "", req.ClientInfo),
-	})
+		Metadata:  authMetadata(req.Email, "", http.StatusCreated, req.ClientInfo),
+	}, false)
 
 	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
 	if err != nil {
@@ -293,6 +380,13 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// Always respond 200 — never reveal whether the email exists.
 	go h.passwordResetter.SendReset(context.Background(), req.Email, h.publicAppURL)
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.password_reset_requested",
+		Resource:  "/api/v1/auth/forgot-password",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  authMetadata(req.Email, "", http.StatusOK, nil),
+	}, true)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -320,9 +414,23 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.passwordResetter.Reset(r.Context(), req.Token, req.Password); err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.password_reset_failed",
+			Resource:  "/api/v1/auth/reset-password",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  statusMetadata("invalid_token", http.StatusBadRequest),
+		}, true)
 		writeError(w, http.StatusBadRequest, "invalid_token")
 		return
 	}
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.password_reset_success",
+		Resource:  "/api/v1/auth/reset-password",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  statusMetadata("", http.StatusOK),
+	}, true)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -390,16 +498,58 @@ func newCSRFToken() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// asyncLog fires an audit log entry in a goroutine that is decoupled from the
-// HTTP request lifetime but still inherits its values (trace IDs, etc.).
-// context.WithoutCancel ensures the log write is not aborted when the handler
-// returns; the 5-second timeout prevents goroutine leaks on slow DB paths.
-func (h *Handler) asyncLog(parent context.Context, entry audit.Entry) {
+// logAudit writes critical audit entries synchronously and non-critical entries
+// in a goroutine decoupled from the HTTP request lifetime. context.WithoutCancel
+// ensures async writes are not aborted when the handler returns; the 5-second
+// timeout prevents unbounded waits on slow DB paths.
+func (h *Handler) logAudit(parent context.Context, entry audit.Entry, synchronous bool) {
+	if h.auditRepo == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	write := func() {
+		if err := h.auditRepo.Log(ctx, entry); err != nil {
+			slog.Error("audit log write failed",
+				"error", err,
+				"action", entry.Action,
+				"resource", entry.Resource,
+			)
+			audit.RecordWriteFailure()
+		}
+	}
+	if synchronous {
+		defer cancel()
+		write()
+		return
+	}
 	go func() {
 		defer cancel()
-		h.auditRepo.Log(ctx, entry)
+		write()
 	}()
+}
+
+func auditMetadataFromHeader(r *http.Request, status int) map[string]any {
+	metadata := map[string]any{
+		"status":  status,
+		"outcome": auditOutcome(status),
+	}
+	raw := r.Header.Get("X-Client-Info")
+	if raw == "" {
+		return metadata
+	}
+	var clientInfo map[string]string
+	if err := json.Unmarshal([]byte(raw), &clientInfo); err != nil || len(clientInfo) == 0 {
+		return metadata
+	}
+	metadata["client_info"] = clientInfo
+	return metadata
+}
+
+func auditOutcome(status int) string {
+	if status >= 200 && status < 400 {
+		return "success"
+	}
+	return "failure"
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

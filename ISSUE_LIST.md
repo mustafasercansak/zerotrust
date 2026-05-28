@@ -99,6 +99,8 @@ Status update:
 
 ### 3. Make audit log writes reliable and observable
 
+State: CLOSED
+
 Status: Audit records are written in the background with no error visibility.
 
 Related files:
@@ -109,6 +111,23 @@ Acceptance criteria:
 - At minimum, logs or metrics are emitted for failures.
 - Preferably define a bounded queue or synchronous strategy for critical audit events.
 - Add tests for events such as login, logout, role changes, and revoke actions.
+
+Status update:
+- `audit.Repository.Log` now returns insert/marshal errors instead of swallowing them.
+- Critical audit writes use a synchronous, timeout-bound strategy; non-critical protected-route writes still use a timeout-bound background context.
+- Audit failures are logged with action/resource/user context where available.
+- Audit failures are counted in-process via `audit.WriteFailures()` for future metrics/health integration.
+- Audit failure count is exported via Prometheus-compatible `/metrics` as `zerotrust_audit_write_failures_total`.
+- Public auth routes and the service-account SSE endpoint are also covered by request-level audit, so malformed, missing-field, unsupported, and unauthenticated attempts leave an audit record.
+- CSRF failures are audited before the CSRF middleware returns 403, so browser-session mutation attempts with missing/invalid CSRF tokens leave an audit record without duplicating unrelated 403 responses.
+- Protected-route authentication failures are audited before the auth middleware returns 401, so missing/expired/invalid token attempts also leave an audit record.
+- Critical protected-route audit events now use stable product event names such as `admin.user.roles_update` and `session.revoke`.
+- Critical audit coverage includes user create/status, service-account create/update/status/delete, settings updates, MFA setup/verify/disable/step-up, session revoke, and admin session revoke operations.
+- Public auth audit coverage now includes client-credentials token success/failure, login lockout, refresh failure, password reset request/success/failure, and MFA challenge success/failure without logging secrets, passwords, reset tokens, refresh tokens, MFA codes, or pending MFA tokens.
+- Audit metadata now includes HTTP `status` and `outcome` (`success`/`failure`) so failed sensitive operations are visible.
+- Added explicit `auth.logout` audit event coverage.
+- Audit middleware preserves optional response-writer capabilities used by streaming and advanced HTTP handlers without advertising unsupported capabilities.
+- Added backend tests for request-level public auth/SSE audit events, CSRF failure audit events, protected-route auth failure audit events, login success/failure/lockout audit events, client-credentials audit events, refresh failure, password reset audit events, MFA challenge audit events, logout audit behavior, critical route audit entries, synchronous critical-route behavior, failed-write observability/counter increments, failed operation outcomes, metrics output, secret/token/code/password redaction, and response-writer capability preservation.
 
 ### 4. Make MFA configuration fail fast
 

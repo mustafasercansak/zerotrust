@@ -1,10 +1,18 @@
 package middleware
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
 )
+
+type csrfFailureKey struct{}
+
+func CSRFFailureFrom(ctx context.Context) string {
+	reason, _ := ctx.Value(csrfFailureKey{}).(string)
+	return reason
+}
 
 // CSRF enforces the double-submit cookie pattern for browser sessions.
 // Requests carrying Authorization: Bearer are exempt (API / service-account clients).
@@ -36,10 +44,12 @@ func CSRF() func(http.Handler) http.Handler {
 			// Browser session exists — enforce double-submit check.
 			c, err := r.Cookie("csrf_token")
 			if err != nil || c.Value == "" {
+				*r = *r.WithContext(context.WithValue(r.Context(), csrfFailureKey{}, "csrf_missing"))
 				writeError(w, http.StatusForbidden, "csrf_missing")
 				return
 			}
 			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(c.Value)) != 1 {
+				*r = *r.WithContext(context.WithValue(r.Context(), csrfFailureKey{}, "csrf_invalid"))
 				writeError(w, http.StatusForbidden, "csrf_invalid")
 				return
 			}

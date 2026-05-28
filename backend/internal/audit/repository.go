@@ -26,15 +26,23 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) Log(ctx context.Context, e Entry) {
+func (r *Repository) Log(ctx context.Context, e Entry) error {
 	var meta []byte
 	if len(e.Metadata) > 0 {
-		meta, _ = json.Marshal(e.Metadata)
+		var err error
+		meta, err = json.Marshal(e.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal audit metadata: %w", err)
+		}
 	}
-	_, _ = r.db.Exec(ctx, `
+	_, err := r.db.Exec(ctx, `
 		INSERT INTO audit_logs (user_id, action, resource, ip_address, user_agent, metadata)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, e.UserID, e.Action, e.Resource, nullStr(e.IPAddress), nullStr(e.UserAgent), meta)
+	if err != nil {
+		return fmt.Errorf("insert audit log: %w", err)
+	}
+	return nil
 }
 
 // EntryRow is the read model for audit log listing.

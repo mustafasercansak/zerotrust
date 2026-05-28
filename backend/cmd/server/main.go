@@ -156,7 +156,7 @@ func main() {
 	}))
 	r.Use(chimiddleware.RequestID)
 	r.Use(authmw.TrustedClientIP(trustedCIDRs))
-	r.Use(skipPaths(globalRL.Middleware(), "/health"))
+	r.Use(skipPaths(globalRL.Middleware(), "/health", "/metrics"))
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
@@ -166,6 +166,10 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok","service":"zerotrust"}`)
 	})
 
+	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		writeMetrics(w)
+	})
+
 	r.Get("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
@@ -173,22 +177,25 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(authmw.AuditCSRFFailures(auditRepo))
 		r.Use(authmw.CSRF())
 
-		r.With(loginRL.Middleware()).Post("/auth/login", authHandler.Login)
-		r.With(loginRL.Middleware()).Post("/auth/mfa/challenge", authHandler.MFAChallenge)
-		r.With(tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
-		r.Post("/auth/refresh", authHandler.Refresh)
-		r.Post("/auth/logout", authHandler.Logout)
-		r.Post("/auth/register", authHandler.Register)
-		r.With(loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
-		r.Post("/auth/reset-password", authHandler.ResetPassword)
+		publicAudit := authmw.AuditLog(auditRepo)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/login", authHandler.Login)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/mfa/challenge", authHandler.MFAChallenge)
+		r.With(publicAudit, tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
+		r.With(publicAudit).Post("/auth/refresh", authHandler.Refresh)
+		r.With(publicAudit).Post("/auth/logout", authHandler.Logout)
+		r.With(publicAudit).Post("/auth/register", authHandler.Register)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
+		r.With(publicAudit).Post("/auth/reset-password", authHandler.ResetPassword)
 
 		// SSE stream — auth handled inside handler via cookie (EventSource sends cookies automatically)
-		r.Get("/admin/service-accounts/events", saHandler.Events)
+		r.With(publicAudit).Get("/admin/service-accounts/events", saHandler.Events)
 
 		// Protected routes — ES256 + jti blocklist + audit log
 		r.Group(func(r chi.Router) {
+			r.Use(authmw.AuditAuthFailures(auditRepo))
 			r.Use(authmw.Authenticate(ks, authSvc))
 			r.Use(authmw.AuditLog(auditRepo))
 
@@ -333,6 +340,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+}
+
+func writeMetrics(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	fmt.Fprintf(w, "# HELP zerotrust_audit_write_failures_total Total audit log write failures.\n")
+	fmt.Fprintf(w, "# TYPE zerotrust_audit_write_failures_total counter\n")
+	fmt.Fprintf(w, "zerotrust_audit_write_failures_total %d\n", audit.WriteFailures())
 }
 
 type config struct {
