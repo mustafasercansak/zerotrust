@@ -5,11 +5,16 @@
     "error": "Bir hata oluştu",
     "save": "Kaydet",
     "cancel": "İptal",
+    "retry": "Tekrar dene",
     "logout": "Çıkış Yap",
     "filterAll": "Tümü",
     "filterActive": "Aktif",
     "filterInactive": "Pasif",
-    "filterExpired": "Süresi Dolmuş"
+    "filterExpired": "Süresi Dolmuş",
+    "authBootstrap": {
+      "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+      "server": "Sunucu oturumunuzu şu anda doğrulayamadı. Lütfen tekrar deneyin."
+    }
   },
   "auth": {
     "email": "E-posta",

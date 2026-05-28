@@ -39,19 +39,34 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { i18n } = useTranslation();
-  const { me, setMe, loading } = useAuth();
+  const { me, setMe, loading, bootstrapError, retry } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  if (loading || !me) {
+  if (loading) {
     return (
       <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "background.default" }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
           <CircularProgress size={18} />
           <Typography color="text.secondary">{tCommon("loading")}</Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (bootstrapError || !me) {
+    return (
+      <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "background.default", p: 2 }}>
+        <Box sx={{ display: "grid", gap: 2, width: "min(100%, 420px)" }}>
+          <Alert severity="error">
+            {tCommon(`authBootstrap.${bootstrapError ?? "network"}`)}
+          </Alert>
+          <Button variant="contained" onClick={retry}>
+            {tCommon("retry")}
+          </Button>
         </Box>
       </Box>
     );

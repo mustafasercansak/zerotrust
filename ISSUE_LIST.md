@@ -180,6 +180,8 @@ Status update:
 
 ### 6. Separate auth failures from infrastructure failures in protected-route bootstrap
 
+State: CLOSED
+
 Status: When the frontend fails to load the current user, it redirects straight to the login screen; network problems and expired sessions are treated the same way.
 
 Related files:
@@ -189,6 +191,14 @@ Acceptance criteria:
 - 401 and 403 responses redirect to login.
 - Network failures and 5xx responses show an error state or retry flow.
 - Add frontend tests for this behavior.
+
+Status update:
+- `ApiError` now carries HTTP status so frontend callers can distinguish auth failures from infrastructure failures.
+- Protected-route bootstrap redirects to `/auth/login` only for 401/403 responses.
+- Network failures and 5xx responses stay on the protected route and show a retryable error state.
+- Token refresh during bootstrap preserves network/5xx failures instead of converting them into `missing_token`.
+- Dashboard layout now renders localized retry UI for bootstrap infrastructure failures.
+- Added frontend tests for 401/403 redirect decisions, network/5xx retryable error decisions, refresh failure preservation, and direct API status propagation.
 
 ### 7. Add integration tests for session and refresh race conditions
 

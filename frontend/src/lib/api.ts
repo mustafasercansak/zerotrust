@@ -26,12 +26,18 @@ export interface UserData {
 }
 
 export class ApiError extends Error {
+  status?: number;
   retryAfter?: number;
-  constructor(code: string, retryAfter?: number) {
+  constructor(code: string, retryAfter?: number, status?: number) {
     super(code);
     this.name = "ApiError";
     this.retryAfter = retryAfter;
+    this.status = status;
   }
+}
+
+function isAuthStatus(status?: number): boolean {
+  return status === 401 || status === 403;
 }
 
 export interface ServiceAccount {
@@ -156,7 +162,7 @@ async function refreshTokens(): Promise<void> {
       body: JSON.stringify({ client_info: clientInfo }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(data.error ?? "invalid_token");
+    if (!res.ok) throw new ApiError(data.error ?? "invalid_token", undefined, res.status);
     scheduleRefresh();
   })().finally(() => {
     refreshing = null;
@@ -189,7 +195,7 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
     return undefined as T;
   }
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     const code: string = data.error ?? "internal_error";
@@ -200,12 +206,18 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
       try {
         await refreshTokens();
         return request<T>(path, init, false);
-      } catch {
-        throw new ApiError("missing_token");
+      } catch (err) {
+        if (err instanceof ApiError && !isAuthStatus(err.status)) {
+          throw err;
+        }
+        if (!(err instanceof ApiError)) {
+          throw err;
+        }
+        throw new ApiError("missing_token", undefined, 401);
       }
     }
 
-    throw new ApiError(code, retryAfter);
+    throw new ApiError(code, retryAfter, res.status);
   }
 
   return data as T;

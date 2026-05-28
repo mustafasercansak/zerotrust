@@ -5,11 +5,16 @@
     "error": "An error occurred",
     "save": "Save",
     "cancel": "Cancel",
+    "retry": "Retry",
     "logout": "Log Out",
     "filterAll": "All",
     "filterActive": "Active",
     "filterInactive": "Inactive",
-    "filterExpired": "Expired"
+    "filterExpired": "Expired",
+    "authBootstrap": {
+      "network": "We could not reach the server. Check your connection and try again.",
+      "server": "The server could not verify your session right now. Please try again."
+    }
   },
   "auth": {
     "email": "Email",
