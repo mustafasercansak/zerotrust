@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zerotrust/backend/internal/audit"
 )
@@ -107,5 +110,74 @@ func TestWriteMetricsIncludesAuditWriteFailures(t *testing.T) {
 	want := "zerotrust_audit_write_failures_total " + strconv.FormatUint(before+1, 10)
 	if !strings.Contains(body, want) {
 		t.Fatalf("metrics body=%q want line containing %q", body, want)
+	}
+}
+
+type cleanupTestKey struct{}
+
+type cleanupProbe struct {
+	once    sync.Once
+	ctxSeen chan struct{}
+}
+
+func (p *cleanupProbe) RevokeStaleInitialSessions(ctx context.Context) (int64, error) {
+	p.recordContext(ctx)
+	return 0, nil
+}
+
+func (p *cleanupProbe) DeleteExpired(ctx context.Context) (int64, error) {
+	p.recordContext(ctx)
+	return 0, nil
+}
+
+func (p *cleanupProbe) recordContext(ctx context.Context) {
+	if ctx.Value(cleanupTestKey{}) == "root" {
+		p.once.Do(func() { close(p.ctxSeen) })
+	}
+}
+
+func TestRunSessionCleanupLoopUsesRootContextAndStopsOnCancel(t *testing.T) {
+	base := context.WithValue(context.Background(), cleanupTestKey{}, "root")
+	ctx, cancel := context.WithCancel(base)
+	probe := &cleanupProbe{ctxSeen: make(chan struct{})}
+	done := make(chan struct{})
+
+	go func() {
+		runSessionCleanupLoop(ctx, probe, time.Millisecond, time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-probe.ctxSeen:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("cleanup loop did not call repository with root context")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup loop did not stop after context cancellation")
+	}
+}
+
+func TestWaitForBackgroundHonorsContextDeadline(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+
+	if waitForBackground(ctx, &wg) {
+		t.Fatal("waitForBackground returned true before WaitGroup completed")
+	}
+
+	wg.Done()
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if !waitForBackground(ctx, &wg) {
+		t.Fatal("waitForBackground returned false after WaitGroup completed")
 	}
 }

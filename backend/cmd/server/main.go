@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -42,6 +43,10 @@ func main() {
 		slog.Error("configuration invalid", "error", err)
 		os.Exit(1)
 	}
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	rootCtx, cancelRoot := context.WithCancel(signalCtx)
+	defer cancelRoot()
 
 	if err := database.RunMigrations(cfg.DatabaseURL, cfg.MigrationsPath); err != nil {
 		slog.Error("migration failed", "error", err)
@@ -94,11 +99,23 @@ func main() {
 	saRepo := serviceaccount.NewRepository(db)
 	saSvc := serviceaccount.NewService(saRepo)
 	saHub := serviceaccount.NewEventHub()
-	go saHub.ListenForChanges(context.Background(), cfg.DatabaseURL)
 
 	sessionHub := session.NewEventHub()
 	sessionRepo := session.NewRepository(db, sessionHub)
-	go runSessionCleanup(sessionRepo)
+
+	var background sync.WaitGroup
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		slog.Info("service account listener started")
+		saHub.ListenForChanges(rootCtx, cfg.DatabaseURL)
+		slog.Info("service account listener stopped")
+	}()
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		runSessionCleanup(rootCtx, sessionRepo)
+	}()
 
 	auditRepo := audit.NewRepository(db)
 	auditHandler := audit.NewHandler(auditRepo)
@@ -328,22 +345,43 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("server starting", "addr", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+			serverErr <- err
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	serverFailed := false
+	select {
+	case <-rootCtx.Done():
+		slog.Info("shutdown signal received")
+	case err := <-serverErr:
+		serverFailed = true
+		slog.Error("server error", "error", err)
+		cancelRoot()
+		stopSignals()
+	}
 
-	slog.Info("shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	srv.Shutdown(ctx)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server shutdown failed", "error", err)
+	} else {
+		slog.Info("server stopped")
+	}
+
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer workerCancel()
+	if waitForBackground(workerCtx, &background) {
+		slog.Info("background workers stopped")
+	} else {
+		slog.Error("background workers did not stop before timeout")
+	}
+	if serverFailed {
+		os.Exit(1)
+	}
 }
 
 func writeMetrics(w http.ResponseWriter) {
@@ -478,23 +516,58 @@ func skipPaths(mw func(http.Handler) http.Handler, paths ...string) func(http.Ha
 //     logins, bots, closed tabs). Other connected clients see a real-time "change"
 //     event and show a snackbar.
 //   - Every hour: delete rows that are expired or already revoked.
-func runSessionCleanup(repo *session.Repository) {
-	staleTicker := time.NewTicker(30 * time.Second)
-	purgeTicker := time.NewTicker(time.Hour)
+type sessionCleaner interface {
+	RevokeStaleInitialSessions(ctx context.Context) (int64, error)
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+func waitForBackground(ctx context.Context, wg *sync.WaitGroup) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func runSessionCleanup(ctx context.Context, repo sessionCleaner) {
+	runSessionCleanupLoop(ctx, repo, 30*time.Second, time.Hour)
+}
+
+func runSessionCleanupLoop(ctx context.Context, repo sessionCleaner, staleInterval, purgeInterval time.Duration) {
+	staleTicker := time.NewTicker(staleInterval)
+	purgeTicker := time.NewTicker(purgeInterval)
 	defer staleTicker.Stop()
 	defer purgeTicker.Stop()
 
+	slog.Info("session cleanup worker started")
+	defer slog.Info("session cleanup worker stopped")
+
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-staleTicker.C:
-			n, err := repo.RevokeStaleInitialSessions(context.Background())
+			if ctx.Err() != nil {
+				return
+			}
+			n, err := repo.RevokeStaleInitialSessions(ctx)
 			if err != nil {
 				slog.Error("stale session revocation failed", "error", err)
 			} else if n > 0 {
 				slog.Info("stale initial sessions revoked", "count", n)
 			}
 		case <-purgeTicker.C:
-			n, err := repo.DeleteExpired(context.Background())
+			if ctx.Err() != nil {
+				return
+			}
+			n, err := repo.DeleteExpired(ctx)
 			if err != nil {
 				slog.Error("session cleanup failed", "error", err)
 			} else if n > 0 {

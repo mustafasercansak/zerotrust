@@ -157,6 +157,8 @@ Status update:
 
 ### 5. Add graceful shutdown support for background workers
 
+State: CLOSED
+
 Status: Session cleanup and the service account listener are not tied to the application lifecycle.
 
 Related files:
@@ -166,6 +168,15 @@ Acceptance criteria:
 - Background goroutines run under a root context.
 - SIGTERM triggers cancelation, drain, and clean shutdown behavior.
 - Add basic lifecycle logging if practical.
+
+Status update:
+- Added a root signal context shared by the HTTP server shutdown path and background workers.
+- Service account PostgreSQL listener now runs under the root context and exits cleanly on cancellation without logging expected shutdown as a retryable disconnect.
+- Session cleanup now runs under the root context, passes cancellation-aware contexts into repository calls, and exits when shutdown starts.
+- Added `WaitGroup`-based worker drain with a bounded timeout after HTTP server shutdown.
+- Unexpected HTTP server failures now explicitly cancel the root context and drain background workers before exiting.
+- Added lifecycle logs for worker start/stop, signal receipt, server stop, and background worker drain result.
+- Added backend tests proving session cleanup uses the root context, stops on cancellation, and worker drain honors context deadlines.
 
 ### 6. Separate auth failures from infrastructure failures in protected-route bootstrap
 

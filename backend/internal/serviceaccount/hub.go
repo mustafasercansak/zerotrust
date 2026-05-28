@@ -55,6 +55,9 @@ func (h *EventHub) ListenForChanges(ctx context.Context, connStr string) {
 			return
 		}
 		if err := h.listenOnce(ctx, connStr); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			slog.Warn("pg listener disconnected, retrying", "error", err)
 			select {
 			case <-ctx.Done():
@@ -70,7 +73,13 @@ func (h *EventHub) listenOnce(ctx context.Context, connStr string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := conn.Close(closeCtx); err != nil {
+			slog.Warn("pg listener close failed", "error", err)
+		}
+	}()
 
 	if _, err := conn.Exec(ctx, "LISTEN service_accounts_changed"); err != nil {
 		return err
