@@ -228,6 +228,8 @@ Status update:
 
 ### 8. Add tests and policy validation for the service account lifecycle
 
+State: CLOSED
+
 Status: The service account surface is important, but its test coverage is weak.
 
 Related files:
@@ -239,6 +241,14 @@ Acceptance criteria:
 - Expired accounts must not be able to obtain tokens.
 - Unauthorized scope requests must be rejected.
 - Status changes must correctly affect token issuance.
+
+Status update:
+- Added auth service tests proving client-credentials tokens include only the stored service-account scopes.
+- Added tests proving expired, inactive, and invalid-secret service accounts cannot obtain tokens.
+- Added a status-change test proving token issuance stops after a service account becomes inactive.
+- Added service-level scope policy tests for allowed scopes, unknown scopes, missing caller claims, and scopes the caller does not hold.
+- Added handler tests for create/update scope-policy errors and not-found behavior.
+- `PATCH /service-accounts/{id}/status` and `DELETE /service-accounts/{id}` now return `404 not_found` when the target account does not exist instead of silently succeeding.
 
 ## P2
 

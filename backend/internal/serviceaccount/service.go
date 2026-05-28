@@ -14,11 +14,14 @@ var ErrUnknownScope = errors.New("unknown_scope")
 var ErrForbiddenScope = errors.New("forbidden_scope")
 
 type Service struct {
-	repo *Repository
+	repo           *Repository
+	scopeValidator interface {
+		allPermissions(ctx context.Context) (map[string]bool, error)
+	}
 }
 
 func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, scopeValidator: repo}
 }
 
 // Create creates a new service account and returns it along with the plaintext secret.
@@ -40,7 +43,7 @@ func (s *Service) Update(ctx context.Context, id, name string, caller *auth.Clai
 
 func (s *Service) validateScopes(ctx context.Context, caller *auth.Claims, scopes []string) error {
 	if len(scopes) > 0 {
-		known, err := s.repo.allPermissions(ctx)
+		known, err := s.scopeValidator.allPermissions(ctx)
 		if err != nil {
 			return err
 		}

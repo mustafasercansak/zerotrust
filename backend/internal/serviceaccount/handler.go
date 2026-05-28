@@ -16,10 +16,18 @@ import (
 )
 
 type Handler struct {
-	svc     *Service
+	svc     serviceAccountService
 	hub     *EventHub
 	ks      *auth.KeyStore
 	authSvc *auth.Service
+}
+
+type serviceAccountService interface {
+	Create(ctx context.Context, name, createdBy string, caller *auth.Claims, scopes []string, expiresAt *time.Time) (*ServiceAccount, string, error)
+	Update(ctx context.Context, id, name string, caller *auth.Claims, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error)
+	List(ctx context.Context, p ListParams) (ListResult, error)
+	Revoke(ctx context.Context, id string) error
+	SetActive(ctx context.Context, id string, active bool) error
 }
 
 func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore, authSvc *auth.Service) *Handler {
@@ -196,6 +204,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.Revoke(r.Context(), id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
@@ -213,6 +225,10 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.SetActive(r.Context(), id, req.IsActive); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}

@@ -205,7 +205,13 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 }
 
 func (r *Repository) Revoke(ctx context.Context, id string) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM service_accounts WHERE id = $1`, id)
+	tag, err := r.db.Exec(ctx, `DELETE FROM service_accounts WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
 	return err
 }
 
@@ -254,7 +260,13 @@ func (r *Repository) Update(ctx context.Context, id, name string, scopes []strin
 }
 
 func (r *Repository) SetActive(ctx context.Context, id string, active bool) error {
-	_, err := r.db.Exec(ctx, `UPDATE service_accounts SET is_active = $2 WHERE id = $1`, id, active)
+	tag, err := r.db.Exec(ctx, `UPDATE service_accounts SET is_active = $2 WHERE id = $1`, id, active)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
 	return err
 }
 
