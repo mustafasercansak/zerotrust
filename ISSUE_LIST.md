@@ -131,6 +131,8 @@ Status update:
 
 ### 4. Make MFA configuration fail fast
 
+State: CLOSED
+
 Status: If the MFA key is invalid, the application continues running with only a warning.
 
 Related files:
@@ -141,6 +143,15 @@ Acceptance criteria:
 - If the flag is enabled and the key is invalid, the service must fail to start.
 - If the flag is disabled, the behavior should remain intentionally disabled.
 - Update README and environment variable documentation.
+
+Status update:
+- Added explicit `MFA_ENABLED` feature flag.
+- `MFA_ENABLED=true` now requires a valid 64-character hex / 32-byte `MFA_ENCRYPTION_KEY`; missing, invalid, or malformed values fail config loading before startup.
+- `MFA_ENABLED=false` keeps MFA intentionally disabled; any configured `MFA_ENCRYPTION_KEY` is ignored and not retained in config.
+- Invalid `MFA_ENABLED` values fail config loading instead of silently disabling MFA.
+- Step-up protected admin actions fail closed while MFA is disabled.
+- Updated README and Docker Compose environment examples.
+- Added backend config tests for disabled, enabled, missing-key, invalid-key, valid-key, and invalid-flag cases.
 
 ## P1
 

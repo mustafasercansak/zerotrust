@@ -37,7 +37,11 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		slog.Error("configuration invalid", "error", err)
+		os.Exit(1)
+	}
 
 	if err := database.RunMigrations(cfg.DatabaseURL, cfg.MigrationsPath); err != nil {
 		slog.Error("migration failed", "error", err)
@@ -103,13 +107,13 @@ func main() {
 	var mfaSvc *mfa.Service
 	var mfaHandler *mfa.Handler
 	const stepUpMFAWindow = 10 * time.Minute
-	if len(cfg.MFAEncryptionKey) == 32 {
+	if cfg.MFAEnabled {
 		mfaRepo := mfa.NewRepository(db)
 		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb)
 		mfaHandler = mfa.NewHandler(mfaSvc, rdb, stepUpMFAWindow)
 		slog.Info("MFA enabled")
 	} else {
-		slog.Warn("MFA_ENCRYPTION_KEY not set or invalid — MFA disabled")
+		slog.Info("MFA disabled by configuration")
 	}
 
 	// Password reset mailer
@@ -360,6 +364,7 @@ type config struct {
 	TLSEnabled               bool
 	CookiesSecure            bool
 	RegistrationEnabled      bool
+	MFAEnabled               bool
 	CORSOrigins              []string
 	TrustedProxies           string
 	InitialAdminEmail        string
@@ -373,19 +378,33 @@ type config struct {
 	PublicAppURL             string
 }
 
-func loadConfig() config {
+func loadConfig() (config, error) {
 	tlsEnabled := getEnv("TLS_ENABLED", "false") == "true"
 	cookiesSecure := getEnv("COOKIES_SECURE", "false") == "true"
 	registrationEnabled := getEnv("REGISTRATION_ENABLED", "false") == "true"
+	mfaEnabled, err := boolEnv("MFA_ENABLED", false)
+	if err != nil {
+		return config{}, err
+	}
 	origins := strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"), ",")
 
-	var mfaKey []byte
-	if keyHex := getEnv("MFA_ENCRYPTION_KEY", ""); keyHex != "" {
-		if b, err := hex.DecodeString(keyHex); err == nil && len(b) == 32 {
-			mfaKey = b
-		} else {
-			slog.Warn("MFA_ENCRYPTION_KEY is set but invalid (must be 64 hex chars / 32 bytes)")
+	keyHex := getEnv("MFA_ENCRYPTION_KEY", "")
+	if !mfaEnabled {
+		if keyHex != "" {
+			slog.Warn("MFA_ENCRYPTION_KEY is set but ignored because MFA_ENABLED is false")
 		}
+		keyHex = ""
+	} else if keyHex == "" {
+		return config{}, fmt.Errorf("MFA_ENABLED=true requires MFA_ENCRYPTION_KEY")
+	}
+
+	var mfaKey []byte
+	if keyHex != "" {
+		b, err := hex.DecodeString(keyHex)
+		if err != nil || len(b) != 32 {
+			return config{}, fmt.Errorf("MFA_ENABLED=true requires MFA_ENCRYPTION_KEY to be 64 hex chars / 32 bytes")
+		}
+		mfaKey = b
 	}
 
 	return config{
@@ -399,6 +418,7 @@ func loadConfig() config {
 		TLSEnabled:               tlsEnabled,
 		CookiesSecure:            cookiesSecure,
 		RegistrationEnabled:      registrationEnabled,
+		MFAEnabled:               mfaEnabled,
 		CORSOrigins:              origins,
 		TrustedProxies:           getEnv("TRUSTED_PROXIES", ""),
 		InitialAdminEmail:        getEnv("INITIAL_ADMIN_EMAIL", ""),
@@ -410,7 +430,7 @@ func loadConfig() config {
 		SMTPUser:                 getEnv("SMTP_USER", ""),
 		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
 		PublicAppURL:             getEnv("PUBLIC_APP_URL", "http://localhost:3000"),
-	}
+	}, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -418,6 +438,21 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func boolEnv(key string, fallback bool) (bool, error) {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return fallback, nil
+	}
+	switch v {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", key)
+	}
 }
 
 func skipPaths(mw func(http.Handler) http.Handler, paths ...string) func(http.Handler) http.Handler {
