@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -219,15 +220,9 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/v1/admin/service-accounts/events — SSE stream.
-// Auth: httpOnly cookie (same-origin EventSource sends it automatically) with ?token= fallback.
+// Auth: httpOnly cookie for browser EventSource, or Authorization: Bearer for API clients.
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
-	token := ""
-	if c, err := r.Cookie("access_token"); err == nil {
-		token = c.Value
-	}
-	if token == "" {
-		token = r.URL.Query().Get("token")
-	}
+	token := eventAccessToken(r)
 	if token == "" {
 		writeError(w, http.StatusUnauthorized, "missing_token")
 		return
@@ -277,6 +272,17 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func eventAccessToken(r *http.Request) string {
+	if c, err := r.Cookie("access_token"); err == nil && c.Value != "" {
+		return c.Value
+	}
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, "Bearer ") {
+		return ""
+	}
+	return strings.TrimPrefix(h, "Bearer ")
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

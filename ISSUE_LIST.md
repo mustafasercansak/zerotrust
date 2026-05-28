@@ -79,6 +79,8 @@ Status update:
 
 ### 2. Remove query parameter token support from the service account SSE endpoint
 
+State: CLOSED
+
 Status: Accepting an access token via URL query string increases token leakage risk.
 
 Related files:
@@ -88,6 +90,12 @@ Acceptance criteria:
 - The endpoint only accepts secure transport methods.
 - Token transport outside cookies or the Authorization header is removed.
 - Update the frontend SSE flow if needed.
+
+Status update:
+- Removed `?token=` fallback from the service account SSE endpoint.
+- The endpoint now accepts only the httpOnly `access_token` cookie or `Authorization: Bearer`.
+- Frontend already uses the same-origin EventSource URL and did not require changes.
+- Added backend tests proving query tokens are rejected and cookie/Bearer token transport still works.
 
 ### 3. Make audit log writes reliable and observable
 
