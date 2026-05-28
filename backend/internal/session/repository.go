@@ -15,6 +15,7 @@ import (
 var ErrNotFound = errors.New("session_not_found")
 
 const activeSessionWindowSQL = "5 minutes"
+const tokenReuseGraceSQL = "5 seconds"
 
 type Repository struct {
 	db  *pgxpool.Pool
@@ -161,13 +162,17 @@ func (r *Repository) Revoke(ctx context.Context, hash string) error {
 // was previously rotated (is_revoked = true). If so, it returns the owning
 // userID — the caller should treat this as evidence of token theft and revoke
 // all remaining sessions for that user.
+// Very recent rotations are ignored to avoid treating legitimate duplicate
+// refresh requests racing with each other as token theft.
 func (r *Repository) CheckReuse(ctx context.Context, hash string) (string, error) {
 	var userID string
 	err := r.db.QueryRow(ctx, `
 		SELECT user_id FROM sessions
-		WHERE refresh_token_hash = $1 AND is_revoked = true
+		WHERE refresh_token_hash = $1
+		  AND is_revoked = true
+		  AND COALESCE(last_used_at, created_at) <= now() - $2::interval
 		LIMIT 1
-	`, hash).Scan(&userID)
+	`, hash, tokenReuseGraceSQL).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil

@@ -202,6 +202,8 @@ Status update:
 
 ### 7. Add integration tests for session and refresh race conditions
 
+State: CLOSED
+
 Status: Critical auth paths have limited test coverage. In particular, concurrent refresh, token reuse, and session revoke scenarios are under-tested.
 
 Related files:
@@ -214,6 +216,15 @@ Acceptance criteria:
 - Add a test covering global revoke behavior after token reuse.
 - Add a test for revoking all sessions except the current one.
 - Ensure the tests run in CI.
+
+Status update:
+- Added Postgres-backed integration tests for refresh/session lifecycle behavior.
+- Concurrent refresh with the same refresh token now proves exactly one request wins and the winner's rotated session remains active.
+- Refreshing with a revoked token returns `ErrInvalidToken`.
+- Reusing an older rotated token beyond the short race grace period revokes all active sessions for the user.
+- Revoke-other-sessions now has an integration test proving the current session is preserved and every other active session is revoked.
+- Added a short token-reuse grace window so legitimate duplicate refresh requests racing with a successful rotation are not treated as theft while delayed reuse still triggers global revoke.
+- CI now starts PostgreSQL for backend tests and sets `TEST_DATABASE_URL`, so these integration tests run in CI.
 
 ### 8. Add tests and policy validation for the service account lifecycle
 
