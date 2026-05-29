@@ -313,9 +313,22 @@ func main() {
 				}
 				defer file.Close()
 
-				contentType := header.Header.Get("Content-Type")
-				if contentType != "image/jpeg" && contentType != "image/png" {
+				// Sniff the first 512 bytes of the file to detect its actual content type.
+				buf := make([]byte, 512)
+				n, err := file.Read(buf)
+				if err != nil && err != io.EOF {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				detectedType := http.DetectContentType(buf[:n])
+				if detectedType != "image/jpeg" && detectedType != "image/png" {
 					http.Error(w, `{"error":"invalid_file_type"}`, http.StatusBadRequest)
+					return
+				}
+
+				// Reset read pointer to the beginning of the file so io.Copy can write the whole content.
+				if _, err := file.Seek(0, io.SeekStart); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
 				}
 

@@ -460,8 +460,10 @@ func (h *Handler) writeCookies(w http.ResponseWriter, r *http.Request, pair *Tok
 		MaxAge:   int(RefreshTTL.Seconds()),
 	})
 	// csrf_token: reuse existing cookie value if present and valid to prevent rotation races
+	// We only reuse it during background token refresh to avoid race conditions. For initial login,
+	// registration, and MFA verification we always rotate the CSRF token to prevent session fixation.
 	csrfVal := ""
-	if r != nil {
+	if r != nil && r.URL.Path == "/api/v1/auth/refresh" {
 		if c, err := r.Cookie("csrf_token"); err == nil && c.Value != "" {
 			csrfVal = c.Value
 		}

@@ -325,19 +325,19 @@ export default function UsersPage() {
     {
       field: "email", headerName: t("user"), minWidth: 280, flex: 1.45,
       renderCell: ({ row }) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, minWidth: 0 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, minWidth: 0, height: "100%" }}>
           <Avatar
             src={row.has_avatar ? `/api/v1/users/${row.id}/avatar` : undefined}
             sx={{ width: 32, height: 32, fontSize: 13 }}
           >
             {userInitials(row)}
           </Avatar>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" noWrap sx={{ fontWeight: fullName(row) ? 700 : 500 }}>
+          <Box sx={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <Typography variant="body2" noWrap sx={{ fontWeight: fullName(row) ? 700 : 500, lineHeight: 1.2 }}>
               {fullName(row) || row.email}
             </Typography>
             {fullName(row) && (
-              <Typography variant="caption" color="text.secondary" noWrap>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ lineHeight: 1.2, mt: 0.25 }}>
                 {row.email}
               </Typography>
             )}
@@ -444,6 +444,7 @@ export default function UsersPage() {
         defaultSortDir="desc"
         pageSizeOptions={[10, 25, 50]}
         defaultPageSize={25}
+        rowHeight={64}
       />
 
       {/* ── Create user dialog ── */}

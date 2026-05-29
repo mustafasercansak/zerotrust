@@ -31,6 +31,7 @@ interface ResourceTablePageProps<T extends GridValidRowModel> {
   refreshSignal?: number;
   liveRefreshMs?: number;
   eventSourceUrl?: string;
+  rowHeight?: number;
 }
 
 /**
@@ -53,6 +54,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
   refreshSignal = 0,
   liveRefreshMs = 5_000,
   eventSourceUrl,
+  rowHeight,
 }: ResourceTablePageProps<T>) {
   const { t } = useTranslation("common");
 
@@ -185,6 +187,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
       )}
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <DataGrid
+          rowHeight={rowHeight}
           rows={rows}
           columns={columns}
           getRowId={getRowId}

@@ -459,3 +459,67 @@ Status update:
 - Integrated upload and delete controls directly inside the Profile Settings dialog in `DashboardLayout.tsx`.
 - Updated users list page `UsersPage.tsx` to load user avatar images.
 
+---
+
+### 19. Verify magic bytes for avatar uploads using content sniffing
+
+State: CLOSED
+
+Status: The avatar upload endpoint validates file types using the client-provided `Content-Type` header. An attacker can spoof this header to upload HTML/JS payloads. If the file is requested directly, it might be sniffed by the browser as `text/html`, leading to Stored XSS.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Sniff the first 512 bytes of the uploaded file on the backend using `http.DetectContentType`.
+- Reject the upload if the sniffed content type is not `image/jpeg` or `image/png`.
+- Reset the file read pointer using `file.Seek(0, io.SeekStart)` before writing it to disk.
+
+Status update:
+- Integrated content sniffing via `http.DetectContentType` on the first 512 bytes of uploaded avatars.
+- Rejected requests containing non-image bytes (non `image/jpeg` and `image/png`) with a bad request status.
+- Seeking back to the beginning of the stream before writing prevents incomplete reads.
+
+---
+
+### 20. Rotate CSRF tokens during login state changes and limit reuse to background refreshes
+
+State: CLOSED
+
+Status: The current CSRF token reuse logic reuses the active cookie on initial login, registration, and MFA challenge steps if a token cookie is already present in the browser. This misses proper rotation on privilege/session transitions, posing a potential session/CSRF fixation risk.
+
+Related files:
+- [backend/internal/auth/handler.go](/home/m/projects/zerotrust/backend/internal/auth/handler.go)
+
+Acceptance criteria:
+- Limit CSRF token reuse strictly to requests sent to the `/api/v1/auth/refresh` endpoint.
+- Always rotate (generate a new token) during login, registration, and MFA challenge/verification endpoints.
+
+Status update:
+- Restricted the CSRF reuse condition in `writeCookies` to requests directed specifically to `/api/v1/auth/refresh`.
+- All other authentication entrypoints (login, registration, MFA steps) now force generation of a new token.
+
+---
+
+### 21. Fix user name, surname, and avatar alignment clipping on Users page
+
+State: CLOSED
+
+Status: In the users list table, rows displaying both a name/surname and email address are taller than standard single-line rows, causing the name text to be pushed up and clipped at the top of the cell.
+
+Related files:
+- [frontend/src/components/ResourceTablePage.tsx](/home/m/projects/zerotrust/frontend/src/components/ResourceTablePage.tsx)
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+
+Acceptance criteria:
+- Add an optional `rowHeight` prop to `ResourceTablePage`.
+- Set `rowHeight={64}` in `UsersPage.tsx` to give rows with multi-line text enough room.
+- Ensure the name and email text layouts are vertically centered and have proper line heights.
+
+Status update:
+- Added `rowHeight` prop to the reusable `ResourceTablePageProps` type and passed it to the MUI `DataGrid`.
+- Configured a generous `rowHeight={64}` for the users page table to handle name and email entries safely.
+- Wrapped user column text components with a column-flex container having `justifyContent: "center"` and explicit `lineHeight: 1.2`.
+
+
+
