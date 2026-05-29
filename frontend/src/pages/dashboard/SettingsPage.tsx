@@ -189,7 +189,7 @@ export default function SettingsPage() {
         </Box>
 
         {activeTab === 0 && (
-          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 4, display: "grid", gap: 3, maxWidth: 600 }}>
+          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 4, display: "grid", gap: 3 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("title")}</Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
               <Avatar
@@ -229,7 +229,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 2 && isAdmin && (
-          <Paper variant="outlined" component="form" onSubmit={handleSystemSave} sx={{ p: 4, display: "grid", gap: 3, maxWidth: 600 }}>
+          <Paper variant="outlined" component="form" onSubmit={handleSystemSave} sx={{ p: 4, display: "grid", gap: 3 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("title")}</Typography>
             {systemLoading ? (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
