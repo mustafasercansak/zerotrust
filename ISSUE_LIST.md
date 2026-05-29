@@ -340,5 +340,7 @@ Status update:
 - Registered a fallback `/api/v1/mfa/status` handler when `MFA_ENABLED=false` that returns `{"enabled": false, "supported": false}` instead of triggering a 404 error.
 - Updated frontend `api.ts` types to support `supported` attribute.
 - Created `unsupported` localization descriptors and updated frontend `MfaPage.tsx` to cleanly present a warning indicating MFA is disabled by system administrator.
+- Modified `docker-compose.yml` environment block to load `MFA_ENABLED` and `MFA_ENCRYPTION_KEY` variables from the `.env` file instead of hardcoding them.
+- Updated `generate-secrets.sh` to automatically output random `MFA_ENCRYPTION_KEY` values to `infra/.env`, and translated the entire shell script from Turkish to English for better accessibility.
 
 
