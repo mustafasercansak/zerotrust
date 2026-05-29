@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/useAuth";
 import { cancelRefresh } from "@/lib/tokenManager";
@@ -203,7 +203,15 @@ export default function DashboardLayout() {
 
         {/* ── Page content ──────────────────────────────────────────── */}
         <Box component="main" sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Outlet />
+          <Suspense
+            fallback={
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                <CircularProgress size={24} />
+              </Box>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </Box>
         <Dialog open={profileOpen} onClose={() => setProfileOpen(false)} fullWidth maxWidth="xs">
           <Box component="form" onSubmit={handleProfileSave}>

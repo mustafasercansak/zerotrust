@@ -8,13 +8,15 @@ import DashboardLayout from "./components/DashboardLayout";
 import LoginPage from "./pages/auth/LoginPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
-import HomePage from "./pages/dashboard/HomePage";
-import SessionsPage from "./pages/dashboard/SessionsPage";
-import UsersPage from "./pages/dashboard/UsersPage";
-import AuditPage from "./pages/dashboard/AuditPage";
-import ServiceAccountsPage from "./pages/dashboard/ServiceAccountsPage";
-import SettingsPage from "./pages/dashboard/SettingsPage";
-import MfaPage from "./pages/dashboard/MfaPage";
+import { lazy } from "react";
+
+const HomePage = lazy(() => import("./pages/dashboard/HomePage"));
+const SessionsPage = lazy(() => import("./pages/dashboard/SessionsPage"));
+const UsersPage = lazy(() => import("./pages/dashboard/UsersPage"));
+const AuditPage = lazy(() => import("./pages/dashboard/AuditPage"));
+const ServiceAccountsPage = lazy(() => import("./pages/dashboard/ServiceAccountsPage"));
+const SettingsPage = lazy(() => import("./pages/dashboard/SettingsPage"));
+const MfaPage = lazy(() => import("./pages/dashboard/MfaPage"));
 
 export default function App() {
   return (
