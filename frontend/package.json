@@ -17,6 +17,7 @@
     "@mui/material": "^9.0.1",
     "@mui/x-data-grid": "^9.3.0",
     "i18next": "^24.0.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.0.0",

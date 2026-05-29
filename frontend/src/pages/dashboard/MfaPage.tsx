@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { DashboardPage } from "@/components/DashboardPage";
+import { QRCodeSVG } from "qrcode.react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -139,21 +140,32 @@ export default function MfaPage() {
               </Box>
               <Typography variant="body2" color="text.secondary">{t("setupInstructions")}</Typography>
             </Box>
-            <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
-              <Typography variant="overline" color="text.secondary">{t("secretLabel")}</Typography>
-              <Typography variant="body2" color="success.main" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
-                {setupData.secret}
-              </Typography>
-              <Link href={setupData.otp_auth_url} sx={{ display: "block", mt: 1, overflowWrap: "anywhere" }}>
-                {t("openInApp")}
-              </Link>
-            </Box>
-            <Box component="form" onSubmit={handleVerify} sx={{ alignItems: { xs: "stretch", sm: "center" }, display: "flex", flexWrap: "wrap", gap: 1.5 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 320px" }}>{t("verifyPrompt")}</Typography>
-              {codeField}
-              <Button type="submit" variant="contained" disabled={submitting || code.length !== 6}>
-                {submitting ? "..." : t("verifyButton")}
-              </Button>
+
+            <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, gap: 3 }}>
+              {/* QR Code Container - styled as a premium high-contrast white card */}
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", bgcolor: "#ffffff", p: 1.5, borderRadius: 2, border: 1, borderColor: "divider", width: { xs: "100%", md: 180 }, height: 180, flexShrink: 0 }}>
+                <QRCodeSVG value={setupData.otp_auth_url} size={156} includeMargin={false} />
+              </Box>
+
+              {/* Instructions and Manual setup details */}
+              <Box sx={{ display: "grid", gap: 2, flexGrow: 1 }}>
+                <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
+                  <Typography variant="overline" color="text.secondary">{t("secretLabel")}</Typography>
+                  <Typography variant="body2" color="success.main" sx={{ fontFamily: "monospace", overflowWrap: "anywhere", fontWeight: 700 }}>
+                    {setupData.secret}
+                  </Typography>
+                  <Link href={setupData.otp_auth_url} sx={{ display: "block", mt: 1, overflowWrap: "anywhere" }}>
+                    {t("openInApp")}
+                  </Link>
+                </Box>
+                <Box component="form" onSubmit={handleVerify} sx={{ alignItems: { xs: "stretch", sm: "center" }, display: "flex", flexWrap: "wrap", gap: 1.5 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 320px" }}>{t("verifyPrompt")}</Typography>
+                  {codeField}
+                  <Button type="submit" variant="contained" disabled={submitting || code.length !== 6}>
+                    {submitting ? "..." : t("verifyButton")}
+                  </Button>
+                </Box>
+              </Box>
             </Box>
             {error && <Alert severity="error">{error}</Alert>}
           </Box>

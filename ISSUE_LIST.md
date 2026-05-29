@@ -343,4 +343,23 @@ Status update:
 - Modified `docker-compose.yml` environment block to load `MFA_ENABLED` and `MFA_ENCRYPTION_KEY` variables from the `.env` file instead of hardcoding them.
 - Updated `generate-secrets.sh` to automatically output random `MFA_ENCRYPTION_KEY` values to `infra/.env`, and translated the entire shell script from Turkish to English for better accessibility.
 
+### 14. Add QR code representation on MFA setup page
 
+State: CLOSED
+
+Status: The MFA setup flow only displays a manual secret string and an "open in app" link. It does not display a QR code, which is the standard for scanning with mobile authenticator apps.
+
+Related files:
+- [frontend/package.json](/home/m/projects/zerotrust/frontend/package.json)
+- [frontend/src/pages/dashboard/MfaPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/MfaPage.tsx)
+
+Acceptance criteria:
+- Install a client-side QR code generator package (e.g. `qrcode.react`) in the frontend.
+- Render the QR code in `MfaPage.tsx` using `otp_auth_url` from the setup response.
+- Style the QR code nicely with a container, a clean border, and clear user instructions in both English and Turkish.
+- Verify that the layout remains responsive and fits well in the dashboard view.
+
+Status update:
+- Installed `qrcode.react` package in the frontend application.
+- Integrated `QRCodeSVG` into the MFA setup block inside `MfaPage.tsx`, displaying the generated QR code in a high-contrast container for seamless mobile scanning.
+- Confirmed the page layout is responsive and successfully verified compilation through a clean production build (`npm run build`).
