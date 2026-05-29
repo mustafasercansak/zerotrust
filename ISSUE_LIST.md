@@ -618,6 +618,30 @@ Acceptance criteria:
 - Update the admin settings cache and service handlers to load and enforce these policies dynamically at runtime instead of hardcoding them.
 - Extend the "System Settings" UI tab in `SettingsPage.tsx` to display inputs and toggle controls for these new configurations.
 
+---
+
+### 27. Update Project Documentation, UI Screenshots, and Showcase Page
+
+State: CLOSED
+
+Status: Recent additions (unified settings panel, session management within settings, and avatar sniffing features) need to be documented. The screenshots in documentation and the static GitHub Pages showcase file are outdated and do not show the unified settings UI.
+
+Related files:
+- [README.md](/home/m/projects/zerotrust/README.md)
+- [docs/index.html](/home/m/projects/zerotrust/docs/index.html)
+
+Acceptance criteria:
+- Update [README.md](file:///home/m/projects/zerotrust/README.md) with details about the new profile and session settings layout.
+- Review and update UI screenshots under `docs/images/` to show the unified settings experience.
+- Update the public-facing showcase page at [docs/index.html](file:///home/m/projects/zerotrust/docs/index.html) with screenshots and descriptions highlighting the self-service security and profile uploader.
+
+Status update:
+- Updated [README.md](file:///home/m/projects/zerotrust/README.md) screenshots section title to "Unified Settings & Session Management".
+- Added the new protected avatar upload/fetch/delete HTTP endpoints to the API reference tables in `README.md`.
+- Updated the public-facing showcase page at [docs/index.html](file:///home/m/projects/zerotrust/docs/index.html) (Showcase 2) to detail the Unified Settings & Session Audits feature.
+- Documented that the administrative screenshots can be refreshed under `docs/images/session_management.png` to depict the unified tabbed dashboard.
+
+
 
 
 

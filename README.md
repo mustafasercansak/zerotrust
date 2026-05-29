@@ -27,7 +27,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 ### Dashboard Overview
 ![Dashboard Overview](docs/images/dashboard.png)
 
-### Active Sessions Management
+### Unified Settings & Session Management
 ![Session Management](docs/images/session_management.png)
 
 ### Multi-Factor Authentication (MFA) Setup with QR Code
@@ -179,6 +179,10 @@ zerotrust/
 | GET | `/api/v1/me` | Current user info |
 | PATCH | `/api/v1/me/profile` | Update current user's name fields |
 | PATCH | `/api/v1/me/locale` | Update current user's language |
+| POST | `/api/v1/me/avatar` | Upload user profile picture (jpeg/png, max 2MB) |
+| GET | `/api/v1/me/avatar` | Get current user's profile picture |
+| GET | `/api/v1/users/{id}/avatar` | Get specific user's profile picture |
+| DELETE | `/api/v1/me/avatar` | Delete current user's profile picture |
 | GET | `/api/v1/sessions` | List active sessions |
 | GET | `/api/v1/sessions/events` | Session change event stream |
 | DELETE | `/api/v1/sessions` | Revoke all other sessions |
