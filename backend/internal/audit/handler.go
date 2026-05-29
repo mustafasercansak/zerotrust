@@ -19,7 +19,7 @@ type pagedResponse struct {
 	Total int        `json:"total"`
 }
 
-// GET /api/v1/admin/audit?limit=25&offset=0&sort_by=created_at&sort_dir=desc&action=login&user_id=...
+// GET /api/v1/admin/audit?limit=25&offset=0&sort_by=created_at&sort_dir=desc&action=login&user_id=...&outcome=success
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	result, err := h.repo.List(r.Context(), ListParams{
@@ -30,6 +30,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Action:   q.Get("action"),
 		UserID:   q.Get("user_id"),
 		Resource: q.Get("resource"),
+		Outcome:  q.Get("outcome"),
 	})
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -40,6 +41,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pagedResponse{Data: result.Entries, Total: result.Total})
+}
+
+// GET /api/v1/admin/audit/trends
+func (h *Handler) Trends(w http.ResponseWriter, r *http.Request) {
+	points, err := h.repo.Trends(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(points)
 }
 
 func queryInt(s string, def int) int {

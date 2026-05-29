@@ -551,7 +551,7 @@ Status update:
 
 ### 23. Add Interactive Charts and Search Filters to Admin Audit Logs
 
-State: OPEN
+State: CLOSED
 
 Status: The current admin audit page shows a simple, un-paged table of raw log events with no search, filtering, or visual metrics.
 
@@ -562,6 +562,11 @@ Related files:
 Acceptance criteria:
 - Integrate search inputs and filters (filter by user, IP address, action name, or outcome).
 - Render visual analytics charts (e.g., success vs. failure ratios over time) to easily spot brute-force attacks or access anomalies.
+
+Status update:
+- Extended the backend repository and handler with dynamic `outcome` query parameters and a database query summarizing success/failure trends for the last 7 days.
+- Designed and built a lightweight, native SVG line chart to plot daily security anomalies without relying on extra UI chart dependencies.
+- Added quick presets/tabs (All, Failures, Auth Requests) inside the `ResourceTablePage` layout to slice audit events dynamically.
 
 ---
 

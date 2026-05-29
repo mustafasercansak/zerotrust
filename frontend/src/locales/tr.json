@@ -168,6 +168,12 @@
   },
   "audit": {
     "title": "Denetim Günlüğü",
+    "trendsTitle": "Güvenlik Olayı Eğilimleri (Son 7 Gün)",
+    "success": "Başarılı",
+    "failure": "Başarısız",
+    "tabAll": "Tüm Olaylar",
+    "tabFailures": "Hatalar",
+    "tabAuth": "Kimlik İstekleri",
     "action": "Eylem",
     "user": "Kullanıcı ID",
     "ip": "IP Adresi",

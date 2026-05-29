@@ -168,6 +168,12 @@
   },
   "audit": {
     "title": "Audit Log",
+    "trendsTitle": "Security Event Trends (Last 7 Days)",
+    "success": "Success",
+    "failure": "Failure",
+    "tabAll": "All Events",
+    "tabFailures": "Failures",
+    "tabAuth": "Auth Requests",
     "action": "Action",
     "user": "User ID",
     "ip": "IP Address",

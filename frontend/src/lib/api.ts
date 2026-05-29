@@ -105,6 +105,12 @@ export interface AuditEntry {
   created_at: string;
 }
 
+export interface AuditTrendPoint {
+  date: string;
+  success: number;
+  failure: number;
+}
+
 // Shared pagination / sort / filter params used by resource table fetchers.
 export interface PageParams {
   page: number;
@@ -298,6 +304,9 @@ export const api = {
 
   listAuditLog: (p: PageParams) =>
     request<PagedResult<AuditEntry>>(`/api/v1/admin/audit${buildQuery(p)}`),
+
+  listAuditLogTrends: () =>
+    request<AuditTrendPoint[]>("/api/v1/admin/audit/trends"),
 
   mfaStatus: () => request<{ enabled: boolean; supported?: boolean }>("/api/v1/mfa/status"),
 

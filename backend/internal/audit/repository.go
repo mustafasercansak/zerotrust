@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -67,6 +68,7 @@ type ListParams struct {
 	Action   string // ILIKE filter
 	UserID   string // exact match
 	Resource string // ILIKE filter
+	Outcome  string // success | failure
 }
 
 // ListResult holds one page of audit entries and the total matching count.
@@ -113,6 +115,11 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	if p.Resource != "" {
 		conds = append(conds, fmt.Sprintf("a.resource ILIKE $%d", n))
 		args = append(args, "%"+p.Resource+"%")
+		n++
+	}
+	if p.Outcome != "" {
+		conds = append(conds, fmt.Sprintf("a.metadata->>'outcome' = $%d", n))
+		args = append(args, p.Outcome)
 		n++
 	}
 
@@ -171,4 +178,50 @@ func nullStr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+type TrendPoint struct {
+	Date    string `json:"date"`
+	Success int    `json:"success"`
+	Failure int    `json:"failure"`
+}
+
+// Trends aggregates audit logs by day over the last 7 days, splitting into success vs failure.
+func (r *Repository) Trends(ctx context.Context) ([]TrendPoint, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+		       COUNT(*) FILTER (WHERE metadata->>'outcome' = 'success') AS success,
+		       COUNT(*) FILTER (WHERE metadata->>'outcome' = 'failure') AS failure
+		FROM audit_logs
+		WHERE created_at >= NOW() - INTERVAL '7 days'
+		GROUP BY day
+		ORDER BY day ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query audit trends: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]TrendPoint)
+	for rows.Next() {
+		var day string
+		var success, failure int
+		if err := rows.Scan(&day, &success, &failure); err != nil {
+			return nil, fmt.Errorf("scan trend row: %w", err)
+		}
+		counts[day] = TrendPoint{Date: day, Success: success, Failure: failure}
+	}
+
+	var points []TrendPoint
+	now := time.Now().UTC()
+	for i := 6; i >= 0; i-- {
+		dayStr := now.AddDate(0, 0, -i).Format("2006-01-02")
+		if p, ok := counts[dayStr]; ok {
+			points = append(points, p)
+		} else {
+			points = append(points, TrendPoint{Date: dayStr, Success: 0, Failure: 0})
+		}
+	}
+
+	return points, nil
 }

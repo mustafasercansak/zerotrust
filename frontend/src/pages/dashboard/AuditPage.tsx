@@ -1,11 +1,13 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type AuditEntry, type PageParams } from "@/lib/api";
+import { api, type AuditEntry, type AuditTrendPoint, type PageParams } from "@/lib/api";
 import { formatDateTime } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
+import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import type { GridColDef } from "@mui/x-data-grid";
 
@@ -42,6 +44,129 @@ function osLabel(info?: AuditClientInfo, ua?: string | null): string {
   return "";
 }
 
+function AuditTrendsChart() {
+  const { t } = useTranslation("audit");
+  const [trends, setTrends] = useState<AuditTrendPoint[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.listAuditLogTrends()
+      .then((data) => setTrends(data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <Paper variant="outlined" sx={{ p: 3, height: 180, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "background.paper" }}>
+        <CircularProgress size={20} />
+      </Paper>
+    );
+  }
+
+  if (!trends || trends.length === 0) return null;
+
+  const maxVal = Math.max(...trends.map((pt) => Math.max(pt.success, pt.failure)), 1);
+  const paddingX = 60;
+  const paddingY = 25;
+  const width = 800;
+  const height = 160;
+  const chartWidth = width - paddingX * 2;
+  const chartHeight = height - paddingY * 2;
+
+  const points = trends.map((pt, i) => {
+    const x = paddingX + i * (chartWidth / (trends.length - 1));
+    const ySuccess = height - paddingY - (pt.success / maxVal) * chartHeight;
+    const yFailure = height - paddingY - (pt.failure / maxVal) * chartHeight;
+    return { x, ySuccess, yFailure, ...pt };
+  });
+
+  const successPath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.ySuccess}`).join(" ");
+  const failurePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.yFailure}`).join(" ");
+
+  const successArea = `${successPath} L${points[points.length - 1].x},${height - paddingY} L${points[0].x},${height - paddingY} Z`;
+  const failureArea = `${failurePath} L${points[points.length - 1].x},${height - paddingY} L${points[0].x},${height - paddingY} Z`;
+
+  return (
+    <Paper variant="outlined" sx={{ p: 3, mb: 2, bgcolor: "background.paper" }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+          {t("trendsTitle")}
+        </Typography>
+        <Box sx={{ display: "flex", gap: 2 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "#10b981" }} />
+            <Typography variant="caption" color="text.secondary">{t("success")}</Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "#f43f5e" }} />
+            <Typography variant="caption" color="text.secondary">{t("failure")}</Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      <Box sx={{ overflowX: "auto", width: "100%" }}>
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ minWidth: 600, display: "block" }}>
+          <defs>
+            <linearGradient id="successGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            </linearGradient>
+            <linearGradient id="failureGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* Horizontal Grid lines */}
+          <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={paddingY + chartHeight / 2} x2={width - paddingX} y2={paddingY + chartHeight / 2} stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.08)" />
+
+          {/* Area Gradients */}
+          <path d={successArea} fill="url(#successGrad)" />
+          <path d={failureArea} fill="url(#failureGrad)" />
+
+          {/* Line paths */}
+          <path d={successPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={failurePath} fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Dots and values for Success */}
+          {points.map((p, i) => (
+            <g key={`succ-${i}`}>
+              <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#10b981" stroke="#090d16" strokeWidth="1" />
+              <text x={p.x} y={p.ySuccess - 8} textAnchor="middle" fill="#10b981" fontSize="9" fontWeight="700">
+                {p.success > 0 ? p.success : ""}
+              </text>
+            </g>
+          ))}
+
+          {/* Dots and values for Failure */}
+          {points.map((p, i) => (
+            <g key={`fail-${i}`}>
+              <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#090d16" strokeWidth="1" />
+              <text x={p.x} y={p.yFailure - 8} textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="700">
+                {p.failure > 0 ? p.failure : ""}
+              </text>
+            </g>
+          ))}
+
+          {/* X-Axis labels */}
+          {points.map((p, i) => {
+            const m = p.date.split("-");
+            const label = m.length >= 3 ? `${m[2]}/${m[1]}` : p.date;
+            return (
+              <text key={`lbl-${i}`} x={p.x} y={height - 6} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="9">
+                {label}
+              </text>
+            );
+          })}
+        </svg>
+      </Box>
+    </Paper>
+  );
+}
+
 export default function AuditPage() {
   const { t } = useTranslation("audit");
   const { i18n } = useTranslation();
@@ -49,6 +174,12 @@ export default function AuditPage() {
   const isAdmin = me?.roles.includes("admin") ?? false;
 
   const fetcher = useCallback((p: PageParams) => api.listAuditLog(p), []);
+
+  const tabs = useMemo(() => [
+    { key: "all", label: t("tabAll") },
+    { key: "failures", label: t("tabFailures"), preset: { outcome: "failure" } },
+    { key: "auth", label: t("tabAuth"), preset: { action: "auth." } },
+  ] as Array<{ key: string; label: string; preset?: Record<string, string> }>, [t]);
 
   const columns = useMemo<GridColDef<AuditEntry>[]>(() => [
     {
@@ -107,17 +238,23 @@ export default function AuditPage() {
   ], [t, i18n.language]);
 
   return (
-    <ResourceTablePage
-      columns={columns}
-      fetcher={fetcher}
-      getRowId={(e) => e.id}
-      accessDenied={!isAdmin}
-      accessDeniedMessage={t("accessDenied")}
-      defaultSortKey="created_at"
-      defaultSortDir="desc"
-      emptyMessage={t("noEntries")}
-      pageSizeOptions={[10, 25, 50]}
-      defaultPageSize={25}
-    />
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {isAdmin && <AuditTrendsChart />}
+      <Box sx={{ flex: 1, minHeight: 0 }}>
+        <ResourceTablePage
+          columns={columns}
+          tabs={tabs}
+          fetcher={fetcher}
+          getRowId={(e) => e.id}
+          accessDenied={!isAdmin}
+          accessDeniedMessage={t("accessDenied")}
+          defaultSortKey="created_at"
+          defaultSortDir="desc"
+          emptyMessage={t("noEntries")}
+          pageSizeOptions={[10, 25, 50]}
+          defaultPageSize={25}
+        />
+      </Box>
+    </Box>
   );
 }

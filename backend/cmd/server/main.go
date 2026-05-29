@@ -455,6 +455,7 @@ func main() {
 
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
+			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit/trends", auditHandler.Trends)
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
