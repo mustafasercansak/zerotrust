@@ -205,7 +205,10 @@
     }
   },
   "settings": {
-    "title": "System Settings",
+    "title": "Settings",
+    "tabProfile": "Profile Settings",
+    "tabSecurity": "Security & Sessions",
+    "tabSystem": "System Settings",
     "maxSessions": "Max Concurrent Sessions",
     "maxSessionsInput": "Limit",
     "maxSessionsDesc": "Maximum number of active sessions allowed per user account (1–20). Oldest sessions are evicted when the limit is reached.",

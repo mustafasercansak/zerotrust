@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState, Suspense, useRef } from "react";
+import { useState, Suspense, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/useAuth";
 import { cancelRefresh } from "@/lib/tokenManager";
@@ -40,14 +40,19 @@ export default function DashboardLayout() {
   const { pathname } = useLocation();
   const { i18n } = useTranslation();
   const { me, setMe, loading, bootstrapError, retry } = useAuth();
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleMeUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<MeData>;
+      setMe(customEvent.detail);
+      setAvatarTimestamp(Date.now());
+    };
+    window.addEventListener("me:updated", handleMeUpdated);
+    return () => {
+      window.removeEventListener("me:updated", handleMeUpdated);
+    };
+  }, [setMe]);
 
   if (loading) {
     return (
@@ -79,14 +84,13 @@ export default function DashboardLayout() {
 
   const navLinks = [
     { to: "/dashboard", label: t("dashboard") },
-    { to: "/dashboard/sessions", label: t("sessions") },
     { to: "/dashboard/mfa", label: t("mfa") },
+    { to: "/dashboard/settings", label: t("settings") },
     ...(isAdmin
       ? [
           { to: "/dashboard/users", label: t("users") },
           { to: "/dashboard/audit", label: t("audit") },
           { to: "/dashboard/service-accounts", label: t("serviceAccounts") },
-          { to: "/dashboard/settings", label: t("settings") },
         ]
       : []),
   ];
@@ -100,63 +104,7 @@ export default function DashboardLayout() {
   }
 
   function openProfile() {
-    if (!me) return;
-    setFirstName(me.first_name ?? "");
-    setLastName(me.last_name ?? "");
-    setProfileError(null);
-    setProfileOpen(true);
-  }
-
-  async function handleProfileSave(e: React.FormEvent) {
-    e.preventDefault();
-    setSavingProfile(true);
-    setProfileError(null);
-    try {
-      const updated = await api.updateProfile({ first_name: firstName, last_name: lastName });
-      setMe(updated);
-      setProfileOpen(false);
-    } catch (err) {
-      const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
-    } finally {
-      setSavingProfile(false);
-    }
-  }
-
-  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      setProfileError(tProfile("errors.file_too_large"));
-      return;
-    }
-    setUploadingAvatar(true);
-    setProfileError(null);
-    try {
-      const updated = await api.uploadAvatar(file);
-      setMe(updated);
-      setAvatarTimestamp(Date.now());
-    } catch (err) {
-      const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
-    } finally {
-      setUploadingAvatar(false);
-    }
-  }
-
-  async function handleAvatarDelete() {
-    setUploadingAvatar(true);
-    setProfileError(null);
-    try {
-      const updated = await api.deleteAvatar();
-      setMe(updated);
-      setAvatarTimestamp(Date.now());
-    } catch (err) {
-      const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
-    } finally {
-      setUploadingAvatar(false);
-    }
+    navigate("/dashboard/settings");
   }
 
   function handleLogout() {
@@ -255,41 +203,6 @@ export default function DashboardLayout() {
             <Outlet />
           </Suspense>
         </Box>
-        <Dialog open={profileOpen} onClose={() => setProfileOpen(false)} fullWidth maxWidth="xs">
-          <Box component="form" onSubmit={handleProfileSave}>
-            <DialogTitle>{tProfile("title")}</DialogTitle>
-            <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
-              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, mb: 1 }}>
-                <Avatar
-                  src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
-                  sx={{ width: 80, height: 80, fontSize: 28 }}
-                >
-                  {initials(me)}
-                </Avatar>
-                <Box sx={{ display: "flex", gap: 1 }}>
-                  <Button variant="outlined" size="small" component="label" disabled={uploadingAvatar}>
-                    {tProfile("uploadButton")}
-                    <input type="file" hidden accept="image/png, image/jpeg" onChange={handleAvatarChange} ref={fileInputRef} />
-                  </Button>
-                  {me.has_avatar && (
-                    <Button variant="outlined" size="small" color="error" onClick={handleAvatarDelete} disabled={uploadingAvatar}>
-                      {tProfile("deleteButton")}
-                    </Button>
-                  )}
-                </Box>
-              </Box>
-              <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-              <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-              {profileError && <Alert severity="error">{profileError}</Alert>}
-            </DialogContent>
-            <DialogActions sx={{ px: 3, pb: 3 }}>
-              <Button onClick={() => setProfileOpen(false)}>{tCommon("cancel")}</Button>
-              <Button type="submit" variant="contained" disabled={savingProfile}>
-                {savingProfile ? tProfile("saving") : tCommon("save")}
-              </Button>
-            </DialogActions>
-          </Box>
-        </Dialog>
       </Box>
     </MeContext.Provider>
   );

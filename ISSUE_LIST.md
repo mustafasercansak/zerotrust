@@ -527,7 +527,7 @@ Status update:
 
 ### 22. Implement User Self-Service Security & Session Management Page
 
-State: OPEN
+State: CLOSED
 
 Status: Users can modify their names and configure MFA, but they lack a dedicated security panel to audit and revoke their active login sessions.
 
@@ -539,6 +539,13 @@ Acceptance criteria:
 - Create a "Security Settings" tab or section inside the User Settings Page.
 - Fetch and display the logged-in user's active sessions (IP, device info, last active timestamp, and indicator for "current session").
 - Provide buttons to revoke a specific session or "log out from all other devices".
+
+Status update:
+- Converted `SettingsPage.tsx` into a tabbed user settings panel accessible to all authenticated users.
+- Embedded the Profile card (name changes, avatar uploads/deletions) directly inside the **Profile Settings** tab.
+- Rendered the reusable `<SessionsPage />` component inside the **Security & Sessions** tab, enabling self-revocation.
+- Kept the **System Settings** tab (concurrent session configurations) admin-only.
+- Exceeded criteria by removing the layout modal dialog and routing user profile links to settings, creating a cohesive user security dashboard.
 
 ---
 
@@ -589,6 +596,28 @@ Acceptance criteria:
 - Create an API endpoint and UI action to rotate a service account's client secret.
 - Allow a temporary overlap window (grace period, e.g. 1 hour) where both the old and new client secrets remain valid to prevent client script failures during migration.
 - Automatically deprecate the old secret once the window expires.
+
+---
+
+### 26. Extend Global System Settings with Custom Security Policies
+
+State: OPEN
+
+Status: System settings currently only support `max_sessions_per_user`. Other critical authentication and access rules (like password strength requirements, global MFA enforcement, and login rate limiting thresholds) are hardcoded or loaded exclusively from static environment variables.
+
+Related files:
+- [backend/internal/settings/repository.go](/home/m/projects/zerotrust/backend/internal/settings/repository.go)
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+
+Acceptance criteria:
+- Add setting keys in the PostgreSQL `settings` database table for:
+  - Password complexity level (e.g. minimum length, requiring numbers/special characters).
+  - Global MFA requirement flag (force MFA setup for all users on login).
+  - Max login attempts before temporary account lockout.
+- Update the admin settings cache and service handlers to load and enforce these policies dynamically at runtime instead of hardcoding them.
+- Extend the "System Settings" UI tab in `SettingsPage.tsx` to display inputs and toggle controls for these new configurations.
+
 
 
 

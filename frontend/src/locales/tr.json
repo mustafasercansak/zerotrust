@@ -205,7 +205,10 @@
     }
   },
   "settings": {
-    "title": "Sistem Ayarları",
+    "title": "Ayarlar",
+    "tabProfile": "Profil Ayarları",
+    "tabSecurity": "Güvenlik & Oturumlar",
+    "tabSystem": "Sistem Ayarları",
     "maxSessions": "Maksimum Eş Zamanlı Oturum",
     "maxSessionsInput": "Limit",
     "maxSessionsDesc": "Kullanıcı başına izin verilen maksimum aktif oturum sayısı (1–20). Sınır aşıldığında en eski oturumlar sonlandırılır.",

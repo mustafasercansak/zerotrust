@@ -1,134 +1,230 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { DashboardPage } from "@/components/DashboardPage";
+import SessionsPage from "./SessionsPage";
 import Alert from "@mui/material/Alert";
+import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
-import Divider from "@mui/material/Divider";
 import Paper from "@mui/material/Paper";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+function initials(me: { email: string; first_name?: string; last_name?: string }): string {
+  const parts = [me.first_name, me.last_name].filter((x): x is string => !!x);
+  if (parts.length > 0) return parts.map((p) => p.charAt(0)).join("").slice(0, 2).toUpperCase();
+  return me.email.slice(0, 2).toUpperCase();
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
+  const { t: tProfile } = useTranslation("profile");
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
 
-  const [maxSessions, setMaxSessions] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState(0);
 
+  // Profile Settings State
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // System Settings State
+  const [maxSessions, setMaxSessions] = useState("");
+  const [systemLoading, setSystemLoading] = useState(true);
+  const [savingSystem, setSavingSystem] = useState(false);
+  const [systemSuccess, setSystemSuccess] = useState(false);
+  const [systemError, setSystemError] = useState<string | null>(null);
+
+  // Initialize Profile Settings Form
+  useEffect(() => {
+    if (me) {
+      setFirstName(me.first_name ?? "");
+      setLastName(me.last_name ?? "");
+    }
+  }, [me]);
+
+  // Load System Settings if admin
   useEffect(() => {
     if (!isAdmin) return;
     api.admin.getSettings()
       .then((s) => setMaxSessions(s["max_sessions_per_user"] ?? "5"))
-      .catch(() => setError("internal_error"))
-      .finally(() => setLoading(false));
+      .catch(() => setSystemError("internal_error"))
+      .finally(() => setSystemLoading(false));
   }, [isAdmin]);
 
-  async function handleSave(e: React.FormEvent) {
+  async function handleProfileSave(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setSaved(false);
-    const n = parseInt(maxSessions, 10);
-    if (isNaN(n) || n < 1 || n > 20) { setError("invalid_value"); return; }
-    setSaving(true);
+    setSavingProfile(true);
+    setProfileError(null);
+    setProfileSuccess(false);
     try {
-      await api.admin.updateSettings({ max_sessions_per_user: String(n) });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      const updated = await api.updateProfile({ first_name: firstName, last_name: lastName });
+      window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
+      setProfileSuccess(true);
+      setTimeout(() => setProfileSuccess(false), 3000);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "internal_error");
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
     } finally {
-      setSaving(false);
+      setSavingProfile(false);
     }
   }
 
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileError(tProfile("errors.file_too_large"));
+      return;
+    }
+    setUploadingAvatar(true);
+    setProfileError(null);
+    try {
+      const updated = await api.uploadAvatar(file);
+      window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
+      setAvatarTimestamp(Date.now());
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function handleAvatarDelete() {
+    setUploadingAvatar(true);
+    setProfileError(null);
+    try {
+      const updated = await api.deleteAvatar();
+      window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
+      setAvatarTimestamp(Date.now());
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function handleSystemSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSystemError(null);
+    setSystemSuccess(false);
+    const n = parseInt(maxSessions, 10);
+    if (isNaN(n) || n < 1 || n > 20) { setSystemError("invalid_value"); return; }
+    setSavingSystem(true);
+    try {
+      await api.admin.updateSettings({ max_sessions_per_user: String(n) });
+      setSystemSuccess(true);
+      setTimeout(() => setSystemSuccess(false), 3000);
+    } catch (err) {
+      setSystemError(err instanceof ApiError ? err.message : "internal_error");
+    } finally {
+      setSavingSystem(false);
+    }
+  }
+
+  if (!me) {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", py: 8 }}>
+        <CircularProgress size={24} />
+      </Box>
+    );
+  }
+
   return (
-    <DashboardPage accessDenied={!isAdmin} accessDeniedMessage={t("accessDenied")}>
-      <Box sx={{ width: "100%" }}>
-        <Paper
-          component="form"
-          onSubmit={handleSave}
-          variant="outlined"
-          sx={{
-            display: "grid",
-            overflow: "hidden",
-          }}
-        >
-          <Box sx={{ px: 3, py: 2.75 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {t("title")}
-            </Typography>
-          </Box>
+    <DashboardPage>
+      <Box sx={{ width: "100%", display: "grid", gap: 3 }}>
+        <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+          <Tabs value={activeTab} onChange={(_, val: number) => setActiveTab(val)}>
+            <Tab label={t("tabProfile")} id="tab-profile" />
+            <Tab label={t("tabSecurity")} id="tab-security" />
+            {isAdmin && <Tab label={t("tabSystem")} id="tab-system" />}
+          </Tabs>
+        </Box>
 
-          <Divider />
-
-          {loading ? (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, px: 3, py: 3 }}>
-              <CircularProgress size={18} />
-              <Typography variant="body2" color="text.secondary">{t("loading")}</Typography>
-            </Box>
-          ) : (
-            <Box
-              sx={{
-                alignItems: { xs: "stretch", md: "center" },
-                display: "grid",
-                gap: { xs: 2, md: 3 },
-                gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) auto" },
-                px: 3,
-                py: 2.75,
-              }}
-            >
-              <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                  {t("maxSessions")}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {t("maxSessionsDesc")}
-                </Typography>
-              </Box>
-              <Box
-                sx={{
-                  alignItems: "center",
-                  display: "flex",
-                  gap: 1.5,
-                  justifyContent: { xs: "stretch", md: "flex-end" },
-                }}
+        {activeTab === 0 && (
+          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 4, display: "grid", gap: 3, maxWidth: 600 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("title")}</Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <Avatar
+                src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
+                sx={{ width: 80, height: 80, fontSize: 28 }}
               >
-                <TextField
-                  label={t("maxSessionsInput")}
-                  type="number"
-                  value={maxSessions}
-                  onChange={(e) => setMaxSessions(e.target.value)}
-                  sx={{ width: { xs: "100%", sm: 160 } }}
-                  slotProps={{ htmlInput: { min: 1, max: 20 } }}
-                />
-                <Button
-                  type="submit"
-                  variant="contained"
-                  disabled={saving || loading}
-                  sx={{ minWidth: 132, whiteSpace: "nowrap" }}
-                >
-                  {saving ? t("saving") : t("save")}
+                {initials(me)}
+              </Avatar>
+              <Box sx={{ display: "flex", gap: 1.5 }}>
+                <Button variant="outlined" size="small" component="label" disabled={uploadingAvatar}>
+                  {tProfile("uploadButton")}
+                  <input type="file" hidden accept="image/png, image/jpeg" onChange={handleAvatarChange} ref={fileInputRef} />
                 </Button>
+                {me.has_avatar && (
+                  <Button variant="outlined" size="small" color="error" onClick={handleAvatarDelete} disabled={uploadingAvatar}>
+                    {tProfile("deleteButton")}
+                  </Button>
+                )}
               </Box>
             </Box>
-          )}
-
-          {(error || saved) && (
-            <Box sx={{ px: 3, pb: 2 }}>
-              {error && <Alert severity="error">{t(`errors.${error}`, { defaultValue: t("errors.internal_error") })}</Alert>}
-              {saved && <Alert severity="success">{t("saved")}</Alert>}
+            <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
+            <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
+            {profileError && <Alert severity="error">{profileError}</Alert>}
+            {profileSuccess && <Alert severity="success">{t("saved")}</Alert>}
+            <Box>
+              <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
+                {savingProfile ? tProfile("saving") : t("save")}
+              </Button>
             </Box>
-          )}
+          </Paper>
+        )}
 
-        </Paper>
+        {activeTab === 1 && (
+          <Box>
+            <SessionsPage />
+          </Box>
+        )}
+
+        {activeTab === 2 && isAdmin && (
+          <Paper variant="outlined" component="form" onSubmit={handleSystemSave} sx={{ p: 4, display: "grid", gap: 3, maxWidth: 600 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("title")}</Typography>
+            {systemLoading ? (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">{t("loading")}</Typography>
+              </Box>
+            ) : (
+              <Box sx={{ display: "grid", gap: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxSessions")}</Typography>
+                <Typography variant="body2" color="text.secondary">{t("maxSessionsDesc")}</Typography>
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center", mt: 1 }}>
+                  <TextField
+                    label={t("maxSessionsInput")}
+                    type="number"
+                    value={maxSessions}
+                    onChange={(e) => setMaxSessions(e.target.value)}
+                    sx={{ width: 160 }}
+                    slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                  />
+                  <Button type="submit" variant="contained" disabled={savingSystem} sx={{ minWidth: 120 }}>
+                    {savingSystem ? t("saving") : t("save")}
+                  </Button>
+                </Box>
+              </Box>
+            )}
+            {systemError && <Alert severity="error">{t(`errors.${systemError}`, { defaultValue: t("errors.internal_error") })}</Alert>}
+            {systemSuccess && <Alert severity="success">{t("saved")}</Alert>}
+          </Paper>
+        )}
       </Box>
     </DashboardPage>
   );
