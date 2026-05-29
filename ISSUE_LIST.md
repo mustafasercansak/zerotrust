@@ -254,15 +254,24 @@ Status update:
 
 ### 9. Add route-level code splitting to the frontend
 
+State: CLOSED
+
 Status: Dashboard pages are eagerly loaded into the initial bundle, and the production build reports a large chunk warning.
 
 Related files:
 - [frontend/src/App.tsx](/home/m/projects/zerotrust/frontend/src/App.tsx)
+- [frontend/src/components/DashboardLayout.tsx](/home/m/projects/zerotrust/frontend/src/components/DashboardLayout.tsx)
 
 Acceptance criteria:
 - Dashboard routes are lazy loaded.
 - Production bundle size decreases.
 - No regressions are introduced in first load or route transitions.
+
+Status update:
+- Converted all dashboard page imports in `App.tsx` to dynamic imports using `React.lazy`.
+- Wrapped the `<Outlet />` element in `DashboardLayout.tsx` with `<Suspense>` using a centered `CircularProgress` loading fallback spinner.
+- Verified that the build splits the chunks successfully and type checks pass.
+
 
 ### 10. Clarify auth and session behavior in the README using product language
 
@@ -278,6 +287,8 @@ Acceptance criteria:
 - Clearly explain MFA prerequisites and the service account auth model.
 
 ### 12. Expand step-up MFA coverage to destructive admin actions
+
+State: CLOSED
 
 Status: Step-up MFA currently protects role updates and service-account create/update. Additional destructive admin operations should be explicitly reviewed and protected for defense in depth.
 
@@ -296,3 +307,10 @@ Acceptance criteria:
 	- `DELETE /api/v1/admin/service-accounts/{id}`
 - Add backend tests proving `mfa_required` is returned when recent MFA is missing.
 - Add/update frontend UX to retry those actions after `/api/v1/mfa/step-up`.
+
+Status update:
+- Enforced `stepUpMFA` middleware on user status patch, all user session deletions, service account status patch, and service account deletion endpoints in `main.go`.
+- Added `mfaPrompt` under the `admin` translation block for localization.
+- Integrated `runWithStepUp` in `UsersPage.tsx` and wrapped user status changes, bulk session revocations, and individual session revocations.
+- Wrapped service account status changes and revocation actions with `runWithStepUp` in `ServiceAccountsPage.tsx`.
+- Verified that all backend tests pass and the frontend builds cleanly.

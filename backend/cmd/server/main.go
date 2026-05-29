@@ -316,10 +316,10 @@ func main() {
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
-			r.With(authmw.RequirePermission("users", "update")).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)
-			r.With(authmw.RequirePermission("users", "update")).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
-			r.With(authmw.RequirePermission("users", "update")).Delete("/admin/users/{id}/sessions/{sessionId}", adminHandler.RevokeUserSession)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions/{sessionId}", adminHandler.RevokeUserSession)
 
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
@@ -332,8 +332,8 @@ func main() {
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
 			r.With(authmw.RequirePermission("service_accounts", "create"), stepUpMFA).Post("/admin/service-accounts", saHandler.Create)
 			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}", saHandler.Update)
-			r.With(authmw.RequirePermission("service_accounts", "update")).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
-			r.With(authmw.RequirePermission("service_accounts", "delete")).Delete("/admin/service-accounts/{id}", saHandler.Revoke)
+			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
+			r.With(authmw.RequirePermission("service_accounts", "delete"), stepUpMFA).Delete("/admin/service-accounts/{id}", saHandler.Revoke)
 		})
 	})
 

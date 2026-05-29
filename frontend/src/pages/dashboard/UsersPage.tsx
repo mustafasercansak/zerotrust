@@ -110,8 +110,8 @@ function RowActions({ row, me, onStatusChange, onViewSessions, onRevokeAll }: Ro
 interface SessionsDialogProps {
   user: UserData | null;
   onClose: () => void;
-  onRevoke: (userId: string, sessionId: string) => void;
-  onRevokeAll: (userId: string) => void;
+  onRevoke: (userId: string, sessionId: string) => Promise<void>;
+  onRevokeAll: (userId: string) => Promise<void>;
 }
 
 function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialogProps) {
@@ -166,10 +166,14 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
               <Box key={s.id}>
                 {idx > 0 && <Divider />}
                 <ListItem
-                  secondaryAction={
-                    <Button size="small" color="warning" onClick={() => {
-                      onRevoke(user.id, s.id);
-                      setSessions((prev) => prev?.filter((x) => x.id !== s.id) ?? null);
+                   secondaryAction={
+                    <Button size="small" color="warning" onClick={async () => {
+                      try {
+                        await onRevoke(user.id, s.id);
+                        setSessions((prev) => prev?.filter((x) => x.id !== s.id) ?? null);
+                      } catch {
+                        // handled by caller
+                      }
                     }}>
                       {t("revokeSession")}
                     </Button>
@@ -203,9 +207,13 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
         <Button
           color="warning"
           disabled={!sessions || sessions.length === 0}
-          onClick={() => {
-            onRevokeAll(user.id);
-            setSessions([]);
+          onClick={async () => {
+            try {
+              await onRevokeAll(user.id);
+              setSessions([]);
+            } catch {
+              // handled by caller
+            }
           }}
         >
           {t("revokeAllSessions")}
@@ -270,27 +278,49 @@ export default function UsersPage() {
     { key: "active",   label: tCommon("filterActive"),   preset: { status: "active" } },
     { key: "inactive", label: tCommon("filterInactive"), preset: { status: "inactive" } },
   ], [tCommon]);
+  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
+        throw err;
+      }
+
+      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
+      if (!code) {
+        throw err;
+      }
+
+      await api.mfaStepUp(code);
+      return action();
+    }
+  }
 
   async function handleStatusChange(userId: string, active: boolean) {
     if (!active && !window.confirm(t("deactivateConfirm"))) return;
     try {
-      await api.admin.setUserStatus(userId, active);
+      await runWithStepUp(() => api.admin.setUserStatus(userId, active));
       setRefresh((n) => n + 1);
-    } catch {
-      // silently ignore — table will not refresh
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      alert(t("errors.internal_error"));
     }
   }
 
   async function handleRevokeAll(row: UserData) {
     if (!window.confirm(t("revokeAllConfirm"))) return;
     try {
-      await api.admin.revokeAllUserSessions(row.id);
+      await runWithStepUp(() => api.admin.revokeAllUserSessions(row.id));
       setRefresh((n) => n + 1);
-    } catch {
-      // silently ignore
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      alert(t("errors.internal_error"));
     }
   }
-
   const columns = useMemo<GridColDef<UserData>[]>(() => [
     {
       field: "email", headerName: t("user"), minWidth: 280, flex: 1.45,
@@ -449,11 +479,27 @@ export default function UsersPage() {
           user={sessionsUser}
           onClose={() => setSessionsUser(null)}
           onRevoke={async (userId, sessionId) => {
-            await api.admin.revokeUserSession(userId, sessionId);
+            try {
+              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId));
+            } catch (err) {
+              if (err instanceof ApiError && err.message === "mfa_required") {
+                throw err;
+              }
+              alert(t("errors.internal_error"));
+              throw err;
+            }
           }}
           onRevokeAll={async (userId) => {
-            await api.admin.revokeAllUserSessions(userId);
-            setRefresh((n) => n + 1);
+            try {
+              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId));
+              setRefresh((n) => n + 1);
+            } catch (err) {
+              if (err instanceof ApiError && err.message === "mfa_required") {
+                throw err;
+              }
+              alert(t("errors.internal_error"));
+              throw err;
+            }
           }}
         />
       )}

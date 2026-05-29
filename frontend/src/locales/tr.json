@@ -120,6 +120,7 @@
     "deactivateConfirm": "Bu kullanıcı devre dışı bırakılacak ve tüm oturumları kapatılacak. Emin misiniz?",
     "revokeAllSessions": "Tüm Oturumları Kapat",
     "revokeAllConfirm": "Bu kullanıcının tüm oturumları kapatılacak. Emin misiniz?",
+    "mfaPrompt": "Hassas işlemi sürdürmek için 6 haneli MFA kodunuzu girin.",
     "revokeSession": "Oturumu Kapat",
     "sessionsDialogTitle": "{{email}} — Aktif Oturumlar",
     "noSessionsFound": "Aktif oturum bulunamadı.",

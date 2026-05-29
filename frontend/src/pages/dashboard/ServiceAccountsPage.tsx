@@ -234,18 +234,30 @@ export default function ServiceAccountsPage() {
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, i18n.language]);
-
   async function handleToggleStatus(sa: ServiceAccount) {
-    try { await api.admin.setServiceAccountStatus(sa.id, !sa.is_active); setRefresh((n) => n + 1); }
-    catch { alert(t("errors.internal_error")); }
+    try {
+      await runWithStepUp(() => api.admin.setServiceAccountStatus(sa.id, !sa.is_active));
+      setRefresh((n) => n + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      alert(t("errors.internal_error"));
+    }
   }
 
   async function handleRevoke(sa: ServiceAccount) {
     if (!confirm(t("revokeConfirm", { name: sa.name }))) return;
-    try { await api.admin.revokeServiceAccount(sa.id); setRefresh((n) => n + 1); }
-    catch { alert(t("errors.internal_error")); }
+    try {
+      await runWithStepUp(() => api.admin.revokeServiceAccount(sa.id));
+      setRefresh((n) => n + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      alert(t("errors.internal_error"));
+    }
   }
-
   function reset() { setName(""); setSelectedScopes([]); setExpiresAt(""); setCreateError(""); }
 
   function toggleScope(scope: string) {

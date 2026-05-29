@@ -120,6 +120,7 @@
     "deactivateConfirm": "This user will be deactivated and all their sessions will be revoked. Are you sure?",
     "revokeAllSessions": "Revoke All Sessions",
     "revokeAllConfirm": "All sessions for this user will be revoked. Are you sure?",
+    "mfaPrompt": "Enter your 6-digit MFA code to continue this sensitive action.",
     "revokeSession": "Revoke Session",
     "sessionsDialogTitle": "{{email}} — Active Sessions",
     "noSessionsFound": "No active sessions found.",
