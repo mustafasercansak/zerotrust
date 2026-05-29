@@ -363,3 +363,26 @@ Status update:
 - Installed `qrcode.react` package in the frontend application.
 - Integrated `QRCodeSVG` into the MFA setup block inside `MfaPage.tsx`, displaying the generated QR code in a high-contrast container for seamless mobile scanning.
 - Confirmed the page layout is responsive and successfully verified compilation through a clean production build (`npm run build`).
+
+### 15. Create project showcase and embed screenshots in README
+
+State: CLOSED
+
+Status: The project lacked visual showcase elements. The screenshots were outdated or in Turkish, and there was no visual demo page.
+
+Related files:
+- [README.md](/home/m/projects/zerotrust/README.md)
+- [showcase.html](/home/m/projects/zerotrust/showcase.html)
+- [docs/images/dashboard.png](/home/m/projects/zerotrust/docs/images/dashboard.png)
+- [docs/images/session_management.png](/home/m/projects/zerotrust/docs/images/session_management.png)
+- [docs/images/mfa_setup.png](/home/m/projects/zerotrust/docs/images/mfa_setup.png)
+
+Acceptance criteria:
+- Embed screenshots in `README.md` to highlight the UI capabilities.
+- Create a premium standalone showcase HTML page containing project features and screenshots.
+- Ensure the screenshots are in English for international accessibility.
+
+Status update:
+- Embedded references to the three core UI screenshots in `README.md`.
+- Created a beautifully styled standalone `showcase.html` with vanilla CSS, modern typography, glassmorphic cards, and detailed feature breakdowns.
+- Collaborated with the user to replace the screenshots with English interface captures.

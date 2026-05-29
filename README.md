@@ -20,9 +20,19 @@ A security-focused Zero Trust authentication and authorization platform built wi
                     └──────────────┘
 ```
 
-Vite proxies all `/api/*` requests to the backend in development, so cookies work on the same origin without HTTPS.
+## Screenshots
+
+### Dashboard Overview
+![Dashboard Overview](docs/images/dashboard.png)
+
+### Active Sessions Management
+![Session Management](docs/images/session_management.png)
+
+### Multi-Factor Authentication (MFA) Setup with QR Code
+![MFA Setup](docs/images/mfa_setup.png)
 
 ## Security Features
+
 
 | Feature | Detail |
 |---|---|

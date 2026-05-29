@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZeroTrust — Security Showcase</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16;
+      --bg-card: rgba(17, 25, 40, 0.75);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #6366f1;
+      --primary-glow: rgba(99, 102, 241, 0.15);
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --font-sans: 'Outfit', sans-serif;
+      --font-mono: 'Space Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.08) 0%, transparent 40%);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    header {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 4rem 2rem 2rem;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: #a5b4fc;
+      padding: 0.4rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 1.5rem;
+      animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .lead {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 3rem;
+      animation: slideUp 1s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem 6rem;
+    }
+
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 2.5rem;
+      text-align: center;
+      position: relative;
+    }
+
+    .section-title::after {
+      content: '';
+      display: block;
+      width: 40px;
+      height: 4px;
+      background: var(--primary);
+      margin: 0.75rem auto 0;
+      border-radius: 2px;
+    }
+
+    /* Screenshot Gallery Showcase */
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 4rem;
+      margin-bottom: 6rem;
+    }
+
+    .showcase-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    @media (max-width: 968px) {
+      .showcase-card {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .showcase-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(99, 102, 241, 0.25);
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 0 40px 5px rgba(99, 102, 241, 0.05);
+    }
+
+    .showcase-img-wrapper {
+      position: relative;
+      background: #0f172a;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid var(--border-card);
+    }
+
+    @media (max-width: 968px) {
+      .showcase-img-wrapper {
+        border-right: none;
+        border-bottom: 1px solid var(--border-card);
+      }
+    }
+
+    .showcase-img-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.5s ease;
+    }
+
+    .showcase-card:hover .showcase-img-wrapper img {
+      transform: scale(1.02);
+    }
+
+    .showcase-content {
+      padding: 3rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    @media (max-width: 640px) {
+      .showcase-content {
+        padding: 2rem;
+      }
+    }
+
+    .showcase-content h3 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #ffffff;
+    }
+
+    .showcase-content p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      font-size: 1.05rem;
+    }
+
+    .tech-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .tech-tag {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0.25rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      color: var(--text);
+    }
+
+    /* Security Architecture Grid */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+      margin-bottom: 6rem;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 2.5rem;
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(6, 182, 212, 0.25);
+      box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      color: var(--accent-cyan);
+    }
+
+    .feature-card:nth-child(even) .feature-icon {
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      color: var(--primary);
+    }
+
+    .feature-card h4 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      color: #ffffff;
+    }
+
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      flex-grow: 1;
+    }
+
+    footer {
+      border-top: 1px solid var(--border-card);
+      padding: 3rem 2rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    footer a {
+      color: var(--primary);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    footer a:hover {
+      color: #a5b4fc;
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Zero Trust Architecture
+    </div>
+    <h1>ZeroTrust Security Showcase</h1>
+    <p class="lead">A complete authentication, authorization, and audit infrastructure built on Zero Trust principles with Go, PostgreSQL, Redis, and React.</p>
+  </header>
+
+  <main>
+    
+    <section>
+      <h2 class="section-title">Core Interface Showcase</h2>
+      <div class="showcase-grid">
+        
+        <!-- Showcase 1 -->
+        <div class="showcase-card">
+          <div class="showcase-img-wrapper">
+            <img src="docs/images/dashboard.png" alt="Dashboard Overview">
+          </div>
+          <div class="showcase-content">
+            <h3>Dashboard Control Panel</h3>
+            <p>A unified user portal that aggregates active sessions, account details, and quick configuration routes. Features clean responsive menus, localization support (EN/TR), and lightweight bundles leveraging route-level lazy loading.</p>
+            <div class="tech-list">
+              <span class="tech-tag">React 19</span>
+              <span class="tech-tag">Vite</span>
+              <span class="tech-tag">MUI v9</span>
+              <span class="tech-tag">i18next</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Showcase 2 -->
+        <div class="showcase-card">
+          <div class="showcase-img-wrapper">
+            <img src="docs/images/session_management.png" alt="Active Session Control">
+          </div>
+          <div class="showcase-content">
+            <h3>Session Management & Revocation</h3>
+            <p>Users and administrators gain full visibility into active browser sessions. Sessions are validated on every transition. Provides options to revoke specific suspicious sessions or terminate all other sessions instantly from the panel.</p>
+            <div class="tech-list">
+              <span class="tech-tag">PostgreSQL Store</span>
+              <span class="tech-tag">Token Rotation</span>
+              <span class="tech-tag">SSE Updates</span>
+              <span class="tech-tag">JTI Revocation</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Showcase 3 -->
+        <div class="showcase-card">
+          <div class="showcase-img-wrapper">
+            <img src="docs/images/mfa_setup.png" alt="Multi-Factor Authentication Setup">
+          </div>
+          <div class="showcase-content">
+            <h3>TOTP Multi-Factor Authentication</h3>
+            <p>Robust security enrollment using Time-based One-Time Passwords (TOTP). Displays a dynamic, high-contrast QR Code for easy scanning via Google Authenticator or Authy, along with fallback manual secrets and native mobile deep-linking.</p>
+            <div class="tech-list">
+              <span class="tech-tag">qrcode.react</span>
+              <span class="tech-tag">AES-256-GCM</span>
+              <span class="tech-tag">Step-Up MFA</span>
+              <span class="tech-tag">TOTP Verification</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Zero Trust Security Principles</h2>
+      <div class="features-grid">
+        
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h4>Double Token Auth Model</h4>
+          <p>Access tokens are short-lived (1-minute TTL) ES256 ECDSA signed JSON Web Tokens (JWT) kept in secure, httpOnly cookies. Rotation relies on opaque database-backed refresh tokens.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          </div>
+          <h4>Token Reuse Protection</h4>
+          <p>If an older rotated refresh token is re-submitted, the system flags it as a potential hijack attempt, immediately invalidates all active sessions for that user, and registers a security alert.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h4>Runtime Session Policies</h4>
+          <p>System settings govern session lifecycles dynamically: enforcing idle timeout windows (e.g. 5 minutes for regular users, 3 minutes for admins) and hard absolute caps (8 hours).</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <h4>Observable Audit Logging</h4>
+          <p>Every critical security event (login, token rotation, session revocation, MFA setup, role change) writes synchronously to a database audit log, feeding an exported Prometheus metric counter.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          </div>
+          <h4>Step-Up MFA Gates</h4>
+          <p>Sensitive user administration and token-management activities require recent (within 10 minutes) multi-factor authentication. If expired, an inline TOTP challenge is triggered.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <h4>Machine-to-Machine Auth</h4>
+          <p>Secure client_credentials flow for service accounts. Emits scope-bounded access tokens, permitting automated API-driven integrations with fine-grained access policies.</p>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>ZeroTrust Security System © 2026. Made with ❤️ for modern security engineering.</p>
+  </footer>
+
+</body>
+</html>
