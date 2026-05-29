@@ -53,3 +53,52 @@ func (c *Cache) GetInt(ctx context.Context, key string, defaultVal int) int {
 	}
 	return defaultVal
 }
+
+func (c *Cache) GetString(ctx context.Context, key string, defaultVal string) string {
+	c.mu.RLock()
+	entry, ok := c.vals[key]
+	c.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expires) {
+		return entry.value
+	}
+
+	val, err := c.repo.Get(ctx, key)
+	if err != nil {
+		return defaultVal
+	}
+
+	c.mu.Lock()
+	c.vals[key] = cachedEntry{value: val, expires: time.Now().Add(cacheTTL)}
+	c.mu.Unlock()
+
+	return val
+}
+
+func (c *Cache) GetBool(ctx context.Context, key string, defaultVal bool) bool {
+	c.mu.RLock()
+	entry, ok := c.vals[key]
+	c.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expires) {
+		if b, err := strconv.ParseBool(entry.value); err == nil {
+			return b
+		}
+		return defaultVal
+	}
+
+	val, err := c.repo.Get(ctx, key)
+	if err != nil {
+		return defaultVal
+	}
+
+	c.mu.Lock()
+	c.vals[key] = cachedEntry{value: val, expires: time.Now().Add(cacheTTL)}
+	c.mu.Unlock()
+
+	if b, err := strconv.ParseBool(val); err == nil {
+		return b
+	}
+	return defaultVal
+}
+

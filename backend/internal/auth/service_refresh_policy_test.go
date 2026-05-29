@@ -136,6 +136,15 @@ func (s *testSettings) GetInt(ctx context.Context, key string, defaultVal int) i
 	return v
 }
 
+func (s *testSettings) GetString(ctx context.Context, key string, defaultVal string) string {
+	return defaultVal
+}
+
+func (s *testSettings) GetBool(ctx context.Context, key string, defaultVal bool) bool {
+	return defaultVal
+}
+
+
 type testServiceAccountStore struct{}
 
 func (s *testServiceAccountStore) FindByClientID(ctx context.Context, clientID string) (*ServiceAccountRecord, error) {

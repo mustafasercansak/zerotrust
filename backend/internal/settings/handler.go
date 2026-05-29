@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 )
-
 // allowedKeys defines which settings are admin-editable and validates their values.
 var allowedKeys = map[string]func(string) bool{
 	"max_sessions_per_user": func(v string) bool {
@@ -23,6 +22,16 @@ var allowedKeys = map[string]func(string) bool{
 	"session_absolute_timeout_seconds": func(v string) bool {
 		n, err := strconv.Atoi(v)
 		return err == nil && n >= 1800 && n <= 172800
+	},
+	"password_complexity": func(v string) bool {
+		return v == "low" || v == "medium" || v == "strong"
+	},
+	"global_mfa_required": func(v string) bool {
+		return v == "true" || v == "false"
+	},
+	"max_login_attempts": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1 && n <= 20
 	},
 }
 

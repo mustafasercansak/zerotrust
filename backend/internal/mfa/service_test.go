@@ -75,7 +75,6 @@ func newTOTPKey(t *testing.T) (secret, code string) {
 	}
 	return key.Secret(), code
 }
-
 // --- Setup tests ---
 
 // TestSetup_FirstTime verifies that Setup succeeds with an empty current_code
@@ -84,27 +83,24 @@ func TestSetup_FirstTime(t *testing.T) {
 	stub := &stubStore{enabled: false}
 	svc := &Service{repo: stub, encKey: testKey()}
 
-	result, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	url, secret, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result == nil || result.OTPAuthURL == "" || result.Secret == "" {
+	if url == "" || secret == "" {
 		t.Error("expected non-empty setup result")
 	}
 	if stub.pendingEnc == "" {
 		t.Error("UpsertPending was not called")
 	}
 }
-
-// TestSetup_MFAEnabled_EmptyCode rejects setup without a current code when MFA
-// is active — prevents a stolen session from silently rotating MFA.
 func TestSetup_MFAEnabled_EmptyCode(t *testing.T) {
 	key := testKey()
 	totpSecret, _ := newTOTPKey(t)
 	stub := &stubStore{enabled: true, secretEnc: encryptSecret(t, key, totpSecret)}
 	svc := &Service{repo: stub, encKey: key}
 
-	_, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	_, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -120,7 +116,7 @@ func TestSetup_MFAEnabled_WrongCode(t *testing.T) {
 	stub := &stubStore{enabled: true, secretEnc: encryptSecret(t, key, totpSecret)}
 	svc := &Service{repo: stub, encKey: key}
 
-	_, err := svc.Setup(context.Background(), "user1", "user1@example.com", "000000")
+	_, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "000000")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -139,11 +135,11 @@ func TestSetup_MFAEnabled_CorrectCode(t *testing.T) {
 
 	originalSecretEnc := stub.secretEnc
 
-	result, err := svc.Setup(context.Background(), "user1", "user1@example.com", currentCode)
+	url, secret, err := svc.Setup(context.Background(), "user1", "user1@example.com", currentCode)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result == nil || result.OTPAuthURL == "" {
+	if url == "" || secret == "" {
 		t.Error("expected non-empty setup result")
 	}
 	if stub.pendingEnc == "" {

@@ -97,7 +97,7 @@ func TestLoginSuccessWritesAuditEvent(t *testing.T) {
 	svc := &fakeAuthService{loginResult: &LoginResult{
 		Pair: &TokenPair{AccessToken: "access-token", RefreshToken: "refresh-token"},
 	}}
-	h := NewHandler(svc, nil, logger, false, false, nil, "")
+	h := NewHandler(svc, nil, logger, false, false, nil, "", nil)
 
 	body, _ := json.Marshal(map[string]any{
 		"email":    "admin@example.com",
@@ -139,7 +139,7 @@ func TestLoginSuccessWritesAuditEvent(t *testing.T) {
 
 func TestLoginFailureWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{loginErr: ErrInvalidCredentials}, nil, logger, false, false, nil, "")
+	h := NewHandler(&fakeAuthService{loginErr: ErrInvalidCredentials}, nil, logger, false, false, nil, "", nil)
 
 	body, _ := json.Marshal(map[string]string{"email": "admin@example.com", "password": "wrong-password"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
@@ -167,7 +167,7 @@ func TestLoginFailureWritesAuditEvent(t *testing.T) {
 
 func TestLoginLockoutWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{loginErr: &AccountLockedError{RetryAfter: time.Minute}}, nil, logger, false, false, nil, "")
+	h := NewHandler(&fakeAuthService{loginErr: &AccountLockedError{RetryAfter: time.Minute}}, nil, logger, false, false, nil, "", nil)
 
 	body, _ := json.Marshal(map[string]string{"email": "admin@example.com", "password": "wrong-password"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
@@ -194,7 +194,7 @@ func TestClientCredentialsSuccessWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
 	h := NewHandler(&fakeAuthService{
 		clientCredentials: &ServiceTokenResponse{AccessToken: "service-token", ExpiresIn: 60},
-	}, nil, logger, false, false, nil, "")
+	}, nil, logger, false, false, nil, "", nil)
 
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":    "client_credentials",
@@ -223,7 +223,7 @@ func TestClientCredentialsSuccessWritesAuditEvent(t *testing.T) {
 
 func TestClientCredentialsFailureWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{clientErr: errors.New("invalid client")}, nil, logger, false, false, nil, "")
+	h := NewHandler(&fakeAuthService{clientErr: errors.New("invalid client")}, nil, logger, false, false, nil, "", nil)
 
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":    "client_credentials",
@@ -271,7 +271,7 @@ func TestMFAChallengeWritesAuditEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-			h := NewHandler(tt.svc, nil, logger, false, false, nil, "")
+			h := NewHandler(tt.svc, nil, logger, false, false, nil, "", nil)
 
 			body, _ := json.Marshal(map[string]string{"mfa_token": "pending-token", "totp_code": "123456"})
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mfa/challenge", bytes.NewReader(body))
@@ -301,7 +301,7 @@ func TestMFAChallengeWritesAuditEvents(t *testing.T) {
 
 func TestRefreshFailureWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{refreshErr: errors.New("bad refresh")}, nil, logger, false, false, nil, "")
+	h := NewHandler(&fakeAuthService{refreshErr: errors.New("bad refresh")}, nil, logger, false, false, nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{}`))
 	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "refresh-token"})
@@ -326,7 +326,7 @@ func TestRefreshFailureWritesAuditEvent(t *testing.T) {
 
 func TestForgotPasswordWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{}, nil, logger, false, false, &fakePasswordResetter{}, "")
+	h := NewHandler(&fakeAuthService{}, nil, logger, false, false, &fakePasswordResetter{}, "", nil)
 
 	body, _ := json.Marshal(map[string]string{"email": "user@example.com"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(body))
@@ -360,7 +360,7 @@ func TestResetPasswordWritesAuditEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-			h := NewHandler(&fakeAuthService{}, nil, logger, false, false, &fakePasswordResetter{resetErr: tt.resetErr}, "")
+			h := NewHandler(&fakeAuthService{}, nil, logger, false, false, &fakePasswordResetter{resetErr: tt.resetErr}, "", nil)
 
 			body, _ := json.Marshal(map[string]string{"token": "reset-token", "password": "StrongerPass123!"})
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(body))
@@ -387,7 +387,7 @@ func TestResetPasswordWritesAuditEvents(t *testing.T) {
 
 func TestLogoutWritesAuditEvent(t *testing.T) {
 	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
-	h := NewHandler(nil, nil, logger, false, false, nil, "")
+	h := NewHandler(nil, nil, logger, false, false, nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	req.RemoteAddr = "203.0.113.10:1234"
@@ -429,7 +429,7 @@ func TestAuthAuditWriteFailureIsLogged(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	logger := &recordingAuthAuditLogger{err: errors.New("db down"), done: make(chan struct{}, 1)}
-	h := NewHandler(&fakeAuthService{}, nil, logger, false, false, nil, "")
+	h := NewHandler(&fakeAuthService{}, nil, logger, false, false, nil, "", nil)
 	failuresBefore := audit.WriteFailures()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)

@@ -235,11 +235,10 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
 
 export const api = {
   login: async (email: string, password: string) =>
-    request<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string }>("/api/v1/auth/login", {
+    request<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string; mfa_setup_secret?: string; mfa_setup_url?: string }>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password, client_info: await getClientInfo() }),
     }),
-
   mfaChallenge: (mfaToken: string, totpCode: string) =>
     request<{ ok: boolean }>("/api/v1/auth/mfa/challenge", {
       method: "POST",

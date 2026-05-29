@@ -38,24 +38,25 @@ type Handler struct {
 	authSvc             authService
 	userSvc             *user.Service
 	auditRepo           auditLogger
+	settings            SettingReader // nil falls back to defaults
 	passwordResetter    PasswordResetter // nil when not configured
 	cookiesSecure       bool
 	registrationEnabled bool
 	publicAppURL        string // base URL for password-reset links (from config, never from request)
 }
 
-func NewHandler(authSvc authService, userSvc *user.Service, auditRepo auditLogger, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string) *Handler {
+func NewHandler(authSvc authService, userSvc *user.Service, auditRepo auditLogger, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string, settings SettingReader) *Handler {
 	return &Handler{
 		authSvc:             authSvc,
 		userSvc:             userSvc,
 		auditRepo:           auditRepo,
+		settings:            settings,
 		passwordResetter:    pr,
 		cookiesSecure:       cookiesSecure,
 		registrationEnabled: registrationEnabled,
 		publicAppURL:        publicAppURL,
 	}
 }
-
 // POST /api/v1/auth/token — client_credentials grant (M2M, returns tokens in JSON body)
 func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -339,10 +340,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := validation.Password(req.Password); err != nil {
+
+	complexity := "low"
+	if h.settings != nil {
+		complexity = h.settings.GetString(r.Context(), "password_complexity", "low")
+	}
+	if err := validation.PasswordWithComplexity(req.Password, complexity); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	if req.Locale == "" {
 		req.Locale = "tr"
 	}
@@ -424,10 +431,16 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing_fields")
 		return
 	}
-	if err := validation.Password(req.Password); err != nil {
+
+	complexity := "low"
+	if h.settings != nil {
+		complexity = h.settings.GetString(r.Context(), "password_complexity", "low")
+	}
+	if err := validation.PasswordWithComplexity(req.Password, complexity); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	if err := h.passwordResetter.Reset(r.Context(), req.Token, req.Password); err != nil {
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "auth.password_reset_failed",

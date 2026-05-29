@@ -159,7 +159,7 @@ func main() {
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
 	authSvc.ConfigureSecurityAnomalies(geoipSvc, ml)
-	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
+	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
@@ -454,7 +454,7 @@ func main() {
 
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
-			r.With(authmw.RequireRole("admin")).Patch("/admin/settings", settingsHandler.Update)
+			r.With(authmw.RequireRole("admin"), stepUpMFA).Patch("/admin/settings", settingsHandler.Update)
 
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)

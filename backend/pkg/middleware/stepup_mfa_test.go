@@ -17,7 +17,6 @@ type fakeMFAChecker struct {
 	enabled  bool
 	validFor map[string]bool
 }
-
 func (f *fakeMFAChecker) IsEnabled(ctx context.Context, userID string) bool {
 	return f.enabled
 }
@@ -26,6 +25,13 @@ func (f *fakeMFAChecker) Validate(ctx context.Context, userID, code string) bool
 	return f.validFor[code]
 }
 
+func (f *fakeMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, error) {
+	return "", "", nil
+}
+
+func (f *fakeMFAChecker) VerifyAndEnable(ctx context.Context, userID, code string) error {
+	return nil
+}
 func newTestRedis(t *testing.T) (*redis.Client, func()) {
 	t.Helper()
 	mr, err := miniredis.Run()

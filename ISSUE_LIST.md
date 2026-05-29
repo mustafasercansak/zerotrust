@@ -620,22 +620,29 @@ Status update:
 
 ### 26. Extend Global System Settings with Custom Security Policies
 
-State: OPEN
+State: CLOSED
 
-Status: System settings currently only support `max_sessions_per_user`. Other critical authentication and access rules (like password strength requirements, global MFA enforcement, and login rate limiting thresholds) are hardcoded or loaded exclusively from static environment variables.
+Status: Global system settings cannot configure password complexity, global MFA requirements, or maximum login lockout attempts, limiting security options.
 
 Related files:
-- [backend/internal/settings/repository.go](/home/m/projects/zerotrust/backend/internal/settings/repository.go)
+- [backend/internal/settings/handler.go](/home/m/projects/zerotrust/backend/internal/settings/handler.go)
 - [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
 - [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
 
 Acceptance criteria:
-- Add setting keys in the PostgreSQL `settings` database table for:
-  - Password complexity level (e.g. minimum length, requiring numbers/special characters).
-  - Global MFA requirement flag (force MFA setup for all users on login).
-  - Max login attempts before temporary account lockout.
-- Update the admin settings cache and service handlers to load and enforce these policies dynamically at runtime instead of hardcoding them.
-- Extend the "System Settings" UI tab in `SettingsPage.tsx` to display inputs and toggle controls for these new configurations.
+- Seed and support database keys for `password_complexity` (`"low" | "medium" | "strong"`), `global_mfa_required` (`"true" | "false"`), and `max_login_attempts` (`1` to `20`).
+- Enforce password complexity policies during register and reset dynamically.
+- Enforce lockout thresholds dynamically in `progressiveLockout`.
+- Support inline MFA onboarding/setup during login if `global_mfa_required` is enabled and the user does not have MFA configured.
+- Extend the frontend admin "System Settings" panel to expose inputs/controls for these settings, requiring step-up MFA challenge verification to save changes.
+
+Status update:
+- Created migrations `000014_system_security_policies.up.sql` and `down.sql` to seed default settings.
+- Implemented `PasswordWithComplexity` and wired setting checks in user registration and reset flows.
+- Extended `progressiveLockout` to read dynamic `max_login_attempts` from custom settings.
+- Handled inline MFA onboarding (returning setup secret/QR URL) during login when global MFA is required and MFA is not yet enabled.
+- Extended settings handler and service cache, securing Settings update checks with step-up MFA.
+- Added settings panel inputs (complexity level, max login attempts, global MFA requirement) in frontend Admin settings.
 
 ---
 

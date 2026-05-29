@@ -14,6 +14,9 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import MenuItem from "@mui/material/MenuItem";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
 
 function initials(me: { email: string; first_name?: string; last_name?: string }): string {
   const parts = [me.first_name, me.last_name].filter((x): x is string => !!x);
@@ -41,6 +44,9 @@ export default function SettingsPage() {
 
   // System Settings State
   const [maxSessions, setMaxSessions] = useState("");
+  const [passwordComplexity, setPasswordComplexity] = useState("low");
+  const [globalMfaRequired, setGlobalMfaRequired] = useState("false");
+  const [maxLoginAttempts, setMaxLoginAttempts] = useState("5");
   const [systemLoading, setSystemLoading] = useState(true);
   const [savingSystem, setSavingSystem] = useState(false);
   const [systemSuccess, setSystemSuccess] = useState(false);
@@ -58,7 +64,12 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!isAdmin) return;
     api.admin.getSettings()
-      .then((s) => setMaxSessions(s["max_sessions_per_user"] ?? "5"))
+      .then((s) => {
+        setMaxSessions(s["max_sessions_per_user"] ?? "5");
+        setPasswordComplexity(s["password_complexity"] ?? "low");
+        setGlobalMfaRequired(s["global_mfa_required"] ?? "false");
+        setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
+      })
       .catch(() => setSystemError("internal_error"))
       .finally(() => setSystemLoading(false));
   }, [isAdmin]);
@@ -117,15 +128,38 @@ export default function SettingsPage() {
     }
   }
 
+  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
+        throw err;
+      }
+      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
+      if (!code) {
+        throw err;
+      }
+      await api.mfaStepUp(code);
+      return action();
+    }
+  }
+
   async function handleSystemSave(e: React.FormEvent) {
     e.preventDefault();
     setSystemError(null);
     setSystemSuccess(false);
     const n = parseInt(maxSessions, 10);
     if (isNaN(n) || n < 1 || n > 20) { setSystemError("invalid_value"); return; }
+    const m = parseInt(maxLoginAttempts, 10);
+    if (isNaN(m) || m < 1 || m > 20) { setSystemError("invalid_value"); return; }
     setSavingSystem(true);
     try {
-      await api.admin.updateSettings({ max_sessions_per_user: String(n) });
+      await runWithStepUp(() => api.admin.updateSettings({
+        max_sessions_per_user: String(n),
+        password_complexity: passwordComplexity,
+        global_mfa_required: globalMfaRequired,
+        max_login_attempts: String(m),
+      }));
       setSystemSuccess(true);
       setTimeout(() => setSystemSuccess(false), 3000);
     } catch (err) {
@@ -203,10 +237,11 @@ export default function SettingsPage() {
                 <Typography variant="body2" color="text.secondary">{t("loading")}</Typography>
               </Box>
             ) : (
-              <Box sx={{ display: "grid", gap: 2 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxSessions")}</Typography>
-                <Typography variant="body2" color="text.secondary">{t("maxSessionsDesc")}</Typography>
-                <Box sx={{ display: "flex", gap: 2, alignItems: "center", mt: 1 }}>
+              <Box sx={{ display: "grid", gap: 3.5 }}>
+                {/* Max Sessions */}
+                <Box sx={{ display: "grid", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxSessions")}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("maxSessionsDesc")}</Typography>
                   <TextField
                     label={t("maxSessionsInput")}
                     type="number"
@@ -215,6 +250,57 @@ export default function SettingsPage() {
                     sx={{ width: 160 }}
                     slotProps={{ htmlInput: { min: 1, max: 20 } }}
                   />
+                </Box>
+
+                {/* Password Complexity */}
+                <Box sx={{ display: "grid", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("passwordComplexity")}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("passwordComplexityDesc")}</Typography>
+                  <TextField
+                    select
+                    label={t("passwordComplexityInput")}
+                    value={passwordComplexity}
+                    onChange={(e) => setPasswordComplexity(e.target.value)}
+                    sx={{ width: 320 }}
+                  >
+                    <MenuItem value="low">{t("passwordComplexityLow")}</MenuItem>
+                    <MenuItem value="medium">{t("passwordComplexityMedium")}</MenuItem>
+                    <MenuItem value="strong">{t("passwordComplexityStrong")}</MenuItem>
+                  </TextField>
+                </Box>
+
+                {/* Max Login Attempts */}
+                <Box sx={{ display: "grid", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxLoginAttempts")}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("maxLoginAttemptsDesc")}</Typography>
+                  <TextField
+                    label={t("maxLoginAttemptsInput")}
+                    type="number"
+                    value={maxLoginAttempts}
+                    onChange={(e) => setMaxLoginAttempts(e.target.value)}
+                    sx={{ width: 160 }}
+                    slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                  />
+                </Box>
+
+                {/* Global MFA */}
+                <Box sx={{ display: "grid", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("globalMfaRequired")}</Typography>
+                  <Typography variant="body2" color="text.secondary">{t("globalMfaRequiredDesc")}</Typography>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={globalMfaRequired === "true"}
+                        onChange={(e) => setGlobalMfaRequired(e.target.checked ? "true" : "false")}
+                        color="primary"
+                      />
+                    }
+                    label={t("globalMfaRequired")}
+                    sx={{ mt: 1 }}
+                  />
+                </Box>
+
+                <Box sx={{ mt: 1 }}>
                   <Button type="submit" variant="contained" disabled={savingSystem} sx={{ minWidth: 120 }}>
                     {savingSystem ? t("saving") : t("save")}
                   </Button>

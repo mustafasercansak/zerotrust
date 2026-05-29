@@ -9,6 +9,8 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import MuiLink from "@mui/material/Link";
 import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import { QRCodeSVG } from "qrcode.react";
 
 type Stage = "credentials" | "mfa";
 
@@ -20,6 +22,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mfaToken, setMfaToken] = useState("");
+  const [mfaSetupSecret, setMfaSetupSecret] = useState("");
+  const [mfaSetupURL, setMfaSetupURL] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,6 +44,10 @@ export default function LoginPage() {
       const result = await api.login(email, password);
       if (result.mfa_required && result.mfa_token) {
         setMfaToken(result.mfa_token);
+        if (result.mfa_setup_url && result.mfa_setup_secret) {
+          setMfaSetupURL(result.mfa_setup_url);
+          setMfaSetupSecret(result.mfa_setup_secret);
+        }
         setStage("mfa");
         return;
       }
@@ -89,6 +97,24 @@ export default function LoginPage() {
     return (
       <AuthPage title={t("mfaTitle")} subtitle={t("mfaSubtitle")}>
         <Box component="form" onSubmit={handleMFA} sx={{ display: "grid", gap: 2 }}>
+          {mfaSetupURL && (
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, mb: 1 }}>
+              <Typography variant="body2" color="warning.main" sx={{ fontWeight: 600, textAlign: "center" }}>
+                {t("mfaSetupRequiredDesc")}
+              </Typography>
+              <Box sx={{ p: 1.5, bgcolor: "#ffffff", borderRadius: 2, border: 1, borderColor: "divider", display: "flex" }}>
+                <QRCodeSVG value={mfaSetupURL} size={156} includeMargin={false} />
+              </Box>
+              <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 1.5, width: "100%" }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                  {t("secretLabel")}
+                </Typography>
+                <Typography variant="body2" color="success.main" sx={{ fontFamily: "monospace", fontWeight: 700, overflowWrap: "anywhere" }}>
+                  {mfaSetupSecret}
+                </Typography>
+              </Box>
+            </Box>
+          )}
           <TextField
             label={t("mfaCode")}
             type="text"
@@ -110,7 +136,7 @@ export default function LoginPage() {
           </Button>
           <Button
             type="button"
-            onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); }}
+            onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); }}
             color="inherit"
           >
             {t("backToLogin")}

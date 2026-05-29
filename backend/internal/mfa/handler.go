@@ -39,8 +39,7 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-
-	result, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
+	otpAuthURL, secret, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
 	if err != nil {
 		if err.Error() == "invalid_code" || err.Error() == "current_code_required" {
 			writeError(w, http.StatusBadRequest, "invalid_code")
@@ -52,8 +51,8 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"otp_auth_url": result.OTPAuthURL,
-		"secret":       result.Secret,
+		"otp_auth_url": otpAuthURL,
+		"secret":       secret,
 	})
 }
 

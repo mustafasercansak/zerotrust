@@ -31,6 +31,8 @@ type UserReader interface {
 type MFAChecker interface {
 	IsEnabled(ctx context.Context, userID string) bool
 	Validate(ctx context.Context, userID, code string) bool
+	Setup(ctx context.Context, userID, email, currentCode string) (string, string, error)
+	VerifyAndEnable(ctx context.Context, userID, code string) error
 }
 
 // SessionStore persists refresh-token sessions.
@@ -48,23 +50,23 @@ type SessionStore interface {
 	// session to enforce a per-user session cap.
 	EvictExcessSessions(ctx context.Context, userID string, keep int) error
 	// CheckReuse returns the owning userID if the hash belongs to an already-
-	// rotated session, indicating a stolen token is being replayed.
+	// used refresh token, indicating a potential token reuse attack.
 	CheckReuse(ctx context.Context, hash string) (string, error)
 	// RevokeAllForUser terminates every active session for the user. Used as
 	// the security response when token reuse is detected.
 	RevokeAllForUser(ctx context.Context, userID string) error
 }
-
-// ServiceAccountRecord is the data auth.Service needs when issuing service tokens.
-// It is populated by whatever implements ServiceAccountStore (avoids import cycle).
+// ServiceAccountRecord maps data returned from saStoreAdapter.
 type ServiceAccountRecord struct {
-	Name                string
-	ClientSecretHash    string
-	Scopes              []string
-	IsActive            bool
-	ExpiresAt           *time.Time
-	OldClientSecretHash *string
-	OldSecretExpiresAt  *time.Time
+	ID                    string
+	ClientID              string
+	Name                  string
+	ClientSecretHash      string
+	OldClientSecretHash   *string
+	OldSecretExpiresAt    *time.Time
+	IsActive              bool
+	Scopes                []string
+	ExpiresAt             *time.Time
 }
 
 // ServiceAccountStore abstracts service account lookups for the auth service.
@@ -77,6 +79,8 @@ type ServiceAccountStore interface {
 // feature and the caller falls back to a hardcoded default.
 type SettingReader interface {
 	GetInt(ctx context.Context, key string, defaultVal int) int
+	GetString(ctx context.Context, key string, defaultVal string) string
+	GetBool(ctx context.Context, key string, defaultVal bool) bool
 }
 
 const (
@@ -125,6 +129,8 @@ type LoginResult struct {
 	Pair            *TokenPair
 	MFARequired     bool
 	MFAPendingToken string
+	MFASetupSecret  string
+	MFASetupURL     string
 	AnomalyType     string
 	AnomalyDetails  string
 }
@@ -201,18 +207,43 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		}
 	}
 
-	if s.mfa != nil && s.mfa.IsEnabled(ctx, u.ID) {
+	globalMFARequired := false
+	if s.settings != nil {
+		globalMFARequired = s.settings.GetBool(ctx, "global_mfa_required", false)
+	}
+
+	if s.mfa != nil && (s.mfa.IsEnabled(ctx, u.ID) || globalMFARequired) {
 		token, err := generateOpaqueToken()
 		if err != nil {
 			return nil, err
 		}
-		data, _ := json.Marshal(map[string]any{"uid": u.ID, "ip": ip, "ua": ua, "device_info": deviceInfo})
+
+		var setupSecret, setupURL string
+		if globalMFARequired && !s.mfa.IsEnabled(ctx, u.ID) {
+			url, secret, err := s.mfa.Setup(ctx, u.ID, u.Email, "")
+			if err != nil {
+				return nil, err
+			}
+			setupSecret = secret
+			setupURL = url
+		}
+
+		data, _ := json.Marshal(map[string]any{
+			"uid":          u.ID,
+			"ip":           ip,
+			"ua":           ua,
+			"device_info":  deviceInfo,
+			"setup_secret": setupSecret,
+			"setup_url":    setupURL,
+		})
 		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
 			return nil, err
 		}
 		return &LoginResult{
 			MFARequired:     true,
 			MFAPendingToken: token,
+			MFASetupSecret:  setupSecret,
+			MFASetupURL:     setupURL,
 			AnomalyType:     anomalyType,
 			AnomalyDetails:  anomalyDetails,
 		}, nil
@@ -368,18 +399,30 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 	}
 
 	var m struct {
-		UID        string            `json:"uid"`
-		IP         string            `json:"ip"`
-		UA         string            `json:"ua"`
-		DeviceInfo map[string]string `json:"device_info"`
+		UID         string            `json:"uid"`
+		IP          string            `json:"ip"`
+		UA          string            `json:"ua"`
+		DeviceInfo  map[string]string `json:"device_info"`
+		SetupSecret string            `json:"setup_secret"`
+		SetupURL    string            `json:"setup_url"`
 	}
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
 	userID := m.UID
-	if s.mfa == nil || !s.mfa.Validate(ctx, userID, totpCode) {
+	if s.mfa == nil {
 		return nil, ErrInvalidCredentials
+	}
+
+	if m.SetupSecret != "" {
+		if err := s.mfa.VerifyAndEnable(ctx, userID, totpCode); err != nil {
+			return nil, ErrInvalidCredentials
+		}
+	} else {
+		if !s.mfa.Validate(ctx, userID, totpCode) {
+			return nil, ErrInvalidCredentials
+		}
 	}
 
 	u, err := s.users.FindByID(ctx, userID)
@@ -523,14 +566,29 @@ func (s *Service) checkLockout(ctx context.Context, email string) error {
 	}
 	return nil
 }
-
 func (s *Service) recordFailedAttempt(ctx context.Context, email string) {
 	if s.rdb == nil {
 		return
 	}
 	fkey := failKey(email)
 	count, _ := s.rdb.Incr(ctx, fkey).Result()
-	if d := progressiveLockout(count); d > 0 {
+
+	maxAttempts := 5
+	if s.settings != nil {
+		maxAttempts = s.settings.GetInt(ctx, "max_login_attempts", 5)
+	}
+
+	if count >= int64(maxAttempts) {
+		diff := count - int64(maxAttempts)
+		var d time.Duration
+		switch {
+		case diff < 3:
+			d = 1 * time.Minute
+		case diff < 6:
+			d = 5 * time.Minute
+		default:
+			d = 30 * time.Minute
+		}
 		s.rdb.Set(ctx, lockoutKey(email), "1", d)
 	}
 }

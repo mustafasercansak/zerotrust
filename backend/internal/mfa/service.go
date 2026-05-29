@@ -56,26 +56,22 @@ func (s *Service) markUsed(ctx context.Context, userID, code string) bool {
 	ok, err := s.rdb.SetNX(ctx, key, "1", usedCodeTTL).Result()
 	return err != nil || ok
 }
-
 // Setup generates a new TOTP secret and stores it as a *pending* candidate.
 // The active secret (and enabled_at) are untouched until VerifyAndEnable succeeds.
-//
-// If MFA is already enabled, currentCode must be the user's live TOTP code to
-// prevent a stolen session from rotating MFA to an attacker-controlled device.
-func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) (*SetupResult, error) {
+func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) (string, string, error) {
 	if s.repo.IsEnabled(ctx, userID) {
 		if currentCode == "" {
-			return nil, errors.New("current_code_required")
+			return "", "", errors.New("current_code_required")
 		}
 		secret, err := s.decryptSecret(ctx, userID)
 		if err != nil {
-			return nil, err
+			return "", "", err
 		}
 		if !totp.Validate(currentCode, secret) {
-			return nil, errors.New("invalid_code")
+			return "", "", errors.New("invalid_code")
 		}
 		if !s.markUsed(ctx, userID, currentCode) {
-			return nil, errors.New("code_already_used")
+			return "", "", errors.New("code_already_used")
 		}
 	}
 
@@ -84,25 +80,20 @@ func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) 
 		AccountName: email,
 	})
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 
 	enc, err := appCrypto.Encrypt(s.encKey, []byte(key.Secret()))
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 
 	if err := s.repo.UpsertPending(ctx, userID, hex.EncodeToString(enc)); err != nil {
-		return nil, err
+		return "", "", err
 	}
 
-	return &SetupResult{
-		OTPAuthURL: key.URL(),
-		Secret:     key.Secret(),
-	}, nil
+	return key.URL(), key.Secret(), nil
 }
-
-// VerifyAndEnable validates a TOTP code against the *pending* secret and, if
 // valid, atomically promotes it to the active secret. Returns an error if
 // the code is wrong or there is no pending setup in progress.
 func (s *Service) VerifyAndEnable(ctx context.Context, userID, code string) error {
