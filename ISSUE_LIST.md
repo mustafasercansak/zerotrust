@@ -386,3 +386,25 @@ Status update:
 - Embedded references to the three core UI screenshots in `README.md`.
 - Created a beautifully styled standalone `showcase.html` with vanilla CSS, modern typography, glassmorphic cards, and detailed feature breakdowns.
 - Collaborated with the user to replace the screenshots with English interface captures.
+
+### 16. Publish showcase page to GitHub Pages
+
+State: CLOSED
+
+Status: The showcase page is local and needs to be hosted on GitHub Pages so others can view it easily from the web.
+
+Related files:
+- [showcase.html](/home/m/projects/zerotrust/showcase.html)
+- [docs/index.html](/home/m/projects/zerotrust/docs/index.html)
+- [README.md](/home/m/projects/zerotrust/README.md)
+
+Acceptance criteria:
+- Move and rename `showcase.html` to `docs/index.html` so it functions as the index entrypoint for GitHub Pages deployment.
+- Update image source paths inside the new `docs/index.html` from `docs/images/` to `images/` (since they are now adjacent relative paths).
+- Update references in `README.md` or other docs if they link to `showcase.html`.
+- Add a GitHub Pages URL reference in `README.md` so visitors can access the live showcase.
+
+Status update:
+- Moved the `showcase.html` file to `docs/index.html` to serve as the entry page for the repository's GitHub Pages site.
+- Updated all image source paths within `docs/index.html` to use relative references (`images/...`).
+- Added the public live showcase URL to [README.md](file:///home/m/projects/zerotrust/README.md).

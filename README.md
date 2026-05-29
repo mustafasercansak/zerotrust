@@ -2,6 +2,8 @@
 
 A security-focused Zero Trust authentication and authorization platform built with Go, React, Vite, PostgreSQL, Redis, and Docker.
 
+> **Live Showcase:** [View the Interactive Showcase](https://mustafasercansak.github.io/zerotrust/)
+>
 > **Status:** Active development. This project is designed as a serious learning and portfolio project for modern auth/security engineering. It has not been independently audited and should not be treated as production-ready without further review, testing, and hardening.
 
 ## Architecture
