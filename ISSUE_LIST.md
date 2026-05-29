@@ -408,3 +408,45 @@ Status update:
 - Moved the `showcase.html` file to `docs/index.html` to serve as the entry page for the repository's GitHub Pages site.
 - Updated all image source paths within `docs/index.html` to use relative references (`images/...`).
 - Added the public live showcase URL to [README.md](file:///home/m/projects/zerotrust/README.md).
+
+### 17. Optimize CSRF token lifetime and prevent rotation races
+
+State: CLOSED
+
+Status: Currently, the CSRF token is regenerated on every call to `writeCookies`, which runs during access token refresh (every 1 minute). This frequency can lead to race conditions for concurrent browser requests if they submit an old token right as rotation completes.
+
+Related files:
+- [backend/internal/auth/handler.go](/home/m/projects/zerotrust/backend/internal/auth/handler.go)
+- [backend/pkg/middleware/csrf.go](/home/m/projects/zerotrust/backend/pkg/middleware/csrf.go)
+
+Acceptance criteria:
+- Reuse the existing `csrf_token` cookie if present and valid in the request, instead of generating a new one on every 1-minute access-token refresh.
+- Only generate a new CSRF token on initial login or when the session is initialized/replaced.
+- Ensure security properties are maintained (tokens remain cryptographically secure and match the double-submit header validation).
+
+Status update:
+- Updated the `writeCookies` signature in `backend/internal/auth/handler.go` to accept the `*http.Request` pointer.
+- Modified the cookie-writing logic to check for an existing `csrf_token` cookie in the request and reuse its value.
+- Re-generation is now limited to scenarios where no valid CSRF cookie is present (e.g. initial login, fresh sessions).
+- Ensured all callers in the auth handler pass the request parameter, and all unit/integration tests pass cleanly.
+
+---
+
+### 18. Implement user avatar upload, serving, and deletion
+
+State: OPEN
+
+Status: Database migration `000012_avatar_local_storage.up.sql` added avatar schema fields (`avatar_object_key` and `avatar_size`) to the `users` table, and the user profile models support `HasAvatar`. However, the API endpoints for uploading, downloading/serving, and deleting avatar files are not yet implemented.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [backend/internal/user/repository.go](/home/m/projects/zerotrust/backend/internal/user/repository.go)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Acceptance criteria:
+- Create backend endpoints:
+  - `POST /api/v1/me/avatar` to upload an avatar image (with size limits and image file validation).
+  - `GET /api/v1/me/avatar` or static asset routing to fetch/stream the avatar image.
+  - `DELETE /api/v1/me/avatar` to remove the avatar.
+- Store avatar files securely (either locally in a bounded storage directory or via object storage).
+- Integrate avatar upload and view functionality in the frontend User Settings/Profile page.

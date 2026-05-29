@@ -170,7 +170,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeCookies(w, result.Pair)
+	h.writeCookies(w, r, result.Pair)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -245,7 +245,7 @@ func (h *Handler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 		Metadata:  statusMetadata("", http.StatusOK),
 	}, true)
 
-	h.writeCookies(w, pair)
+	h.writeCookies(w, r, pair)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -276,7 +276,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeCookies(w, pair)
+	h.writeCookies(w, r, pair)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -358,7 +358,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !result.MFARequired {
-		h.writeCookies(w, result.Pair)
+		h.writeCookies(w, r, result.Pair)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -437,7 +437,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 // writeCookies sets the four session cookies: access_token (httpOnly), refresh_token (httpOnly),
 // csrf_token (JS-readable, double-submit pattern), at_exp (JS-readable, for refresh scheduling).
-func (h *Handler) writeCookies(w http.ResponseWriter, pair *TokenPair) {
+func (h *Handler) writeCookies(w http.ResponseWriter, r *http.Request, pair *TokenPair) {
 	secure := h.cookiesSecure
 	expAt := time.Now().Add(AccessTTL)
 
@@ -459,10 +459,19 @@ func (h *Handler) writeCookies(w http.ResponseWriter, pair *TokenPair) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(RefreshTTL.Seconds()),
 	})
-	// csrf_token: long-lived so it survives multiple access token refresh cycles
+	// csrf_token: reuse existing cookie value if present and valid to prevent rotation races
+	csrfVal := ""
+	if r != nil {
+		if c, err := r.Cookie("csrf_token"); err == nil && c.Value != "" {
+			csrfVal = c.Value
+		}
+	}
+	if csrfVal == "" {
+		csrfVal = newCSRFToken()
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "csrf_token",
-		Value:    newCSRFToken(),
+		Value:    csrfVal,
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   secure,
