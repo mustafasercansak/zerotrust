@@ -187,6 +187,7 @@
     "statusPending": "Setup Pending",
     "enabledDesc": "Your account is protected with TOTP authentication.",
     "disabledDesc": "Add an extra layer of security with an authenticator app.",
+    "unsupportedDesc": "Two-factor authentication is globally disabled by the administrator.",
     "setupButton": "Enable 2FA",
     "setupInstructions": "Scan the code below or enter the secret manually in your authenticator app (Google Authenticator, Authy, etc.).",
     "secretLabel": "Manual entry secret",

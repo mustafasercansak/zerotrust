@@ -187,6 +187,7 @@
     "statusPending": "Kurulum Bekliyor",
     "enabledDesc": "Hesabınız TOTP kimlik doğrulamasıyla korunuyor.",
     "disabledDesc": "Kimlik doğrulama uygulamasıyla ekstra güvenlik katmanı ekleyin.",
+    "unsupportedDesc": "İki faktörlü kimlik doğrulama sistem yöneticisi tarafından devre dışı bırakılmış.",
     "setupButton": "2FA'yı Etkinleştir",
     "setupInstructions": "Aşağıdaki kodu kimlik doğrulama uygulamanızda (Google Authenticator, Authy vb.) taratın veya gizli anahtarı manuel olarak girin.",
     "secretLabel": "Manuel giriş anahtarı",

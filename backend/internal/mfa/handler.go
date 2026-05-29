@@ -117,7 +117,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 
 	enabled := h.svc.IsEnabled(r.Context(), claims.UserID)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"enabled": enabled})
+	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": enabled, "supported": true})
 }
 
 // POST /api/v1/mfa/step-up — verifies a live TOTP code and marks this session

@@ -319,3 +319,26 @@ Status update:
 - Integrated `runWithStepUp` in `UsersPage.tsx` and wrapped user status changes, bulk session revocations, and individual session revocations.
 - Wrapped service account status changes and revocation actions with `runWithStepUp` in `ServiceAccountsPage.tsx`.
 - Verified that all backend tests pass and the frontend builds cleanly.
+
+### 13. Gracefully handle globally disabled MFA on the frontend
+
+State: CLOSED
+
+Status: When MFA is disabled in the backend settings (MFA_ENABLED=false), the MFA-related API endpoints return 404 because they are not registered in the router. Clicking "Enable 2FA" on the frontend MfaPage results in a generic "Server error" instead of a clean, informative message indicating that MFA is disabled by the administrator.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/pages/dashboard/MfaPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/MfaPage.tsx)
+
+Acceptance criteria:
+- Register the `/api/v1/mfa/status` endpoint regardless of the `MFA_ENABLED` flag, and have it return `{ "enabled": false, "supported": false }` when disabled.
+- Alternatively, have the frontend detect a 404 or a `"supported": false` response from `/api/v1/mfa/status` and render a clear warning message: "Multi-factor authentication is currently disabled by the system administrator."
+- Disable the "Enable 2FA" button when MFA is globally disabled.
+
+Status update:
+- Updated the backend `/api/v1/mfa/status` endpoint to return a `supported` flag (`true` when active).
+- Registered a fallback `/api/v1/mfa/status` handler when `MFA_ENABLED=false` that returns `{"enabled": false, "supported": false}` instead of triggering a 404 error.
+- Updated frontend `api.ts` types to support `supported` attribute.
+- Created `unsupported` localization descriptors and updated frontend `MfaPage.tsx` to cleanly present a warning indicating MFA is disabled by system administrator.
+
+

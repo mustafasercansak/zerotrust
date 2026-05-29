@@ -283,7 +283,7 @@ export const api = {
   listAuditLog: (p: PageParams) =>
     request<PagedResult<AuditEntry>>(`/api/v1/admin/audit${buildQuery(p)}`),
 
-  mfaStatus: () => request<{ enabled: boolean }>("/api/v1/mfa/status"),
+  mfaStatus: () => request<{ enabled: boolean; supported?: boolean }>("/api/v1/mfa/status"),
 
   mfaSetup: () =>
     request<{ otp_auth_url: string; secret: string }>("/api/v1/mfa/setup", { method: "POST" }),

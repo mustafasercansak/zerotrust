@@ -310,6 +310,11 @@ func main() {
 				r.Post("/mfa/verify", mfaHandler.Verify)
 				r.Post("/mfa/disable", mfaHandler.Disable)
 				r.Post("/mfa/step-up", mfaHandler.StepUp)
+			} else {
+				r.Get("/mfa/status", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(`{"enabled":false,"supported":false}`))
+				})
 			}
 
 			// User management

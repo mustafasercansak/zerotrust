@@ -13,7 +13,7 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
-type Status = "loading" | "disabled" | "pending" | "enabled";
+type Status = "loading" | "disabled" | "pending" | "enabled" | "unsupported";
 
 export default function MfaPage() {
   const { t } = useTranslation("mfa");
@@ -25,7 +25,15 @@ export default function MfaPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api.mfaStatus().then((d) => setStatus(d.enabled ? "enabled" : "disabled")).catch(() => setStatus("disabled"));
+    api.mfaStatus()
+      .then((d) => {
+        if (d.supported === false) {
+          setStatus("unsupported");
+        } else {
+          setStatus(d.enabled ? "enabled" : "disabled");
+        }
+      })
+      .catch(() => setStatus("unsupported"));
   }, []);
 
   async function handleSetup() {
@@ -109,6 +117,16 @@ export default function MfaPage() {
             <Button onClick={handleSetup} variant="contained" disabled={submitting} sx={{ justifySelf: { md: "end" }, minWidth: 160 }}>
               {t("setupButton")}
             </Button>
+          </Box>
+        )}
+
+        {status === "unsupported" && (
+          <Box sx={{ px: 3, py: 2.75 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sectionTitle")}</Typography>
+              <Chip size="small" variant="outlined" color="warning" label={t("statusDisabled")} />
+            </Box>
+            <Typography variant="body2" color="text.secondary">{t("unsupportedDesc")}</Typography>
           </Box>
         )}
 
