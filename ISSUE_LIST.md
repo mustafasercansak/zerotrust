@@ -275,6 +275,8 @@ Status update:
 
 ### 10. Clarify auth and session behavior in the README using product language
 
+State: CLOSED
+
 Status: The security features are documented, but some actual runtime behaviors remain ambiguous.
 
 Related files:
@@ -285,6 +287,9 @@ Acceptance criteria:
 - Clearly describe refresh policy and idle-timeout behavior.
 - Document logout and revoke semantics.
 - Clearly explain MFA prerequisites and the service account auth model.
+
+Status update:
+- Extensively updated the README with clear, developer-facing product language explaining the browser cookies auth flow, system timeout cache behaviors, logout/revocation semantics (with token reuse detection), TOTP MFA step-up requirements, and M2M service accounts token issue structure.
 
 ### 12. Expand step-up MFA coverage to destructive admin actions
 
