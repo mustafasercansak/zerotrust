@@ -521,5 +521,75 @@ Status update:
 - Configured a generous `rowHeight={64}` for the users page table to handle name and email entries safely.
 - Wrapped user column text components with a column-flex container having `justifyContent: "center"` and explicit `lineHeight: 1.2`.
 
+---
+
+## Future Improvements
+
+### 22. Implement User Self-Service Security & Session Management Page
+
+State: OPEN
+
+Status: Users can modify their names and configure MFA, but they lack a dedicated security panel to audit and revoke their active login sessions.
+
+Related files:
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+- [backend/internal/session/handler.go](/home/m/projects/zerotrust/backend/internal/session/handler.go)
+
+Acceptance criteria:
+- Create a "Security Settings" tab or section inside the User Settings Page.
+- Fetch and display the logged-in user's active sessions (IP, device info, last active timestamp, and indicator for "current session").
+- Provide buttons to revoke a specific session or "log out from all other devices".
+
+---
+
+### 23. Add Interactive Charts and Search Filters to Admin Audit Logs
+
+State: OPEN
+
+Status: The current admin audit page shows a simple, un-paged table of raw log events with no search, filtering, or visual metrics.
+
+Related files:
+- [frontend/src/pages/dashboard/AuditPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/AuditPage.tsx)
+- [backend/internal/audit/handler.go](/home/m/projects/zerotrust/backend/internal/audit/handler.go)
+
+Acceptance criteria:
+- Integrate search inputs and filters (filter by user, IP address, action name, or outcome).
+- Render visual analytics charts (e.g., success vs. failure ratios over time) to easily spot brute-force attacks or access anomalies.
+
+---
+
+### 24. Implement Geolocation and Context-Aware MFA challenges for logins
+
+State: OPEN
+
+Status: Logins are validated purely by username/password + MFA. The system does not verify context (e.g. traveling between countries or using unknown devices).
+
+Related files:
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
+- [backend/pkg/middleware/ip.go](/home/m/projects/zerotrust/backend/pkg/middleware/ip.go)
+
+Acceptance criteria:
+- Parse remote IP geolocation using a free GeoIP database library (such as MaxMind GeoLite2).
+- Detect impossible travel (e.g., logging in from two distant locations within a short time) or first-time devices.
+- Force a step-up MFA challenge or alert the user via email on anomaly detection.
+
+---
+
+### 25. Add Service Account Client Secret Rotation with Grace Period
+
+State: OPEN
+
+Status: Service account secrets are static and displayed only once at creation. If a client secret needs rotation, the service account must be recreated, leading to consumer downtime.
+
+Related files:
+- [backend/internal/serviceaccount/service.go](/home/m/projects/zerotrust/backend/internal/serviceaccount/service.go)
+- [backend/internal/serviceaccount/handler.go](/home/m/projects/zerotrust/backend/internal/serviceaccount/handler.go)
+
+Acceptance criteria:
+- Create an API endpoint and UI action to rotate a service account's client secret.
+- Allow a temporary overlap window (grace period, e.g. 1 hour) where both the old and new client secrets remain valid to prevent client script failures during migration.
+- Automatically deprecate the old secret once the window expires.
+
+
 
 
