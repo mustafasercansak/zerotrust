@@ -596,7 +596,7 @@ Status update:
 
 ### 25. Add Service Account Client Secret Rotation with Grace Period
 
-State: OPEN
+State: CLOSED
 
 Status: Service account secrets are static and displayed only once at creation. If a client secret needs rotation, the service account must be recreated, leading to consumer downtime.
 
@@ -608,6 +608,13 @@ Acceptance criteria:
 - Create an API endpoint and UI action to rotate a service account's client secret.
 - Allow a temporary overlap window (grace period, e.g. 1 hour) where both the old and new client secrets remain valid to prevent client script failures during migration.
 - Automatically deprecate the old secret once the window expires.
+
+Status update:
+- Added `000013_service_account_secret_rotation` migration to store the old secret hash and its expiration timestamp.
+- Updated `ClientCredentials` authentication logic to accept the old secret if it matches and is within the 1-hour grace period.
+- Created `/api/v1/admin/service-accounts/{id}/rotate` endpoint requiring step-up MFA.
+- Added a "Rotate Secret" action button to the frontend Service Accounts table grid, triggering the MFA challenge and displaying the new secret key.
+- Added unit tests for secret grace period validation.
 
 ---
 

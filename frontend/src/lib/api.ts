@@ -377,6 +377,11 @@ export const api = {
         body: JSON.stringify(payload),
       }),
 
+    rotateServiceAccountSecret: (id: string) =>
+      request<ServiceAccountCreated>(`/api/v1/admin/service-accounts/${id}/rotate`, {
+        method: "POST",
+      }),
+
     createServiceToken: async (payload: { client_id: string; client_secret: string }) => {
       const res = await fetch("/api/v1/auth/token", {
         method: "POST",

@@ -58,11 +58,13 @@ type SessionStore interface {
 // ServiceAccountRecord is the data auth.Service needs when issuing service tokens.
 // It is populated by whatever implements ServiceAccountStore (avoids import cycle).
 type ServiceAccountRecord struct {
-	Name             string
-	ClientSecretHash string
-	Scopes           []string
-	IsActive         bool
-	ExpiresAt        *time.Time
+	Name                string
+	ClientSecretHash    string
+	Scopes              []string
+	IsActive            bool
+	ExpiresAt           *time.Time
+	OldClientSecretHash *string
+	OldSecretExpiresAt  *time.Time
 }
 
 // ServiceAccountStore abstracts service account lookups for the auth service.
@@ -483,7 +485,11 @@ func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string
 	if sa.ExpiresAt != nil && time.Now().After(*sa.ExpiresAt) {
 		return nil, ErrInactiveUser
 	}
-	if !s.saSvc.CheckSecret(sa.ClientSecretHash, secret) {
+	secretValid := s.saSvc.CheckSecret(sa.ClientSecretHash, secret)
+	if !secretValid && sa.OldClientSecretHash != nil && sa.OldSecretExpiresAt != nil && time.Now().Before(*sa.OldSecretExpiresAt) {
+		secretValid = s.saSvc.CheckSecret(*sa.OldClientSecretHash, secret)
+	}
+	if !secretValid {
 		return nil, ErrInvalidCredentials
 	}
 	return GenerateServiceToken(s.ks, clientID, sa.Name, sa.Scopes, serviceTokenTTL)

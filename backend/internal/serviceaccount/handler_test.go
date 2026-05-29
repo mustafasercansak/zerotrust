@@ -136,6 +136,10 @@ func (s *fakeServiceAccountService) SetActive(ctx context.Context, id string, ac
 	return s.setActiveErr
 }
 
+func (s *fakeServiceAccountService) RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error) {
+	return &ServiceAccount{ID: id, Name: "rotated", ClientID: "svc_1", IsActive: true, CreatedAt: time.Now()}, "newsecret", nil
+}
+
 func requestWithClaims(req *http.Request) *http.Request {
 	claims := &auth.Claims{Permissions: []string{"users:read", "service_accounts:create", "service_accounts:update"}}
 	ctx := context.WithValue(req.Context(), middleware.ClaimsKey, claims)
@@ -251,5 +255,25 @@ func TestUpdateMapsNotFoundAndScopePolicyErrors(t *testing.T) {
 				t.Fatalf("body=%s want %q", rr.Body.String(), tc.body)
 			}
 		})
+	}
+}
+
+func TestRotateSecretSuccess(t *testing.T) {
+	svc := &fakeServiceAccountService{}
+	h := &Handler{svc: svc, hub: NewEventHub()}
+	req := requestWithURLParam(
+		httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts/sa1/rotate", nil),
+		"id",
+		"sa1",
+	)
+	rr := httptest.NewRecorder()
+
+	h.RotateSecret(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte(`"client_secret":"newsecret"`)) {
+		t.Fatalf("expected response to contain rotated secret, got %s", rr.Body.String())
 	}
 }

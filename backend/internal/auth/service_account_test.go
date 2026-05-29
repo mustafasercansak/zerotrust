@@ -40,7 +40,13 @@ func (s *clientCredentialsStore) FindByClientID(ctx context.Context, clientID st
 }
 
 func (s *clientCredentialsStore) CheckSecret(hash, secret string) bool {
-	return hash == "valid-hash" && secret == "valid-secret"
+	if hash == "valid-hash" && secret == "valid-secret" {
+		return true
+	}
+	if hash == "old-hash" && secret == "old-secret" {
+		return true
+	}
+	return false
 }
 
 func newClientCredentialsService(t *testing.T, store ServiceAccountStore) *Service {
@@ -151,5 +157,49 @@ func TestClientCredentialsRejectsInvalidSecret(t *testing.T) {
 	_, err := svc.ClientCredentials(context.Background(), "svc_123", "wrong-secret")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("ClientCredentials error=%v want ErrInvalidCredentials", err)
+	}
+}
+
+func TestClientCredentialsAcceptsOldSecretWithinGracePeriod(t *testing.T) {
+	future := time.Now().Add(30 * time.Minute)
+	oldHash := "old-hash"
+	store := &clientCredentialsStore{record: &ServiceAccountRecord{
+		Name:                "Rotated Bot",
+		ClientSecretHash:    "valid-hash",
+		Scopes:              []string{"users:read"},
+		IsActive:            true,
+		OldClientSecretHash: &oldHash,
+		OldSecretExpiresAt:  &future,
+	}}
+	svc := newClientCredentialsService(t, store)
+
+	// New secret works
+	if _, err := svc.ClientCredentials(context.Background(), "svc_123", "valid-secret"); err != nil {
+		t.Fatalf("new secret failed: %v", err)
+	}
+
+	// Old secret works within grace period
+	if _, err := svc.ClientCredentials(context.Background(), "svc_123", "old-secret"); err != nil {
+		t.Fatalf("old secret within grace period failed: %v", err)
+	}
+}
+
+func TestClientCredentialsRejectsOldSecretAfterGracePeriod(t *testing.T) {
+	past := time.Now().Add(-5 * time.Minute)
+	oldHash := "old-hash"
+	store := &clientCredentialsStore{record: &ServiceAccountRecord{
+		Name:                "Rotated Bot",
+		ClientSecretHash:    "valid-hash",
+		Scopes:              []string{"users:read"},
+		IsActive:            true,
+		OldClientSecretHash: &oldHash,
+		OldSecretExpiresAt:  &past,
+	}}
+	svc := newClientCredentialsService(t, store)
+
+	// Old secret fails after grace period
+	_, err := svc.ClientCredentials(context.Background(), "svc_123", "old-secret")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials for expired old secret, got: %v", err)
 	}
 }

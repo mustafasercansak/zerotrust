@@ -269,6 +269,8 @@
     "expired": "Expired",
     "revoke": "Revoke",
     "revokeConfirm": "Are you sure you want to revoke \"{{name}}\"? This cannot be undone.",
+    "rotate": "Rotate Secret",
+    "rotateConfirm": "Are you sure you want to rotate the secret for \"{{name}}\"? The old secret will remain active for 1 hour, and the new secret will be displayed once.",
     "secretTitle": "Save your client secret",
     "secretWarning": "This secret will only be shown once. Copy it now.",
     "secretLabel": "Client Secret",

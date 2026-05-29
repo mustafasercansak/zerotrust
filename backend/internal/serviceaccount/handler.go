@@ -28,6 +28,7 @@ type serviceAccountService interface {
 	List(ctx context.Context, p ListParams) (ListResult, error)
 	Revoke(ctx context.Context, id string) error
 	SetActive(ctx context.Context, id string, active bool) error
+	RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error)
 }
 
 func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore, authSvc *auth.Service) *Handler {
@@ -312,4 +313,25 @@ func queryInt(s string, def int) int {
 		return n
 	}
 	return def
+}
+
+// POST /api/v1/admin/service-accounts/{id}/rotate
+func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sa, secret, err := h.svc.RotateSecret(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	h.hub.Broadcast()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(createResponse{
+		saResponse:   toResponse(sa),
+		ClientSecret: secret,
+	})
 }

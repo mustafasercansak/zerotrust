@@ -465,6 +465,7 @@ func main() {
 			r.With(authmw.RequirePermission("service_accounts", "create"), stepUpMFA).Post("/admin/service-accounts", saHandler.Create)
 			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}", saHandler.Update)
 			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
+			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Post("/admin/service-accounts/{id}/rotate", saHandler.RotateSecret)
 			r.With(authmw.RequirePermission("service_accounts", "delete"), stepUpMFA).Delete("/admin/service-accounts/{id}", saHandler.Revoke)
 		})
 	})
@@ -720,11 +721,13 @@ func (a *saStoreAdapter) FindByClientID(ctx context.Context, clientID string) (*
 		return nil, err
 	}
 	return &auth.ServiceAccountRecord{
-		Name:             sa.Name,
-		ClientSecretHash: sa.ClientSecretHash,
-		Scopes:           sa.Scopes,
-		IsActive:         sa.IsActive,
-		ExpiresAt:        sa.ExpiresAt,
+		Name:                sa.Name,
+		ClientSecretHash:    sa.ClientSecretHash,
+		Scopes:              sa.Scopes,
+		IsActive:            sa.IsActive,
+		ExpiresAt:           sa.ExpiresAt,
+		OldClientSecretHash: sa.OldClientSecretHash,
+		OldSecretExpiresAt:  sa.OldSecretExpiresAt,
 	}, nil
 }
 

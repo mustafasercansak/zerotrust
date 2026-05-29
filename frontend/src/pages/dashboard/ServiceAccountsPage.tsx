@@ -210,7 +210,7 @@ export default function ServiceAccountsPage() {
       },
     },
     {
-      field: "actions", headerName: "", sortable: false, filterable: false, align: "right", width: 132,
+      field: "actions", headerName: "", sortable: false, filterable: false, align: "right", width: 168,
       // eslint-disable-next-line react-hooks/exhaustive-deps
       renderCell: ({ row }) => (
         <Box sx={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
@@ -222,6 +222,11 @@ export default function ServiceAccountsPage() {
           <Tooltip title={t("edit")}>
             <IconButton size="small" onClick={() => openEdit(row)}>
               <Edit fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={t("rotate")}>
+            <IconButton size="small" onClick={() => handleRotate(row)}>
+              <Key fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title={t("revoke")}>
@@ -250,6 +255,20 @@ export default function ServiceAccountsPage() {
     if (!confirm(t("revokeConfirm", { name: sa.name }))) return;
     try {
       await runWithStepUp(() => api.admin.revokeServiceAccount(sa.id));
+      setRefresh((n) => n + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      alert(t("errors.internal_error"));
+    }
+  }
+
+  async function handleRotate(sa: ServiceAccount) {
+    if (!confirm(t("rotateConfirm", { name: sa.name }))) return;
+    try {
+      const rotated = await runWithStepUp(() => api.admin.rotateServiceAccountSecret(sa.id));
+      setNewSecret(rotated);
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {

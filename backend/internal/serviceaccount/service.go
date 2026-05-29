@@ -82,3 +82,7 @@ func (s *Service) SetActive(ctx context.Context, id string, active bool) error {
 func (s *Service) CheckSecret(hash, secret string) bool {
 	return s.repo.CheckSecret(hash, secret)
 }
+
+func (s *Service) RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error) {
+	return s.repo.RotateSecret(ctx, id)
+}

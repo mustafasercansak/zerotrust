@@ -269,6 +269,8 @@
     "expired": "Süresi Doldu",
     "revoke": "İptal Et",
     "revokeConfirm": "\"{{name}}\" servis hesabını iptal etmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "rotate": "Secret'ı Yenile",
+    "rotateConfirm": "\"{{name}}\" servis hesabının secret'ını yenilemek istediğinizden emin misiniz? Eski secret 1 saat boyunca aktif kalmaya devam edecek ve yeni secret bir kez gösterilecektir.",
     "secretTitle": "Client secret'ı kaydedin",
     "secretWarning": "Bu secret yalnızca bir kez gösterilecektir. Şimdi kopyalayın.",
     "secretLabel": "Client Secret",

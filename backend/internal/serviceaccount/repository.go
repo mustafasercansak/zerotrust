@@ -54,9 +54,9 @@ func (r *Repository) Create(ctx context.Context, name, createdBy string, scopes 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO service_accounts (name, client_id, client_secret_hash, created_by, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at
+		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at, old_client_secret_hash, old_secret_expires_at
 	`, name, clientID, string(hash), createdByParam, expiresAt).Scan(
-		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt,
+		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt, &sa.OldClientSecretHash, &sa.OldSecretExpiresAt,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") {
@@ -84,10 +84,10 @@ func (r *Repository) Create(ctx context.Context, name, createdBy string, scopes 
 func (r *Repository) FindByClientID(ctx context.Context, clientID string) (*ServiceAccount, error) {
 	sa := &ServiceAccount{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, client_id, client_secret_hash, is_active, created_at, expires_at
+		SELECT id, name, client_id, client_secret_hash, is_active, created_at, expires_at, old_client_secret_hash, old_secret_expires_at
 		FROM service_accounts WHERE client_id = $1
 	`, clientID).Scan(
-		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt,
+		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt, &sa.OldClientSecretHash, &sa.OldSecretExpiresAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -227,9 +227,9 @@ func (r *Repository) Update(ctx context.Context, id, name string, scopes []strin
 		UPDATE service_accounts
 		SET name = $2, is_active = $3, expires_at = $4
 		WHERE id = $1
-		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at
+		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at, old_client_secret_hash, old_secret_expires_at
 	`, id, name, active, expiresAt).Scan(
-		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt,
+		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt, &sa.OldClientSecretHash, &sa.OldSecretExpiresAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -323,4 +323,59 @@ func generateSecret() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func (r *Repository) RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error) {
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, "", err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), 12)
+	if err != nil {
+		return nil, "", err
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback(ctx)
+
+	// Fetch current secret hash
+	var currentHash string
+	err = tx.QueryRow(ctx, `SELECT client_secret_hash FROM service_accounts WHERE id = $1`, id).Scan(&currentHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, "", ErrNotFound
+		}
+		return nil, "", err
+	}
+
+	// Update with new secret, setting old secret to expire in 1 hour
+	sa := &ServiceAccount{}
+	err = tx.QueryRow(ctx, `
+		UPDATE service_accounts
+		SET old_client_secret_hash = $2,
+		    old_secret_expires_at = NOW() + INTERVAL '1 hour',
+		    client_secret_hash = $3
+		WHERE id = $1
+		RETURNING id, name, client_id, client_secret_hash, is_active, created_at, expires_at, old_client_secret_hash, old_secret_expires_at
+	`, id, currentHash, string(hash)).Scan(
+		&sa.ID, &sa.Name, &sa.ClientID, &sa.ClientSecretHash, &sa.IsActive, &sa.CreatedAt, &sa.ExpiresAt, &sa.OldClientSecretHash, &sa.OldSecretExpiresAt,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Fetch scopes to populate
+	sa.Scopes, err = r.getScopes(ctx, sa.ID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, "", err
+	}
+
+	return sa, secret, nil
 }
