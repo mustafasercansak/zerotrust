@@ -326,7 +326,10 @@ export default function UsersPage() {
       field: "email", headerName: t("user"), minWidth: 280, flex: 1.45,
       renderCell: ({ row }) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, minWidth: 0 }}>
-          <Avatar sx={{ width: 32, height: 32, fontSize: 13 }}>
+          <Avatar
+            src={row.has_avatar ? `/api/v1/users/${row.id}/avatar` : undefined}
+            sx={{ width: 32, height: 32, fontSize: 13 }}
+          >
             {userInitials(row)}
           </Avatar>
           <Box sx={{ minWidth: 0 }}>

@@ -174,11 +174,15 @@ async function refreshTokens(): Promise<void> {
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const clientInfo = await cachedClientInfo();
+  const isFormData = init?.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     "X-Client-Info": JSON.stringify(clientInfo),
     ...(init?.headers as Record<string, string>),
   };
+
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
 
   if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
     const csrf = getCSRFToken();
@@ -259,6 +263,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+
+  uploadAvatar: (file: File) => {
+    const formData = new FormData();
+    formData.append("avatar", file);
+    return request<MeData>("/api/v1/me/avatar", {
+      method: "POST",
+      body: formData,
+    });
+  },
+
+  deleteAvatar: () =>
+    request<MeData>("/api/v1/me/avatar", { method: "DELETE" }),
 
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>("/api/v1/auth/forgot-password", {

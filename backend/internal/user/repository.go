@@ -381,7 +381,32 @@ func (r *Repository) getRoles(ctx context.Context, userID string) ([]string, err
 	return roles, rows.Err()
 }
 
+func (r *Repository) UpdateAvatar(ctx context.Context, userID, key string, size int) (*User, error) {
+	u := &User{}
+	err := r.db.QueryRow(ctx, `
+		UPDATE users
+		SET avatar_object_key = $1, avatar_size = $2, updated_at = NOW()
+		WHERE id = $3
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+	`, key, size, userID).Scan(
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	roles, err := r.getRoles(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	u.Roles = roles
+	return u, nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+

@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState, Suspense } from "react";
+import { useState, Suspense, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/useAuth";
 import { cancelRefresh } from "@/lib/tokenManager";
@@ -45,6 +45,9 @@ export default function DashboardLayout() {
   const [lastName, setLastName] = useState("");
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (loading) {
     return (
@@ -120,6 +123,42 @@ export default function DashboardLayout() {
     }
   }
 
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileError(tProfile("errors.file_too_large"));
+      return;
+    }
+    setUploadingAvatar(true);
+    setProfileError(null);
+    try {
+      const updated = await api.uploadAvatar(file);
+      setMe(updated);
+      setAvatarTimestamp(Date.now());
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function handleAvatarDelete() {
+    setUploadingAvatar(true);
+    setProfileError(null);
+    try {
+      const updated = await api.deleteAvatar();
+      setMe(updated);
+      setAvatarTimestamp(Date.now());
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   function handleLogout() {
     cancelRefresh();
     void api.logout();
@@ -167,7 +206,10 @@ export default function DashboardLayout() {
               onClick={openProfile}
               sx={{ justifyContent: "flex-start", gap: 1, p: 0, textTransform: "none" }}
             >
-              <Avatar sx={{ width: 32, height: 32, fontSize: 13 }}>
+              <Avatar
+                src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
+                sx={{ width: 32, height: 32, fontSize: 13 }}
+              >
                 {initials(me)}
               </Avatar>
               <Box sx={{ minWidth: 0, textAlign: "left" }}>
@@ -217,11 +259,27 @@ export default function DashboardLayout() {
           <Box component="form" onSubmit={handleProfileSave}>
             <DialogTitle>{tProfile("title")}</DialogTitle>
             <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, mb: 1 }}>
+                <Avatar
+                  src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
+                  sx={{ width: 80, height: 80, fontSize: 28 }}
+                >
+                  {initials(me)}
+                </Avatar>
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button variant="outlined" size="small" component="label" disabled={uploadingAvatar}>
+                    {tProfile("uploadButton")}
+                    <input type="file" hidden accept="image/png, image/jpeg" onChange={handleAvatarChange} ref={fileInputRef} />
+                  </Button>
+                  {me.has_avatar && (
+                    <Button variant="outlined" size="small" color="error" onClick={handleAvatarDelete} disabled={uploadingAvatar}>
+                      {tProfile("deleteButton")}
+                    </Button>
+                  )}
+                </Box>
+              </Box>
               <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
               <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-              <Typography variant="caption" color="text.secondary">
-                {tProfile("photoLater")}
-              </Typography>
               {profileError && <Alert severity="error">{profileError}</Alert>}
             </DialogContent>
             <DialogActions sx={{ px: 3, pb: 3 }}>

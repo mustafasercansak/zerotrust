@@ -82,10 +82,13 @@
     "title": "Profil",
     "firstName": "Ad",
     "lastName": "Soyad",
-    "photoLater": "Fotoğraf alanı hazır; upload akışı eklendiğinde burada profil fotoğrafı yönetilecek.",
+    "uploadButton": "Fotoğraf Yükle",
+    "deleteButton": "Sil",
     "saving": "Kaydediliyor...",
     "errors": {
       "invalid_profile": "Ad ve soyad en fazla 80 karakter olmalıdır.",
+      "file_too_large": "Dosya çok büyük (maksimum 2MB).",
+      "invalid_file_type": "Yalnızca JPEG ve PNG formatındaki resimler yüklenebilir.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
     }
   },

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -295,6 +297,114 @@ func main() {
 					return
 				}
 				w.WriteHeader(http.StatusNoContent)
+			})
+
+			r.Post("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+				if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
+					http.Error(w, `{"error":"file_too_large"}`, http.StatusBadRequest)
+					return
+				}
+				file, header, err := r.FormFile("avatar")
+				if err != nil {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				defer file.Close()
+
+				contentType := header.Header.Get("Content-Type")
+				if contentType != "image/jpeg" && contentType != "image/png" {
+					http.Error(w, `{"error":"invalid_file_type"}`, http.StatusBadRequest)
+					return
+				}
+
+				uploadDir := "uploads/avatars"
+				if err := os.MkdirAll(uploadDir, 0755); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+
+				filePath := filepath.Join(uploadDir, claims.UserID)
+				out, err := os.Create(filePath)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				defer out.Close()
+
+				if _, err := io.Copy(out, file); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+
+				profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, claims.UserID, int(header.Size))
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+
+				roles := profile.Roles
+				if roles == nil {
+					roles = []string{}
+				}
+				perms := claims.Permissions
+				if perms == nil {
+					perms = []string{}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				rolesJSON, _ := json.Marshal(roles)
+				permsJSON, _ := json.Marshal(perms)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+			})
+
+			r.Get("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				u, err := userSvc.FindByID(r.Context(), claims.UserID)
+				if err != nil || !u.HasAvatar {
+					http.NotFound(w, r)
+					return
+				}
+				filePath := filepath.Join("uploads/avatars", claims.UserID)
+				http.ServeFile(w, r, filePath)
+			})
+
+			r.Get("/users/{id}/avatar", func(w http.ResponseWriter, r *http.Request) {
+				id := chi.URLParam(r, "id")
+				u, err := userSvc.FindByID(r.Context(), id)
+				if err != nil || !u.HasAvatar {
+					http.NotFound(w, r)
+					return
+				}
+				filePath := filepath.Join("uploads/avatars", id)
+				http.ServeFile(w, r, filePath)
+			})
+
+			r.Delete("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				filePath := filepath.Join("uploads/avatars", claims.UserID)
+				_ = os.Remove(filePath)
+
+				profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, "", 0)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+
+				roles := profile.Roles
+				if roles == nil {
+					roles = []string{}
+				}
+				perms := claims.Permissions
+				if perms == nil {
+					perms = []string{}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				rolesJSON, _ := json.Marshal(roles)
+				permsJSON, _ := json.Marshal(perms)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
 			})
 
 			// Session management — any authenticated user manages their own sessions

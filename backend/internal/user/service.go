@@ -95,3 +95,8 @@ func (s *Service) SeedAdmin(ctx context.Context, email, hash string) error {
 	}
 	return s.repo.AssignRoleByName(ctx, u.ID, "admin")
 }
+
+func (s *Service) UpdateAvatar(ctx context.Context, userID, key string, size int) (*User, error) {
+	return s.repo.UpdateAvatar(ctx, userID, key, size)
+}
+

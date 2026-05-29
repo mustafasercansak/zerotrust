@@ -82,10 +82,13 @@
     "title": "Profile",
     "firstName": "First name",
     "lastName": "Last name",
-    "photoLater": "The photo field is ready; profile photo management can plug in here when upload support is added.",
+    "uploadButton": "Upload Photo",
+    "deleteButton": "Delete",
     "saving": "Saving...",
     "errors": {
       "invalid_profile": "First and last name must be 80 characters or fewer.",
+      "file_too_large": "File is too large (max 2MB).",
+      "invalid_file_type": "Only JPEG and PNG images are allowed.",
       "internal_error": "Server error. Please try again."
     }
   },

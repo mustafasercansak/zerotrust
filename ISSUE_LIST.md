@@ -434,7 +434,7 @@ Status update:
 
 ### 18. Implement user avatar upload, serving, and deletion
 
-State: OPEN
+State: CLOSED
 
 Status: Database migration `000012_avatar_local_storage.up.sql` added avatar schema fields (`avatar_object_key` and `avatar_size`) to the `users` table, and the user profile models support `HasAvatar`. However, the API endpoints for uploading, downloading/serving, and deleting avatar files are not yet implemented.
 
@@ -450,3 +450,12 @@ Acceptance criteria:
   - `DELETE /api/v1/me/avatar` to remove the avatar.
 - Store avatar files securely (either locally in a bounded storage directory or via object storage).
 - Integrate avatar upload and view functionality in the frontend User Settings/Profile page.
+
+Status update:
+- Implemented `UpdateAvatar` database mutation in `backend/internal/user/repository.go` and user service wrapper.
+- Added `/api/v1/me/avatar` POST, GET, and DELETE endpoints and `/api/v1/users/{id}/avatar` GET endpoint in `backend/cmd/server/main.go`.
+- Files are validated to ensure only JPEG/PNG images under 2MB are accepted, and saved to a local files directory (`uploads/avatars/`) named by their unique user ID.
+- Updated frontend `api.ts` with file-upload compatibility (`FormData`) and registered the avatar API functions.
+- Integrated upload and delete controls directly inside the Profile Settings dialog in `DashboardLayout.tsx`.
+- Updated users list page `UsersPage.tsx` to load user avatar images.
+
