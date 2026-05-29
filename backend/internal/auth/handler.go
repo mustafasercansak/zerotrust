@@ -161,6 +161,21 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Metadata:  authMetadata(req.Email, "", http.StatusOK, req.ClientInfo),
 	}, true)
 
+	if result.AnomalyType != "" {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "login.anomaly",
+			Resource:  "/api/v1/auth/login",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"email":        req.Email,
+				"anomaly_type": result.AnomalyType,
+				"details":      result.AnomalyDetails,
+				"outcome":      "success",
+			},
+		}, true)
+	}
+
 	if result.MFARequired {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{

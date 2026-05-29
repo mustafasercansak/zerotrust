@@ -396,3 +396,38 @@ func parseAddr(addr string) *netip.Addr {
 	}
 	return &a
 }
+
+// GetActiveSessions fetches active sessions returning a map slice to avoid package cycles.
+func (r *Repository) GetActiveSessions(ctx context.Context, userID string) ([]map[string]any, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT COALESCE(ip_address::text, ''),
+		       user_agent,
+		       created_at,
+		       last_used_at
+		FROM sessions
+		WHERE user_id = $1
+		  AND is_revoked = false
+		  AND expires_at > now()
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []map[string]any
+	for rows.Next() {
+		var ip, ua string
+		var created time.Time
+		var lastUsed *time.Time
+		if err := rows.Scan(&ip, &ua, &created, &lastUsed); err != nil {
+			return nil, err
+		}
+		list = append(list, map[string]any{
+			"ip_address":   ip,
+			"user_agent":   ua,
+			"created_at":   created,
+			"last_used_at": lastUsed,
+		})
+	}
+	return list, rows.Err()
+}

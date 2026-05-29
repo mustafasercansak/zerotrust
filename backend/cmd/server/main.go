@@ -32,6 +32,7 @@ import (
 	"github.com/zerotrust/backend/internal/settings"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
+	"github.com/zerotrust/backend/pkg/geoip"
 	"github.com/zerotrust/backend/pkg/mailer"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
@@ -156,6 +157,8 @@ func main() {
 	}
 	stepUpMFA := authmw.RequireRecentMFA(mfaChecker, rdb, stepUpMFAWindow)
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
+	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
+	authSvc.ConfigureSecurityAnomalies(geoipSvc, ml)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
@@ -543,6 +546,7 @@ type config struct {
 	SMTPUser                 string
 	SMTPPassword             string
 	PublicAppURL             string
+	GeoIPDBPath              string
 }
 
 func loadConfig() (config, error) {
@@ -597,6 +601,7 @@ func loadConfig() (config, error) {
 		SMTPUser:                 getEnv("SMTP_USER", ""),
 		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
 		PublicAppURL:             getEnv("PUBLIC_APP_URL", "http://localhost:3000"),
+		GeoIPDBPath:              getEnv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb"),
 	}, nil
 }
 

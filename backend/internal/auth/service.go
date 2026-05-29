@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/geoip"
+	"github.com/zerotrust/backend/pkg/mailer"
 )
 
 // UserReader abstracts the user-service methods that auth.Service needs.
@@ -120,6 +123,8 @@ type LoginResult struct {
 	Pair            *TokenPair
 	MFARequired     bool
 	MFAPendingToken string
+	AnomalyType     string
+	AnomalyDetails  string
 }
 
 type Service struct {
@@ -130,10 +135,17 @@ type Service struct {
 	settings SettingReader // nil falls back to hardcoded defaults
 	rdb      *redis.Client
 	ks       *KeyStore
+	geoip    *geoip.Service
+	mailer   mailer.Mailer
 }
 
 func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountStore, rdb *redis.Client, ks *KeyStore, mfa MFAChecker, settings SettingReader) *Service {
 	return &Service{users: users, sessions: sessions, saSvc: saSvc, mfa: mfa, settings: settings, rdb: rdb, ks: ks}
+}
+
+func (s *Service) ConfigureSecurityAnomalies(g *geoip.Service, m mailer.Mailer) {
+	s.geoip = g
+	s.mailer = m
 }
 
 // Login authenticates a user. If MFA is enabled for the account it returns a
@@ -162,6 +174,31 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	// Password correct — clear lockout counters regardless of MFA outcome.
 	s.clearFailedAttempts(ctx, email)
 
+	// Anomaly checking
+	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, u.ID, u.Email, ip, ua, deviceInfo)
+	if hasAnomaly {
+		slog.Warn("Login anomaly detected", "user_id", u.ID, "type", anomalyType, "details", anomalyDetails)
+		
+		// Send security alert email
+		if s.mailer != nil {
+			var locStr string
+			if s.geoip != nil {
+				if loc, err := s.geoip.Lookup(ip); err == nil {
+					locStr = formatLocation(loc)
+				}
+			}
+			if locStr == "" {
+				locStr = "Unknown"
+			}
+			go func() {
+				err := s.mailer.SendSecurityAlert(context.Background(), u.Email, anomalyType, ip, locStr, anomalyDetails)
+				if err != nil {
+					slog.Error("failed to send security alert email", "user_id", u.ID, "error", err)
+				}
+			}()
+		}
+	}
+
 	if s.mfa != nil && s.mfa.IsEnabled(ctx, u.ID) {
 		token, err := generateOpaqueToken()
 		if err != nil {
@@ -171,14 +208,151 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
 			return nil, err
 		}
-		return &LoginResult{MFARequired: true, MFAPendingToken: token}, nil
+		return &LoginResult{
+			MFARequired:     true,
+			MFAPendingToken: token,
+			AnomalyType:     anomalyType,
+			AnomalyDetails:  anomalyDetails,
+		}, nil
 	}
 
 	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo)
 	if err != nil {
 		return nil, err
 	}
-	return &LoginResult{Pair: pair}, nil
+	return &LoginResult{
+		Pair:            pair,
+		AnomalyType:     anomalyType,
+		AnomalyDetails:  anomalyDetails,
+	}, nil
+}
+
+func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, email string, currentIP, currentUA string, currentDeviceInfo map[string]string) (bool, string, string) {
+	if s.geoip == nil {
+		return false, "", ""
+	}
+
+	lister, ok := s.sessions.(interface {
+		GetActiveSessions(ctx context.Context, userID string) ([]map[string]any, error)
+	})
+	if !ok {
+		return false, "", ""
+	}
+
+	activeSessions, err := lister.GetActiveSessions(ctx, userID)
+	if err != nil {
+		slog.Error("failed to list active sessions for anomaly detection", "user_id", userID, "error", err)
+		return false, "", ""
+	}
+
+	// Geolocate current IP
+	currLoc, err := s.geoip.Lookup(currentIP)
+	if err != nil {
+		slog.Warn("failed to geolocate current IP", "ip", currentIP, "error", err)
+		return false, "", ""
+	}
+
+	// Check if device/browser has been seen before for this user
+	isFirstTimeDevice := true
+	for _, sess := range activeSessions {
+		ua, _ := sess["user_agent"].(string)
+		if ua == currentUA {
+			isFirstTimeDevice = false
+			break
+		}
+	}
+
+	var travelAnomalyDetails string
+
+	// Detect impossible travel
+	for _, sess := range activeSessions {
+		ip, _ := sess["ip_address"].(string)
+		if ip == "" || ip == currentIP {
+			continue
+		}
+
+		sessLoc, err := s.geoip.Lookup(ip)
+		if err != nil {
+			continue
+		}
+
+		distance := haversineDistance(currLoc.Latitude, currLoc.Longitude, sessLoc.Latitude, sessLoc.Longitude)
+		if distance < 10.0 {
+			continue
+		}
+
+		var lastActive time.Time
+		if val, exists := sess["last_used_at"]; exists && val != nil {
+			if t, ok := val.(*time.Time); ok && t != nil {
+				lastActive = *t
+			} else if t, ok := val.(time.Time); ok {
+				lastActive = t
+			}
+		}
+		if lastActive.IsZero() {
+			if val, exists := sess["created_at"]; exists {
+				if t, ok := val.(time.Time); ok {
+					lastActive = t
+				}
+			}
+		}
+		if lastActive.IsZero() {
+			lastActive = time.Now()
+		}
+
+		timeDiff := time.Since(lastActive)
+		if timeDiff <= 0 {
+			timeDiff = 1 * time.Second
+		}
+
+		// Calculate velocity in km/h
+		velocity := distance / timeDiff.Hours()
+
+		// If velocity > 800 km/h and time difference is under 24 hours, flag it
+		if velocity > 800.0 && timeDiff < 24*time.Hour {
+			travelAnomalyDetails = fmt.Sprintf("Impossible travel detected from %s (%s) to %s (%s). Distance: %.1f km, Time elapsed: %s, Velocity: %.1f km/h",
+				ip, formatLocation(sessLoc),
+				currentIP, formatLocation(currLoc),
+				distance, timeDiff.Round(time.Second), velocity)
+			break
+		}
+	}
+
+	if travelAnomalyDetails != "" {
+		return true, "impossible_travel", travelAnomalyDetails
+	}
+
+	if isFirstTimeDevice && len(activeSessions) > 0 {
+		return true, "new_device", fmt.Sprintf("New/first-time device login from IP %s (%s)", currentIP, formatLocation(currLoc))
+	}
+
+	return false, "", ""
+}
+
+func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKm = 6371.0
+
+	dLat := (lat2 - lat1) * math.Pi / 180.0
+	dLon := (lon2 - lon1) * math.Pi / 180.0
+
+	radLat1 := lat1 * math.Pi / 180.0
+	radLat2 := lat2 * math.Pi / 180.0
+
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Sin(dLon/2)*math.Sin(dLon/2)*math.Cos(radLat1)*math.Cos(radLat2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadiusKm * c
+}
+
+func formatLocation(l *geoip.Location) string {
+	if l.City != "" && l.Country != "" {
+		return fmt.Sprintf("%s, %s", l.City, l.Country)
+	}
+	if l.Country != "" {
+		return l.Country
+	}
+	return "Unknown"
 }
 
 // MFAChallenge completes a login that required a second factor.
@@ -334,6 +508,9 @@ func (s *Service) IsRevoked(ctx context.Context, jti string) bool {
 }
 
 func (s *Service) checkLockout(ctx context.Context, email string) error {
+	if s.rdb == nil {
+		return nil
+	}
 	ttl, err := s.rdb.TTL(ctx, lockoutKey(email)).Result()
 	if err == nil && ttl > 0 {
 		return &AccountLockedError{RetryAfter: ttl}
@@ -342,6 +519,9 @@ func (s *Service) checkLockout(ctx context.Context, email string) error {
 }
 
 func (s *Service) recordFailedAttempt(ctx context.Context, email string) {
+	if s.rdb == nil {
+		return
+	}
 	fkey := failKey(email)
 	count, _ := s.rdb.Incr(ctx, fkey).Result()
 	if d := progressiveLockout(count); d > 0 {
@@ -350,6 +530,9 @@ func (s *Service) recordFailedAttempt(ctx context.Context, email string) {
 }
 
 func (s *Service) clearFailedAttempts(ctx context.Context, email string) {
+	if s.rdb == nil {
+		return
+	}
 	s.rdb.Del(ctx, failKey(email), lockoutKey(email))
 }
 

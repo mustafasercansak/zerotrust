@@ -572,18 +572,25 @@ Status update:
 
 ### 24. Implement Geolocation and Context-Aware MFA challenges for logins
 
-State: OPEN
+State: CLOSED
 
 Status: Logins are validated purely by username/password + MFA. The system does not verify context (e.g. traveling between countries or using unknown devices).
 
 Related files:
 - [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
-- [backend/pkg/middleware/ip.go](/home/m/projects/zerotrust/backend/pkg/middleware/ip.go)
+- [backend/pkg/geoip/geoip.go](/home/m/projects/zerotrust/backend/pkg/geoip/geoip.go)
 
 Acceptance criteria:
 - Parse remote IP geolocation using a free GeoIP database library (such as MaxMind GeoLite2).
 - Detect impossible travel (e.g., logging in from two distant locations within a short time) or first-time devices.
 - Force a step-up MFA challenge or alert the user via email on anomaly detection.
+
+Status update:
+- Created a GeoIP lookup service package using the `oschwald/geoip2-golang` library with a robust mock fallback for local development and unit tests.
+- Implemented Haversine distance mathematical formula to calculate physical distances and velocities between successive user login IPs.
+- Configured impossible travel checking (>800 km/h) and first-time device checking against active sessions.
+- Extended the `Mailer` interface to dispatch security alert emails when anomalies are detected, and logged `login.anomaly` events to the admin audit log.
+- Added comprehensive unit tests in `anomaly_test.go` and `geoip_test.go`.
 
 ---
 
