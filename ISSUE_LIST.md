@@ -667,6 +667,76 @@ Status update:
 - Updated the public-facing showcase page at [docs/index.html](file:///home/m/projects/zerotrust/docs/index.html) (Showcase 2) to detail the Unified Settings & Session Audits feature.
 - Documented that the administrative screenshots can be refreshed under `docs/images/session_management.png` to depict the unified tabbed dashboard.
 
+---
+
+### 28. Add MFA Backup Recovery Codes
+
+State: OPEN
+
+Status: If a user loses their TOTP authenticator device, they are completely locked out and must contact an administrator to manually disable their MFA.
+
+Related files:
+- [backend/internal/mfa/service.go](/home/m/projects/zerotrust/backend/internal/mfa/service.go)
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
+- [frontend/src/pages/auth/LoginPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/auth/LoginPage.tsx)
+
+Acceptance criteria:
+- Generate a set of 8-10 single-use, cryptographically secure recovery codes (e.g., format `xxxx-xxxx-xxxx`) during MFA setup/registration.
+- Store these codes as salted bcrypt hashes in a new database table or schema field (`mfa_recovery_codes`).
+- Show the recovery codes to the user during setup and force them to confirm they saved them before enabling MFA.
+- Allow users to enter a backup recovery code on the MFA login verification stage to bypass TOTP challenge.
+- Once a recovery code is used, delete it or mark it as invalid, and notify the user via log/audit event.
+
+---
+
+### 29. Make Anomaly Email Alerts Resilient
+
+State: OPEN
+
+Status: Security email alerts for login anomalies (impossible travel, new devices) are dispatched in fire-and-forget goroutines. If the SMTP server experiences transient issues, the alerts are silently lost.
+
+Related files:
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
+- [backend/pkg/mailer/mailer.go](/home/m/projects/zerotrust/backend/pkg/mailer/mailer.go)
+
+Acceptance criteria:
+- Define an outbox database schema or a memory-backed retrying queue for outgoing mail events.
+- If email delivery fails, retry sending with exponential backoff and a maximum retry limit.
+- Log failures to the server console and audit logs if the maximum retry limit is reached.
+
+---
+
+### 30. Implement API Rate Limiting for Protected Endpoints
+
+State: OPEN
+
+Status: Rate limiting is currently set for public auth/token routes, but generic protected endpoints (such as avatar uploads or session queries) have no rate limits and can be abused by automated scripts.
+
+Related files:
+- [backend/pkg/middleware/rate_limit.go](/home/m/projects/zerotrust/backend/pkg/middleware/rate_limit.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Introduce token-bucket rate limiting based on authenticated `claims.UserID` or IP address for generic protected routes.
+- Return HTTP 429 with appropriate `Retry-After` headers when the rate limit threshold is exceeded.
+- Provide unit tests showing that authenticated clients are rate-limited independently.
+
+---
+
+### 31. Database Connection Pool and Timeout Tuning
+
+State: OPEN
+
+Status: The database and Redis client connection pools are initialized using hardcoded or default library options. High traffic or network latency could lead to pool exhaustion or socket timeouts.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Load dynamic settings (e.g., `DATABASE_MAX_CONNS`, `DATABASE_MIN_CONNS`, `DATABASE_CONN_TIMEOUT`, `REDIS_POOL_SIZE`) from configuration/environment variables.
+- Log connection pool metrics or utilization checks upon server startup and lifecycle updates.
+
+
 
 
 
