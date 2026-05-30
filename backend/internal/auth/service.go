@@ -199,12 +199,10 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			if locStr == "" {
 				locStr = "Unknown"
 			}
-			go func() {
-				err := s.mailer.SendSecurityAlert(context.Background(), u.Email, anomalyType, ip, locStr, anomalyDetails)
-				if err != nil {
-					slog.Error("failed to send security alert email", "user_id", u.ID, "error", err)
-				}
-			}()
+			err := s.mailer.SendSecurityAlert(ctx, u.Email, anomalyType, ip, locStr, anomalyDetails)
+			if err != nil {
+				slog.Error("failed to queue security alert email", "user_id", u.ID, "error", err)
+			}
 		}
 	}
 

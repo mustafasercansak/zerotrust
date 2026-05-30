@@ -147,6 +147,35 @@ func main() {
 	prRepo := passwdreset.NewRepository(db)
 	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
 
+	// Resilient Mailer Wrapper
+	resilientMailer := mailer.NewResilientMailer(ml, 1000, func(ctx context.Context, email, alertType, ip, details string, sendErr error) {
+		var userID *string
+		if u, err := userSvc.FindByEmail(ctx, email); err == nil {
+			userID = &u.ID
+		}
+		meta := map[string]any{
+			"email":      email,
+			"alert_type": alertType,
+			"error":      sendErr.Error(),
+			"details":    details,
+			"outcome":    "failure",
+		}
+		_ = auditRepo.Log(ctx, audit.Entry{
+			UserID:    userID,
+			Action:    "auth.security_alert.delivery_failure",
+			Resource:  "auth",
+			IPAddress: ip,
+			Metadata:  meta,
+		})
+	})
+	resilientMailer.Start(2)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		<-rootCtx.Done()
+		resilientMailer.Stop()
+	}()
+
 	settingsRepo := settings.NewRepository(db)
 	settingsCache := settings.NewCache(settingsRepo)
 	settingsHandler := settings.NewHandler(settingsRepo)
@@ -158,7 +187,7 @@ func main() {
 	stepUpMFA := authmw.RequireRecentMFA(mfaChecker, rdb, stepUpMFAWindow)
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
-	authSvc.ConfigureSecurityAnomalies(geoipSvc, ml)
+	authSvc.ConfigureSecurityAnomalies(geoipSvc, resilientMailer)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)

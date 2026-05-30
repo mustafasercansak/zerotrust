@@ -700,18 +700,27 @@ Status update:
 
 ### 29. Make Anomaly Email Alerts Resilient
 
-State: OPEN
+State: CLOSED
 
 Status: Security email alerts for login anomalies (impossible travel, new devices) are dispatched in fire-and-forget goroutines. If the SMTP server experiences transient issues, the alerts are silently lost.
 
 Related files:
 - [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
 - [backend/pkg/mailer/mailer.go](/home/m/projects/zerotrust/backend/pkg/mailer/mailer.go)
+- [backend/pkg/mailer/resilient.go](/home/m/projects/zerotrust/backend/pkg/mailer/resilient.go)
 
 Acceptance criteria:
 - Define an outbox database schema or a memory-backed retrying queue for outgoing mail events.
 - If email delivery fails, retry sending with exponential backoff and a maximum retry limit.
 - Log failures to the server console and audit logs if the maximum retry limit is reached.
+
+Status update:
+- Created a memory-backed retrying queue wrapper `ResilientMailer` inside `backend/pkg/mailer/resilient.go`.
+- Implemented exponential backoff delay based on attempts (1s, 2s, 4s, 8s, 16s) up to a max limit of 5 retries.
+- Wired the resilient queue to start under the signal lifecycle root context inside `main.go` and drain/stop cleanly during graceful shutdown.
+- Configured a callback in `main.go` to lookup the corresponding user and log an `auth.security_alert.delivery_failure` failure record to the audit database if all attempts fail.
+- Replaced the fire-and-forget goroutine in `auth/service.go` with direct synchronous queuing.
+- Added comprehensive unit tests in `resilient_test.go` covering success, retry backoff, max attempts, and audit failures.
 
 ---
 
