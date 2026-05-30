@@ -25,8 +25,8 @@ func (f *fakeMFAChecker) Validate(ctx context.Context, userID, code string) bool
 	return f.validFor[code]
 }
 
-func (f *fakeMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, error) {
-	return "", "", nil
+func (f *fakeMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
+	return "", "", nil, nil
 }
 
 func (f *fakeMFAChecker) VerifyAndEnable(ctx context.Context, userID, code string) error {

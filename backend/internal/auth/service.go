@@ -31,7 +31,7 @@ type UserReader interface {
 type MFAChecker interface {
 	IsEnabled(ctx context.Context, userID string) bool
 	Validate(ctx context.Context, userID, code string) bool
-	Setup(ctx context.Context, userID, email, currentCode string) (string, string, error)
+	Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error)
 	VerifyAndEnable(ctx context.Context, userID, code string) error
 }
 
@@ -126,13 +126,14 @@ func progressiveLockout(attempts int64) time.Duration {
 // When MFARequired is true, Pair is nil and MFAPendingToken holds a short-lived
 // opaque token the client must exchange via MFAChallenge.
 type LoginResult struct {
-	Pair            *TokenPair
-	MFARequired     bool
-	MFAPendingToken string
-	MFASetupSecret  string
-	MFASetupURL     string
-	AnomalyType     string
-	AnomalyDetails  string
+	Pair             *TokenPair
+	MFARequired      bool
+	MFAPendingToken  string
+	MFASetupSecret   string
+	MFASetupURL      string
+	MFARecoveryCodes []string
+	AnomalyType      string
+	AnomalyDetails   string
 }
 
 type Service struct {
@@ -219,33 +220,37 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		}
 
 		var setupSecret, setupURL string
+		var recoveryCodes []string
 		if globalMFARequired && !s.mfa.IsEnabled(ctx, u.ID) {
-			url, secret, err := s.mfa.Setup(ctx, u.ID, u.Email, "")
+			url, secret, recCodes, err := s.mfa.Setup(ctx, u.ID, u.Email, "")
 			if err != nil {
 				return nil, err
 			}
 			setupSecret = secret
 			setupURL = url
+			recoveryCodes = recCodes
 		}
 
 		data, _ := json.Marshal(map[string]any{
-			"uid":          u.ID,
-			"ip":           ip,
-			"ua":           ua,
-			"device_info":  deviceInfo,
-			"setup_secret": setupSecret,
-			"setup_url":    setupURL,
+			"uid":            u.ID,
+			"ip":             ip,
+			"ua":             ua,
+			"device_info":    deviceInfo,
+			"setup_secret":   setupSecret,
+			"setup_url":      setupURL,
+			"recovery_codes": recoveryCodes,
 		})
 		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
 			return nil, err
 		}
 		return &LoginResult{
-			MFARequired:     true,
-			MFAPendingToken: token,
-			MFASetupSecret:  setupSecret,
-			MFASetupURL:     setupURL,
-			AnomalyType:     anomalyType,
-			AnomalyDetails:  anomalyDetails,
+			MFARequired:      true,
+			MFAPendingToken:  token,
+			MFASetupSecret:   setupSecret,
+			MFASetupURL:      setupURL,
+			MFARecoveryCodes: recoveryCodes,
+			AnomalyType:      anomalyType,
+			AnomalyDetails:   anomalyDetails,
 		}, nil
 	}
 

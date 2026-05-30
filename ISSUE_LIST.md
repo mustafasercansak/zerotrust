@@ -671,7 +671,7 @@ Status update:
 
 ### 28. Add MFA Backup Recovery Codes
 
-State: OPEN
+State: CLOSED
 
 Status: If a user loses their TOTP authenticator device, they are completely locked out and must contact an administrator to manually disable their MFA.
 
@@ -686,6 +686,15 @@ Acceptance criteria:
 - Show the recovery codes to the user during setup and force them to confirm they saved them before enabling MFA.
 - Allow users to enter a backup recovery code on the MFA login verification stage to bypass TOTP challenge.
 - Once a recovery code is used, delete it or mark it as invalid, and notify the user via log/audit event.
+
+Status update:
+- Added columns `recovery_codes` and `pending_recovery_codes` in the `user_mfa` table.
+- Implemented cryptographically secure generation of 8 recovery codes formatted as `xxxx-xxxx-xxxx` during MFA setup.
+- Hashed the recovery codes using `bcrypt` and stored them in `pending_recovery_codes` during setup, then promoted them to `recovery_codes` upon successful verification.
+- Modified the validation flow to check for recovery codes as a fallback to TOTP. If a recovery code is used, it is atomically removed from the user's record (single-use constraint).
+- Updated the frontend `MfaPage.tsx` and `LoginPage.tsx` to display recovery codes during setup and require a confirmation checkbox.
+- Configured the login verification input field on `LoginPage.tsx` to accept and validate either 6-digit TOTP codes or 14-character recovery codes.
+- Added comprehensive unit tests validating single-use logic, setup promotion, and rejection of invalid codes.
 
 ---
 

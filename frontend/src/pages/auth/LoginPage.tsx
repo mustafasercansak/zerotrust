@@ -10,6 +10,8 @@ import Button from "@mui/material/Button";
 import MuiLink from "@mui/material/Link";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import { QRCodeSVG } from "qrcode.react";
 
 type Stage = "credentials" | "mfa";
@@ -24,6 +26,8 @@ export default function LoginPage() {
   const [mfaToken, setMfaToken] = useState("");
   const [mfaSetupSecret, setMfaSetupSecret] = useState("");
   const [mfaSetupURL, setMfaSetupURL] = useState("");
+  const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([]);
+  const [codesSaved, setCodesSaved] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,6 +51,8 @@ export default function LoginPage() {
         if (result.mfa_setup_url && result.mfa_setup_secret) {
           setMfaSetupURL(result.mfa_setup_url);
           setMfaSetupSecret(result.mfa_setup_secret);
+          setMfaRecoveryCodes(result.mfa_recovery_codes ?? []);
+          setCodesSaved(false);
         }
         setStage("mfa");
         return;
@@ -94,10 +100,11 @@ export default function LoginPage() {
   }
 
   if (stage === "mfa") {
+    const isSetup = !!mfaSetupURL;
     return (
       <AuthPage title={t("mfaTitle")} subtitle={t("mfaSubtitle")}>
         <Box component="form" onSubmit={handleMFA} sx={{ display: "grid", gap: 2 }}>
-          {mfaSetupURL && (
+          {isSetup && (
             <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, mb: 1 }}>
               <Typography variant="body2" color="warning.main" sx={{ fontWeight: 600, textAlign: "center" }}>
                 {t("mfaSetupRequiredDesc")}
@@ -113,30 +120,64 @@ export default function LoginPage() {
                   {mfaSetupSecret}
                 </Typography>
               </Box>
+
+              {/* Recovery Codes for Setup */}
+              {mfaRecoveryCodes.length > 0 && (
+                <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 1.5, width: "100%" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 700 }}>
+                    Backup Recovery Codes
+                  </Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, fontFamily: "monospace", mb: 1.5 }}>
+                    {mfaRecoveryCodes.map((c, idx) => (
+                      <Box key={idx} sx={{ p: 0.5, border: 1, borderColor: "divider", borderRadius: 0.5, bgcolor: "background.paper", textAlign: "center", fontSize: "0.75rem", fontWeight: 600 }}>
+                        {c}
+                      </Box>
+                    ))}
+                  </Box>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={codesSaved}
+                        onChange={(e) => setCodesSaved(e.target.checked)}
+                        color="primary"
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                        I have safely stored my backup recovery codes
+                      </Typography>
+                    }
+                  />
+                </Box>
+              )}
             </Box>
           )}
           <TextField
-            label={t("mfaCode")}
+            label={isSetup ? t("mfaCode") : "MFA Code / Recovery Code"}
             type="text"
-            inputMode="numeric"
             autoFocus
             required
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value)}
-            placeholder="000000"
-            slotProps={{ htmlInput: { maxLength: 6, style: { textAlign: "center", fontFamily: "monospace" } } }}
+            placeholder={isSetup ? "000000" : "000000 or xxxx-xxxx-xxxx"}
+            slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" } } }}
           />
           {(error || retryAfter > 0) && (
             <Alert severity="error">
               {retryAfter > 0 ? t("errors.rate_limit_exceeded_countdown", { seconds: retryAfter }) : error}
             </Alert>
           )}
-          <Button type="submit" variant="contained" disabled={loading || totpCode.length !== 6 || retryAfter > 0}>
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={loading || (totpCode.length !== 6 && totpCode.length !== 14) || retryAfter > 0 || (isSetup && !codesSaved)}
+          >
             {loading ? "..." : retryAfter > 0 ? t("retryButton", { seconds: retryAfter }) : t("mfaButton")}
           </Button>
           <Button
             type="button"
-            onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); }}
+            onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); setMfaRecoveryCodes([]); setCodesSaved(false); }}
             color="inherit"
           >
             {t("backToLogin")}

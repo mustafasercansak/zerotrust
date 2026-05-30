@@ -2,15 +2,18 @@ package mfa
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/pquerna/otp/totp"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 
 	appCrypto "github.com/zerotrust/backend/pkg/crypto"
 )
@@ -20,19 +23,22 @@ const usedCodeTTL = 90 * time.Second
 
 // SetupResult is returned when the user initiates MFA setup.
 type SetupResult struct {
-	OTPAuthURL string // otpauth:// URI for authenticator apps
-	Secret     string // raw base32 secret for manual entry
+	OTPAuthURL    string   // otpauth:// URI for authenticator apps
+	Secret        string   // raw base32 secret for manual entry
+	RecoveryCodes []string // raw recovery codes to show to the user
 }
 
 // store is the persistence interface consumed by Service.
 // *Repository satisfies it; tests may supply a stub.
 type store interface {
 	IsEnabled(ctx context.Context, userID string) bool
-	UpsertPending(ctx context.Context, userID, pendingEnc string) error
+	UpsertPending(ctx context.Context, userID, pendingEnc string, pendingCodes []string) error
 	Enable(ctx context.Context, userID string) error
 	Delete(ctx context.Context, userID string) error
 	SecretEnc(ctx context.Context, userID string) (string, error)
 	PendingSecretEnc(ctx context.Context, userID string) (string, error)
+	RecoveryCodes(ctx context.Context, userID string) ([]string, error)
+	UpdateRecoveryCodes(ctx context.Context, userID string, codes []string) error
 }
 
 type Service struct {
@@ -41,7 +47,7 @@ type Service struct {
 	rdb    *redis.Client
 }
 
-func NewService(repo *Repository, encKey []byte, rdb *redis.Client) *Service {
+func NewService(repo store, encKey []byte, rdb *redis.Client) *Service {
 	return &Service{repo: repo, encKey: encKey, rdb: rdb}
 }
 
@@ -56,22 +62,23 @@ func (s *Service) markUsed(ctx context.Context, userID, code string) bool {
 	ok, err := s.rdb.SetNX(ctx, key, "1", usedCodeTTL).Result()
 	return err != nil || ok
 }
+
 // Setup generates a new TOTP secret and stores it as a *pending* candidate.
 // The active secret (and enabled_at) are untouched until VerifyAndEnable succeeds.
-func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) (string, string, error) {
+func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
 	if s.repo.IsEnabled(ctx, userID) {
 		if currentCode == "" {
-			return "", "", errors.New("current_code_required")
+			return "", "", nil, errors.New("current_code_required")
 		}
 		secret, err := s.decryptSecret(ctx, userID)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		if !totp.Validate(currentCode, secret) {
-			return "", "", errors.New("invalid_code")
+			return "", "", nil, errors.New("invalid_code")
 		}
 		if !s.markUsed(ctx, userID, currentCode) {
-			return "", "", errors.New("code_already_used")
+			return "", "", nil, errors.New("code_already_used")
 		}
 	}
 
@@ -80,22 +87,27 @@ func (s *Service) Setup(ctx context.Context, userID, email, currentCode string) 
 		AccountName: email,
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	enc, err := appCrypto.Encrypt(s.encKey, []byte(key.Secret()))
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
-	if err := s.repo.UpsertPending(ctx, userID, hex.EncodeToString(enc)); err != nil {
-		return "", "", err
+	rawCodes, hashedCodes, err := generateRecoveryCodes()
+	if err != nil {
+		return "", "", nil, err
 	}
 
-	return key.URL(), key.Secret(), nil
+	if err := s.repo.UpsertPending(ctx, userID, hex.EncodeToString(enc), hashedCodes); err != nil {
+		return "", "", nil, err
+	}
+
+	return key.URL(), key.Secret(), rawCodes, nil
 }
-// valid, atomically promotes it to the active secret. Returns an error if
-// the code is wrong or there is no pending setup in progress.
+
+// VerifyAndEnable verifies a TOTP code and promoting the pending secret to active.
 func (s *Service) VerifyAndEnable(ctx context.Context, userID, code string) error {
 	secret, err := s.decryptPendingSecret(ctx, userID)
 	if err != nil {
@@ -129,14 +141,42 @@ func (s *Service) IsEnabled(ctx context.Context, userID string) bool {
 
 // Validate satisfies auth.MFAChecker.
 func (s *Service) Validate(ctx context.Context, userID, code string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+
+	// 1. Try TOTP validation first
 	secret, err := s.decryptSecret(ctx, userID)
-	if err != nil {
+	if err == nil {
+		if totp.Validate(code, secret) {
+			return s.markUsed(ctx, userID, code)
+		}
+	}
+
+	// 2. Check if it matches a recovery code
+	recoveryCodes, err := s.repo.RecoveryCodes(ctx, userID)
+	if err != nil || len(recoveryCodes) == 0 {
 		return false
 	}
-	if !totp.Validate(code, secret) {
-		return false
+
+	matchedIdx := -1
+	for i, hashedCode := range recoveryCodes {
+		if bcrypt.CompareHashAndPassword([]byte(hashedCode), []byte(code)) == nil {
+			matchedIdx = i
+			break
+		}
 	}
-	return s.markUsed(ctx, userID, code)
+
+	if matchedIdx != -1 {
+		// Remove the matched recovery code (single-use)
+		updatedCodes := append(recoveryCodes[:matchedIdx], recoveryCodes[matchedIdx+1:]...)
+		if err := s.repo.UpdateRecoveryCodes(ctx, userID, updatedCodes); err != nil {
+			slog.Error("failed to update recovery codes after use", "user_id", userID, "error", err)
+			return false
+		}
+		slog.Info("MFA recovery code used successfully", "user_id", userID)
+		return true
+	}
+
+	return false
 }
 
 func (s *Service) decryptSecret(ctx context.Context, userID string) (string, error) {
@@ -171,4 +211,23 @@ func (s *Service) decryptHex(encHex string) (string, error) {
 func ValidBase32(s string) bool {
 	_, err := base32.StdEncoding.DecodeString(strings.ToUpper(s))
 	return err == nil
+}
+
+func generateRecoveryCodes() ([]string, []string, error) {
+	rawCodes := make([]string, 8)
+	hashedCodes := make([]string, 8)
+	for i := 0; i < 8; i++ {
+		b := make([]byte, 6)
+		if _, err := rand.Read(b); err != nil {
+			return nil, nil, err
+		}
+		code := fmt.Sprintf("%04x-%04x-%04x", b[0:2], b[2:4], b[4:6])
+		hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, nil, err
+		}
+		rawCodes[i] = code
+		hashedCodes[i] = string(hash)
+	}
+	return rawCodes, hashedCodes, nil
 }

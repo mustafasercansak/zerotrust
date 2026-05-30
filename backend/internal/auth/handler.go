@@ -179,10 +179,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	if result.MFARequired {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		resp := map[string]any{
 			"mfa_required": true,
 			"mfa_token":    result.MFAPendingToken,
-		})
+		}
+		if result.MFASetupSecret != "" {
+			resp["mfa_setup_secret"] = result.MFASetupSecret
+			resp["mfa_setup_url"] = result.MFASetupURL
+			resp["mfa_recovery_codes"] = result.MFARecoveryCodes
+		}
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 

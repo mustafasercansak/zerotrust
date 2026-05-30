@@ -19,17 +19,22 @@ type stubStore struct {
 	upsertErr    error
 	enableErr    error
 	enableCalled bool
+	recoveryCodes []string
+	pendingCodes  []string
 }
 
 func (s *stubStore) IsEnabled(_ context.Context, _ string) bool { return s.enabled }
 
-func (s *stubStore) UpsertPending(_ context.Context, _, enc string) error {
+func (s *stubStore) UpsertPending(_ context.Context, _, enc string, pendingCodes []string) error {
 	s.pendingEnc = enc
+	s.pendingCodes = pendingCodes
 	return s.upsertErr
 }
 
 func (s *stubStore) Enable(_ context.Context, _ string) error {
 	s.enableCalled = true
+	s.recoveryCodes = s.pendingCodes
+	s.pendingCodes = nil
 	return s.enableErr
 }
 
@@ -47,6 +52,15 @@ func (s *stubStore) PendingSecretEnc(_ context.Context, _ string) (string, error
 		return "", ErrNotFound
 	}
 	return s.pendingEnc, nil
+}
+
+func (s *stubStore) RecoveryCodes(_ context.Context, _ string) ([]string, error) {
+	return s.recoveryCodes, nil
+}
+
+func (s *stubStore) UpdateRecoveryCodes(_ context.Context, _ string, codes []string) error {
+	s.recoveryCodes = codes
+	return nil
 }
 
 // testKey returns a deterministic 32-byte AES key suitable for tests only.
@@ -75,6 +89,7 @@ func newTOTPKey(t *testing.T) (secret, code string) {
 	}
 	return key.Secret(), code
 }
+
 // --- Setup tests ---
 
 // TestSetup_FirstTime verifies that Setup succeeds with an empty current_code
@@ -83,24 +98,31 @@ func TestSetup_FirstTime(t *testing.T) {
 	stub := &stubStore{enabled: false}
 	svc := &Service{repo: stub, encKey: testKey()}
 
-	url, secret, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	url, secret, recoveryCodes, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if url == "" || secret == "" {
 		t.Error("expected non-empty setup result")
 	}
+	if len(recoveryCodes) != 8 {
+		t.Errorf("expected 8 recovery codes, got %d", len(recoveryCodes))
+	}
 	if stub.pendingEnc == "" {
 		t.Error("UpsertPending was not called")
 	}
+	if len(stub.pendingCodes) != 8 {
+		t.Error("UpsertPending did not store pending recovery codes")
+	}
 }
+
 func TestSetup_MFAEnabled_EmptyCode(t *testing.T) {
 	key := testKey()
 	totpSecret, _ := newTOTPKey(t)
 	stub := &stubStore{enabled: true, secretEnc: encryptSecret(t, key, totpSecret)}
 	svc := &Service{repo: stub, encKey: key}
 
-	_, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	_, _, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -116,7 +138,7 @@ func TestSetup_MFAEnabled_WrongCode(t *testing.T) {
 	stub := &stubStore{enabled: true, secretEnc: encryptSecret(t, key, totpSecret)}
 	svc := &Service{repo: stub, encKey: key}
 
-	_, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "000000")
+	_, _, _, err := svc.Setup(context.Background(), "user1", "user1@example.com", "000000")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -135,12 +157,15 @@ func TestSetup_MFAEnabled_CorrectCode(t *testing.T) {
 
 	originalSecretEnc := stub.secretEnc
 
-	url, secret, err := svc.Setup(context.Background(), "user1", "user1@example.com", currentCode)
+	url, secret, recoveryCodes, err := svc.Setup(context.Background(), "user1", "user1@example.com", currentCode)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if url == "" || secret == "" {
 		t.Error("expected non-empty setup result")
+	}
+	if len(recoveryCodes) != 8 {
+		t.Error("expected 8 recovery codes")
 	}
 	if stub.pendingEnc == "" {
 		t.Error("UpsertPending was not called")
@@ -191,5 +216,52 @@ func TestVerifyAndEnable_NoPending(t *testing.T) {
 
 	if err := svc.VerifyAndEnable(context.Background(), "user1", "123456"); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// --- Recovery Codes validation tests ---
+
+func TestRecoveryCodes_ValidationAndSingleUse(t *testing.T) {
+	key := testKey()
+	totpSecret, _ := newTOTPKey(t)
+	stub := &stubStore{enabled: false}
+	svc := &Service{repo: stub, encKey: key}
+
+	// 1. Run Setup to generate pending secret and recovery codes
+	_, _, rawCodes, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// 2. Enable MFA (VerifyAndEnable will promote the pending codes to active recovery codes)
+	stub.pendingEnc = encryptSecret(t, key, totpSecret)
+	code, _ := totp.GenerateCode(totpSecret, time.Now())
+	if err := svc.VerifyAndEnable(context.Background(), "user1", code); err != nil {
+		t.Fatalf("verify and enable failed: %v", err)
+	}
+
+	if len(stub.recoveryCodes) != 8 {
+		t.Fatalf("expected 8 active recovery codes, got %d", len(stub.recoveryCodes))
+	}
+
+	// 3. Validate using a valid recovery code (should succeed)
+	validCode := rawCodes[2]
+	if !svc.Validate(context.Background(), "user1", validCode) {
+		t.Error("expected valid recovery code to pass validation")
+	}
+
+	// 4. Recovery codes array should be updated to size 7 (single-use check)
+	if len(stub.recoveryCodes) != 7 {
+		t.Errorf("expected recovery codes size to decrease to 7, got %d", len(stub.recoveryCodes))
+	}
+
+	// 5. Trying to reuse the same recovery code must fail
+	if svc.Validate(context.Background(), "user1", validCode) {
+		t.Error("expected single-use recovery code reuse to fail")
+	}
+
+	// 6. Validating with an invalid code format/value must fail
+	if svc.Validate(context.Background(), "user1", "invalid-code-here") {
+		t.Error("expected invalid recovery code to fail validation")
 	}
 }

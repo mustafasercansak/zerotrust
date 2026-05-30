@@ -45,7 +45,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Atomic Token Rotation | `SELECT … FOR UPDATE` prevents replay race |
 | JTI Blocklist | Instant revocation via Redis (auto-TTL) |
 | Key Rotation | Zero-downtime via primary/secondary key slots |
-| TOTP MFA | Encrypted TOTP secrets with pending setup flow |
+| TOTP MFA | Encrypted TOTP secrets with pending setup flow & single-use backup recovery codes |
 | Password Reset | Opaque reset tokens, atomic consume + password update + session revocation |
 | Progressive Lockout | 1 / 5 / 30 min escalating lockout (Redis) |
 | Rate Limiting | Login 10/min · global 300/min (sliding window) |
@@ -69,7 +69,7 @@ ZeroTrust currently includes:
 - Admin user and role management
 - Fine-grained permissions
 - Service-account credentials and M2M token issuing
-- TOTP MFA setup, verification, disable, and MFA challenge during login
+- TOTP MFA setup, verification (with single-use backup recovery codes), disable, and MFA challenge during login
 - Password reset flow with SMTP or development log mailer
 - Audit log listing
 - Turkish and English UI messages
@@ -262,6 +262,7 @@ Session limits are fetched and cached dynamically from the `system_settings` tab
 ### 4. Multi-Factor Authentication (MFA)
 - **Prerequisites**: Enabled globally by setting `MFA_ENABLED=true` and supplying a 32-byte hexadecimal key in `MFA_ENCRYPTION_KEY` (used for encrypting secret seeds with AES-256-GCM).
 - **MFA Challenge**: When enabled, logging in triggers an MFA challenge that generates a temporary 5-minute single-use `mfa_token` cookie. The login is only finalized when the user submits their valid TOTP code.
+- **Backup Recovery Codes**: During initial setup, the system generates 8 single-use recovery codes (`xxxx-xxxx-xxxx`) hashed via `bcrypt` and stored in the database. Users can enter a backup recovery code during login/verification challenges to bypass the TOTP prompt. Upon successful validation, the code is permanently deleted.
 - **Step-Up Verification**: Destructive administrator operations (such as modifying user roles/status, revoking user sessions, or creating/deleting service accounts) require **recent** MFA verification. If no verified marker exists for the session in Redis within the last 10 minutes, the action is blocked (`mfa_required` error) until the administrator completes an inline TOTP step-up challenge.
 
 ### 5. Service Account (M2M) Auth Model

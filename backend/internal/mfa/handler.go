@@ -39,7 +39,7 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	otpAuthURL, secret, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
+	otpAuthURL, secret, recoveryCodes, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
 	if err != nil {
 		if err.Error() == "invalid_code" || err.Error() == "current_code_required" {
 			writeError(w, http.StatusBadRequest, "invalid_code")
@@ -50,13 +50,12 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"otp_auth_url": otpAuthURL,
-		"secret":       secret,
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"otp_auth_url":   otpAuthURL,
+		"secret":         secret,
+		"recovery_codes": recoveryCodes,
 	})
 }
-
-// POST /api/v1/mfa/verify — verify a TOTP code and enable MFA
 func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	claims := authmw.ClaimsFrom(r.Context())
 	if claims == nil {
