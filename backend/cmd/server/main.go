@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,7 +58,22 @@ func main() {
 	}
 	slog.Info("migrations applied")
 
-	db, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	dbCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("database parse config failed", "error", err)
+		os.Exit(1)
+	}
+	if cfg.DatabaseMaxConns > 0 {
+		dbCfg.MaxConns = int32(cfg.DatabaseMaxConns)
+	}
+	if cfg.DatabaseMinConns > 0 {
+		dbCfg.MinConns = int32(cfg.DatabaseMinConns)
+	}
+	if cfg.DatabaseConnTimeout > 0 {
+		dbCfg.ConnConfig.ConnectTimeout = cfg.DatabaseConnTimeout
+	}
+
+	db, err := pgxpool.NewWithConfig(context.Background(), dbCfg)
 	if err != nil {
 		slog.Error("database connection failed", "error", err)
 		os.Exit(1)
@@ -69,17 +85,31 @@ func main() {
 		slog.Error("database ping failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("database connection pool initialized",
+		"max_conns", db.Stat().MaxConns(),
+		"total_conns", db.Stat().TotalConns(),
+		"idle_conns", db.Stat().IdleConns(),
+	)
 
-	rdb := redis.NewClient(&redis.Options{
+	redisOpts := &redis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
-	})
+	}
+	if cfg.RedisPoolSize > 0 {
+		redisOpts.PoolSize = cfg.RedisPoolSize
+	}
+	rdb := redis.NewClient(redisOpts)
 	defer rdb.Close()
 
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		slog.Error("redis connection failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("redis connection pool initialized",
+		"pool_size", rdb.Options().PoolSize,
+		"total_conns", rdb.PoolStats().TotalConns,
+		"idle_conns", rdb.PoolStats().IdleConns,
+	)
 
 	ks, err := auth.LoadOrGenerateKeyStore(cfg.JWTPrivateKeyFile, cfg.JWTSecondaryKeyFile)
 	if err != nil {
@@ -118,6 +148,30 @@ func main() {
 	go func() {
 		defer background.Done()
 		runSessionCleanup(rootCtx, sessionRepo)
+	}()
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		slog.Info("connection pool metrics worker started")
+		for {
+			select {
+			case <-rootCtx.Done():
+				slog.Info("connection pool metrics worker stopped")
+				return
+			case <-ticker.C:
+				dbStat := db.Stat()
+				rdbStat := rdb.PoolStats()
+				slog.Info("connection pool metrics",
+					"db_max_conns", dbStat.MaxConns(),
+					"db_total_conns", dbStat.TotalConns(),
+					"db_idle_conns", dbStat.IdleConns(),
+					"redis_total_conns", rdbStat.TotalConns,
+					"redis_idle_conns", rdbStat.IdleConns,
+				)
+			}
+		}
 	}()
 
 	auditRepo := audit.NewRepository(db)
@@ -558,8 +612,12 @@ func writeMetrics(w http.ResponseWriter) {
 type config struct {
 	ServerAddr               string
 	DatabaseURL              string
+	DatabaseMaxConns         int
+	DatabaseMinConns         int
+	DatabaseConnTimeout      time.Duration
 	RedisAddr                string
 	RedisPassword            string
+	RedisPoolSize            int
 	MigrationsPath           string
 	JWTPrivateKeyFile        string
 	JWTSecondaryKeyFile      string
@@ -610,11 +668,33 @@ func loadConfig() (config, error) {
 		mfaKey = b
 	}
 
+	dbMaxConns, err := intEnv("DATABASE_MAX_CONNS", 20)
+	if err != nil {
+		return config{}, err
+	}
+	dbMinConns, err := intEnv("DATABASE_MIN_CONNS", 2)
+	if err != nil {
+		return config{}, err
+	}
+	dbConnTimeoutStr := getEnv("DATABASE_CONN_TIMEOUT", "5s")
+	dbConnTimeout, err := time.ParseDuration(dbConnTimeoutStr)
+	if err != nil {
+		return config{}, fmt.Errorf("invalid DATABASE_CONN_TIMEOUT %q: %w", dbConnTimeoutStr, err)
+	}
+	redisPoolSize, err := intEnv("REDIS_POOL_SIZE", 10)
+	if err != nil {
+		return config{}, err
+	}
+
 	return config{
 		ServerAddr:               getEnv("SERVER_ADDR", ":8080"),
 		DatabaseURL:              getEnv("DATABASE_URL", "postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable"),
+		DatabaseMaxConns:         dbMaxConns,
+		DatabaseMinConns:         dbMinConns,
+		DatabaseConnTimeout:      dbConnTimeout,
 		RedisAddr:                getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:            getEnv("REDIS_PASSWORD", "zerotrust_secret"),
+		RedisPoolSize:            redisPoolSize,
 		MigrationsPath:           getEnv("MIGRATIONS_PATH", "migrations"),
 		JWTPrivateKeyFile:        getEnv("JWT_PRIVATE_KEY_FILE", ""),
 		JWTSecondaryKeyFile:      getEnv("JWT_SECONDARY_KEY_FILE", ""),
@@ -657,6 +737,18 @@ func boolEnv(key string, fallback bool) (bool, error) {
 	default:
 		return false, fmt.Errorf("%s must be true or false", key)
 	}
+}
+
+func intEnv(key string, fallback int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback, nil
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid int env %s=%q: %w", key, v, err)
+	}
+	return i, nil
 }
 
 func skipPaths(mw func(http.Handler) http.Handler, paths ...string) func(http.Handler) http.Handler {

@@ -181,3 +181,52 @@ func TestWaitForBackgroundHonorsContextDeadline(t *testing.T) {
 		t.Fatal("waitForBackground returned false after WaitGroup completed")
 	}
 }
+
+func TestLoadConfig_ConnectionPoolTuning(t *testing.T) {
+	t.Setenv("DATABASE_MAX_CONNS", "50")
+	t.Setenv("DATABASE_MIN_CONNS", "5")
+	t.Setenv("DATABASE_CONN_TIMEOUT", "10s")
+	t.Setenv("REDIS_POOL_SIZE", "25")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error loading config with pool parameters: %v", err)
+	}
+
+	if cfg.DatabaseMaxConns != 50 {
+		t.Errorf("expected DatabaseMaxConns to be 50, got %d", cfg.DatabaseMaxConns)
+	}
+	if cfg.DatabaseMinConns != 5 {
+		t.Errorf("expected DatabaseMinConns to be 5, got %d", cfg.DatabaseMinConns)
+	}
+	if cfg.DatabaseConnTimeout != 10*time.Second {
+		t.Errorf("expected DatabaseConnTimeout to be 10s, got %v", cfg.DatabaseConnTimeout)
+	}
+	if cfg.RedisPoolSize != 25 {
+		t.Errorf("expected RedisPoolSize to be 25, got %d", cfg.RedisPoolSize)
+	}
+
+	// Verify defaults
+	t.Setenv("DATABASE_MAX_CONNS", "")
+	t.Setenv("DATABASE_MIN_CONNS", "")
+	t.Setenv("DATABASE_CONN_TIMEOUT", "")
+	t.Setenv("REDIS_POOL_SIZE", "")
+
+	cfg, err = loadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error loading default config: %v", err)
+	}
+
+	if cfg.DatabaseMaxConns != 20 {
+		t.Errorf("expected default DatabaseMaxConns to be 20, got %d", cfg.DatabaseMaxConns)
+	}
+	if cfg.DatabaseMinConns != 2 {
+		t.Errorf("expected default DatabaseMinConns to be 2, got %d", cfg.DatabaseMinConns)
+	}
+	if cfg.DatabaseConnTimeout != 5*time.Second {
+		t.Errorf("expected default DatabaseConnTimeout to be 5s, got %v", cfg.DatabaseConnTimeout)
+	}
+	if cfg.RedisPoolSize != 10 {
+		t.Errorf("expected default RedisPoolSize to be 10, got %d", cfg.RedisPoolSize)
+	}
+}

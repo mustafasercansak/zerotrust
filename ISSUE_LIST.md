@@ -749,7 +749,7 @@ Status update:
 
 ### 31. Database Connection Pool and Timeout Tuning
 
-State: OPEN
+State: CLOSED
 
 Status: The database and Redis client connection pools are initialized using hardcoded or default library options. High traffic or network latency could lead to pool exhaustion or socket timeouts.
 
@@ -759,6 +759,15 @@ Related files:
 Acceptance criteria:
 - Load dynamic settings (e.g., `DATABASE_MAX_CONNS`, `DATABASE_MIN_CONNS`, `DATABASE_CONN_TIMEOUT`, `REDIS_POOL_SIZE`) from configuration/environment variables.
 - Log connection pool metrics or utilization checks upon server startup and lifecycle updates.
+
+Status update:
+- Added `DatabaseMaxConns`, `DatabaseMinConns`, `DatabaseConnTimeout`, and `RedisPoolSize` parsing logic to `loadConfig` in `main.go`.
+- Configured defaults: `DATABASE_MAX_CONNS` (20), `DATABASE_MIN_CONNS` (2), `DATABASE_CONN_TIMEOUT` ("5s"), and `REDIS_POOL_SIZE` (10).
+- Initialized `pgxpool` using `NewWithConfig` dynamically applying the pool limits and timeout values.
+- Initialized `redis.Client` applying the pool size value.
+- Added startup log entries displaying the initial pool metrics for both PostgreSQL and Redis.
+- Registered a periodic background metrics worker inside the main `WaitGroup` logging connection pool stats every 5 minutes.
+- Added test coverage in `main_test.go` verifying pool parameter parsing and fallback values.
 
 
 

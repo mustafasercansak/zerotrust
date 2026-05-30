@@ -103,6 +103,12 @@ JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_ec_primary.pem
 # ── MFA ─────────────────────────────────────
 MFA_ENABLED=true
 MFA_ENCRYPTION_KEY=$(openssl rand -hex 32)
+
+# ── Connection Pool Tuning (defaults shown) ─
+# DATABASE_MAX_CONNS=20
+# DATABASE_MIN_CONNS=2
+# DATABASE_CONN_TIMEOUT=5s
+# REDIS_POOL_SIZE=10
 EOF
 chmod 600 "$INFRA_DIR/.env"
 log "infra/.env created (chmod 600)"
