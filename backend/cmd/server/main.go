@@ -196,6 +196,7 @@ func main() {
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
 	tokenRL := authmw.NewRateLimiter(rdb, "token", 30, time.Minute)
 	globalRL := authmw.NewRateLimiter(rdb, "global", 300, time.Minute)
+	protectedRL := authmw.NewRateLimiter(rdb, "protected", 100, time.Minute)
 	trustedCIDRs := authmw.ParseCIDRs(cfg.TrustedProxies)
 
 	r := chi.NewRouter()
@@ -252,6 +253,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.AuditAuthFailures(auditRepo))
 			r.Use(authmw.Authenticate(ks, authSvc))
+			r.Use(protectedRL.Middleware())
 			r.Use(authmw.AuditLog(auditRepo))
 
 			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {

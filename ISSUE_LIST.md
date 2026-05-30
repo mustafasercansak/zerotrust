@@ -726,18 +726,24 @@ Status update:
 
 ### 30. Implement API Rate Limiting for Protected Endpoints
 
-State: OPEN
+State: CLOSED
 
 Status: Rate limiting is currently set for public auth/token routes, but generic protected endpoints (such as avatar uploads or session queries) have no rate limits and can be abused by automated scripts.
 
 Related files:
-- [backend/pkg/middleware/rate_limit.go](/home/m/projects/zerotrust/backend/pkg/middleware/rate_limit.go)
+- [backend/pkg/middleware/ratelimit.go](/home/m/projects/zerotrust/backend/pkg/middleware/ratelimit.go)
 - [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
 
 Acceptance criteria:
 - Introduce token-bucket rate limiting based on authenticated `claims.UserID` or IP address for generic protected routes.
 - Return HTTP 429 with appropriate `Retry-After` headers when the rate limit threshold is exceeded.
 - Provide unit tests showing that authenticated clients are rate-limited independently.
+
+Status update:
+- Updated the key generation logic inside `ratelimit.go` to inspect the JWT context claims. If `claims.UserID` is present, it is used as the rate limit key; otherwise, it falls back to the client IP address.
+- Initialized a `protectedRL` rate limiter instance in `main.go` restricting clients to 100 requests per minute.
+- Configured the `protectedRL.Middleware()` wrapper inside the protected route group in `main.go`, positioned right after the authentication guard.
+- Added a full test suite in `ratelimit_test.go` confirming that unauthenticated users are rate limited by IP, authenticated users are rate limited by User ID, independent user counts are maintained, and HTTP 429 returns with appropriate `Retry-After` and metadata headers.
 
 ---
 
