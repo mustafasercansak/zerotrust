@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zerotrust/backend/internal/audit"
+	"github.com/zerotrust/backend/internal/user"
 )
 
 type recordingAuthAuditLogger struct {
@@ -510,5 +511,101 @@ func TestRegister_InvalidPassword(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request, got %d", rr.Code)
+	}
+}
+
+type fakeUserService struct {
+	registerUser *user.User
+	registerErr  error
+}
+
+func (s *fakeUserService) Register(ctx context.Context, email, password, locale string) (*user.User, error) {
+	return s.registerUser, s.registerErr
+}
+
+func TestRegister_Success(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	userSvc := &fakeUserService{
+		registerUser: &user.User{ID: "test-user-id", Email: "test@example.com"},
+	}
+	authSvc := &fakeAuthService{
+		loginResult: &LoginResult{
+			Pair: &TokenPair{AccessToken: "at", RefreshToken: "rt"},
+		},
+	}
+	h := NewHandler(authSvc, userSvc, logger, false, true, nil, "", nil)
+
+	reqBody := `{"email":"test@example.com","password":"Password1!","locale":"en"}`
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("User-Agent", "TestAgent")
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("expected 201 Created, got %d. body=%s", rr.Code, rr.Body.String())
+	}
+	
+	entry := logger.wait(t)
+	if entry.Action != "auth.register" {
+		t.Errorf("expected action auth.register, got %s", entry.Action)
+	}
+}
+
+func TestRegister_EmailTaken(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	userSvc := &fakeUserService{
+		registerErr: user.ErrEmailTaken,
+	}
+	h := NewHandler(nil, userSvc, logger, false, true, nil, "", nil)
+
+	reqBody := `{"email":"test@example.com","password":"Password1!","locale":"en"}`
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict, got %d", rr.Code)
+	}
+}
+
+func TestRegister_UserSvcInternalError(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	userSvc := &fakeUserService{
+		registerErr: errors.New("db down"),
+	}
+	h := NewHandler(nil, userSvc, logger, false, true, nil, "", nil)
+
+	reqBody := `{"email":"test@example.com","password":"Password1!","locale":"en"}`
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rr.Code)
+	}
+}
+
+func TestRegister_LoginSvcError(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	userSvc := &fakeUserService{
+		registerUser: &user.User{ID: "test-user-id", Email: "test@example.com"},
+	}
+	authSvc := &fakeAuthService{
+		loginErr: errors.New("redis down"),
+	}
+	h := NewHandler(authSvc, userSvc, logger, false, true, nil, "", nil)
+
+	reqBody := `{"email":"test@example.com","password":"Password1!","locale":"en"}`
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rr.Code)
 	}
 }

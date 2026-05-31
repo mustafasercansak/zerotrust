@@ -34,9 +34,13 @@ type authService interface {
 	Logout(ctx context.Context, refreshToken, accessToken string) error
 }
 
+type userService interface {
+	Register(ctx context.Context, email, password, locale string) (*user.User, error)
+}
+
 type Handler struct {
 	authSvc             authService
-	userSvc             *user.Service
+	userSvc             userService
 	auditRepo           auditLogger
 	settings            SettingReader // nil falls back to defaults
 	passwordResetter    PasswordResetter // nil when not configured
@@ -45,7 +49,7 @@ type Handler struct {
 	publicAppURL        string // base URL for password-reset links (from config, never from request)
 }
 
-func NewHandler(authSvc authService, userSvc *user.Service, auditRepo auditLogger, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string, settings SettingReader) *Handler {
+func NewHandler(authSvc authService, userSvc userService, auditRepo auditLogger, cookiesSecure, registrationEnabled bool, pr PasswordResetter, publicAppURL string, settings SettingReader) *Handler {
 	return &Handler{
 		authSvc:             authSvc,
 		userSvc:             userSvc,
