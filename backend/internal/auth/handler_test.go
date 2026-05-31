@@ -457,3 +457,58 @@ func TestAuthAuditWriteFailureIsLogged(t *testing.T) {
 		t.Fatalf("audit write failures=%d want %d", got, failuresBefore+1)
 	}
 }
+func TestRegister_Disabled(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	h := NewHandler(nil, nil, logger, false, false, nil, "", nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", nil)
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", rr.Code)
+	}
+}
+
+func TestRegister_InvalidBody(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	h := NewHandler(nil, nil, logger, false, true, nil, "", nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader("invalid json"))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", rr.Code)
+	}
+}
+
+func TestRegister_InvalidEmail(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	h := NewHandler(nil, nil, logger, false, true, nil, "", nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader("{\"email\":\"invalid\",\"password\":\"Password1!\"}"))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", rr.Code)
+	}
+}
+
+func TestRegister_InvalidPassword(t *testing.T) {
+	logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+	h := NewHandler(nil, nil, logger, false, true, nil, "", nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", strings.NewReader("{\"email\":\"test@example.com\",\"password\":\"short\"}"))
+	rr := httptest.NewRecorder()
+
+	h.Register(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", rr.Code)
+	}
+}
