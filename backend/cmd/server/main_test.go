@@ -383,3 +383,107 @@ func TestSAStoreAdapterFindByClientIDPropagatesError(t *testing.T) {
 		t.Fatalf("FindByClientID error=%v want=%v", err, wantErr)
 	}
 }
+
+func TestGetEnvReturnsFallbackAndValue(t *testing.T) {
+	t.Setenv("ZT_TEST_ENV", "")
+	if got := getEnv("ZT_TEST_ENV", "fallback"); got != "fallback" {
+		t.Fatalf("getEnv fallback=%q want=fallback", got)
+	}
+
+	t.Setenv("ZT_TEST_ENV", "value")
+	if got := getEnv("ZT_TEST_ENV", "fallback"); got != "value" {
+		t.Fatalf("getEnv value=%q want=value", got)
+	}
+}
+
+func TestBoolEnv(t *testing.T) {
+	t.Setenv("ZT_BOOL", "")
+	if got, err := boolEnv("ZT_BOOL", true); err != nil || !got {
+		t.Fatalf("boolEnv fallback got=%v err=%v", got, err)
+	}
+
+	t.Setenv("ZT_BOOL", " FALSE ")
+	if got, err := boolEnv("ZT_BOOL", true); err != nil || got {
+		t.Fatalf("boolEnv false got=%v err=%v", got, err)
+	}
+
+	t.Setenv("ZT_BOOL", "not-bool")
+	if _, err := boolEnv("ZT_BOOL", false); err == nil {
+		t.Fatal("expected boolEnv to return error for invalid value")
+	}
+}
+
+func TestIntEnv(t *testing.T) {
+	t.Setenv("ZT_INT", "")
+	if got, err := intEnv("ZT_INT", 42); err != nil || got != 42 {
+		t.Fatalf("intEnv fallback got=%d err=%v", got, err)
+	}
+
+	t.Setenv("ZT_INT", " 7 ")
+	if got, err := intEnv("ZT_INT", 42); err != nil || got != 7 {
+		t.Fatalf("intEnv parse got=%d err=%v", got, err)
+	}
+
+	t.Setenv("ZT_INT", "oops")
+	if _, err := intEnv("ZT_INT", 42); err == nil {
+		t.Fatal("expected intEnv to return error for invalid value")
+	}
+}
+
+type cleanupCounterProbe struct {
+	staleCount int
+	purgeCount int
+	staleSeen  chan struct{}
+	purgeSeen  chan struct{}
+}
+
+func (p *cleanupCounterProbe) RevokeStaleInitialSessions(ctx context.Context) (int64, error) {
+	p.staleCount++
+	if p.staleCount == 1 {
+		close(p.staleSeen)
+	}
+	return 1, nil
+}
+
+func (p *cleanupCounterProbe) DeleteExpired(ctx context.Context) (int64, error) {
+	p.purgeCount++
+	if p.purgeCount == 1 {
+		close(p.purgeSeen)
+	}
+	return 1, nil
+}
+
+func TestRunSessionCleanupLoopRunsBothTickers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	probe := &cleanupCounterProbe{
+		staleSeen: make(chan struct{}),
+		purgeSeen: make(chan struct{}),
+	}
+	done := make(chan struct{})
+
+	go func() {
+		runSessionCleanupLoop(ctx, probe, time.Millisecond, time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-probe.staleSeen:
+	case <-time.After(time.Second):
+		t.Fatal("stale cleanup ticker did not run")
+	}
+
+	select {
+	case <-probe.purgeSeen:
+	case <-time.After(time.Second):
+		t.Fatal("purge cleanup ticker did not run")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup loop did not stop after cancel")
+	}
+}

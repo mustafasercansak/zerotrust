@@ -359,4 +359,103 @@ func TestSeedAdmin(t *testing.T) {
 			t.Fatalf("expected boom error, got %v", err)
 		}
 	})
+
+	t.Run("assign role failure for existing user returns error", func(t *testing.T) {
+		store := &fakeStore{findByEmailUser: &User{ID: "u1"}, assignRoleErr: errors.New("assign failed")}
+		svc := NewService(store)
+
+		err := svc.SeedAdmin(context.TODO(), "admin@example.com", "bcrypt-hash")
+		if err == nil || err.Error() != "assign failed" {
+			t.Fatalf("expected assign failed error, got %v", err)
+		}
+	})
+
+	t.Run("create failure other than email taken returns error", func(t *testing.T) {
+		store := &fakeStore{findByEmailErr: ErrNotFound, createErr: errors.New("create failed")}
+		svc := NewService(store)
+
+		err := svc.SeedAdmin(context.TODO(), "admin@example.com", "bcrypt-hash")
+		if err == nil || err.Error() != "create failed" {
+			t.Fatalf("expected create failed error, got %v", err)
+		}
+	})
+
+	t.Run("assign role failure after create returns error", func(t *testing.T) {
+		store := &fakeStore{
+			findByEmailErr: ErrNotFound,
+			createUser:     &User{ID: "u2"},
+			assignRoleErr:  errors.New("assign failed"),
+		}
+		svc := NewService(store)
+
+		err := svc.SeedAdmin(context.TODO(), "admin@example.com", "bcrypt-hash")
+		if err == nil || err.Error() != "assign failed" {
+			t.Fatalf("expected assign failed error, got %v", err)
+		}
+	})
+}
+
+func TestServicePassthroughErrors(t *testing.T) {
+	t.Run("register propagates repository error", func(t *testing.T) {
+		store := &fakeStore{createErr: errors.New("repo down")}
+		svc := NewService(store)
+
+		_, err := svc.Register(context.TODO(), "user@example.com", "Password1!", "en")
+		if err == nil || err.Error() != "repo down" {
+			t.Fatalf("expected repo down error, got %v", err)
+		}
+	})
+
+	t.Run("register with roles propagates repository error", func(t *testing.T) {
+		store := &fakeStore{createWithRolesErr: errors.New("role assign failed")}
+		svc := NewService(store)
+
+		_, err := svc.RegisterWithRoles(context.TODO(), "user@example.com", "Password1!", "en", []string{"admin"})
+		if err == nil || err.Error() != "role assign failed" {
+			t.Fatalf("expected role assign failed error, got %v", err)
+		}
+	})
+
+	t.Run("setters and updaters propagate errors", func(t *testing.T) {
+		store := &fakeStore{
+			setRolesErr:       errors.New("set roles failed"),
+			setActiveErr:      errors.New("set active failed"),
+			updatePasswordErr: errors.New("update password failed"),
+			updateAvatarErr:   errors.New("update avatar failed"),
+			permissionsErr:    errors.New("permissions failed"),
+			listErr:           errors.New("list failed"),
+			findByIDErr:       errors.New("find by id failed"),
+			findByEmailErr:    errors.New("find by email failed"),
+			updateProfileErr:  errors.New("update profile failed"),
+		}
+		svc := NewService(store)
+
+		if _, err := svc.List(context.TODO(), ListParams{}); err == nil || err.Error() != "list failed" {
+			t.Fatalf("expected list failed error, got %v", err)
+		}
+		if _, err := svc.FindByID(context.TODO(), "u1"); err == nil || err.Error() != "find by id failed" {
+			t.Fatalf("expected find by id failed error, got %v", err)
+		}
+		if _, err := svc.FindByEmail(context.TODO(), "u1@example.com"); err == nil || err.Error() != "find by email failed" {
+			t.Fatalf("expected find by email failed error, got %v", err)
+		}
+		if err := svc.SetRoles(context.TODO(), "u1", []string{"admin"}); err == nil || err.Error() != "set roles failed" {
+			t.Fatalf("expected set roles failed error, got %v", err)
+		}
+		if err := svc.SetActive(context.TODO(), "u1", false); err == nil || err.Error() != "set active failed" {
+			t.Fatalf("expected set active failed error, got %v", err)
+		}
+		if err := svc.UpdatePassword(context.TODO(), "u1", "hash"); err == nil || err.Error() != "update password failed" {
+			t.Fatalf("expected update password failed error, got %v", err)
+		}
+		if _, err := svc.UpdateAvatar(context.TODO(), "u1", "key", 1); err == nil || err.Error() != "update avatar failed" {
+			t.Fatalf("expected update avatar failed error, got %v", err)
+		}
+		if _, err := svc.GetPermissions(context.TODO(), "u1"); err == nil || err.Error() != "permissions failed" {
+			t.Fatalf("expected permissions failed error, got %v", err)
+		}
+		if _, err := svc.UpdateProfile(context.TODO(), "u1", "Jane", "Doe"); err == nil || err.Error() != "update profile failed" {
+			t.Fatalf("expected update profile failed error, got %v", err)
+		}
+	})
 }
