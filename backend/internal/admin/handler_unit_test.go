@@ -98,6 +98,8 @@ type mockUserManager struct {
 	setRolesErr        error
 	setActiveErr       error
 	lastListParams     user.ListParams
+	lastSetRolesID     string
+	lastSetRoles       []string
 	lastSetActiveID    string
 	lastSetActiveValue bool
 }
@@ -125,6 +127,8 @@ func (m *mockUserManager) UpdateProfile(_ context.Context, userID, firstName, la
 }
 
 func (m *mockUserManager) SetRoles(_ context.Context, userID string, roles []string) error {
+	m.lastSetRolesID = userID
+	m.lastSetRoles = append([]string(nil), roles...)
 	return m.setRolesErr
 }
 
@@ -135,24 +139,50 @@ func (m *mockUserManager) SetActive(_ context.Context, userID string, active boo
 }
 
 type mockSessionManagerUnit struct {
-	revokeAllCalls int
+	listResp         []session.SessionInfo
+	listErr          error
+	revokeAllErr     error
+	revokeByIDErr    error
+	revokeAllCalls   int
+	revokeByIDCalls  int
+	lastListUserID   string
+	lastRevokeAllID  string
+	lastRevokeID     string
+	lastRevokeUserID string
 }
 
-func (m *mockSessionManagerUnit) ListForUser(context.Context, string, string) ([]session.SessionInfo, error) {
-	return nil, nil
+func (m *mockSessionManagerUnit) ListForUser(_ context.Context, userID, currentHash string) ([]session.SessionInfo, error) {
+	m.lastListUserID = userID
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.listResp, nil
 }
 
-func (m *mockSessionManagerUnit) RevokeAllForUser(context.Context, string) error {
+func (m *mockSessionManagerUnit) RevokeAllForUser(_ context.Context, userID string) error {
 	m.revokeAllCalls++
+	m.lastRevokeAllID = userID
+	if m.revokeAllErr != nil {
+		return m.revokeAllErr
+	}
 	return nil
 }
 
-func (m *mockSessionManagerUnit) RevokeByID(context.Context, string, string) error {
+func (m *mockSessionManagerUnit) RevokeByID(_ context.Context, id, userID string) error {
+	m.revokeByIDCalls++
+	m.lastRevokeID = id
+	m.lastRevokeUserID = userID
+	if m.revokeByIDErr != nil {
+		return m.revokeByIDErr
+	}
 	return nil
 }
 
 func withURLParam(r *http.Request, key, value string) *http.Request {
-	rctx := chi.NewRouteContext()
+	rctx, _ := r.Context().Value(chi.RouteCtxKey).(*chi.Context)
+	if rctx == nil {
+		rctx = chi.NewRouteContext()
+	}
 	rctx.URLParams.Add(key, value)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 }
@@ -263,4 +293,140 @@ func TestSetStatusWithMockService_NotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusNotFound)
 	}
+}
+
+func TestUpdateRolesWithMockService(t *testing.T) {
+	t.Run("invalid request", func(t *testing.T) {
+		h := NewHandler(&mockUserManager{}, nil)
+		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString("{bad"))
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UpdateRoles(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("unknown role", func(t *testing.T) {
+		mgr := &mockUserManager{setRolesErr: user.ErrUnknownRole}
+		h := NewHandler(mgr, nil)
+		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin"]}`))
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UpdateRoles(rr, req)
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnprocessableEntity)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mgr := &mockUserManager{}
+		h := NewHandler(mgr, nil)
+		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin","viewer"]}`))
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UpdateRoles(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+		}
+		if mgr.lastSetRolesID != "u1" || len(mgr.lastSetRoles) != 2 {
+			t.Fatalf("unexpected set roles call id=%q roles=%v", mgr.lastSetRolesID, mgr.lastSetRoles)
+		}
+	})
+}
+
+func TestAdminSessionEndpointsWithMockService(t *testing.T) {
+	t.Run("list sessions unavailable", func(t *testing.T) {
+		h := NewHandler(&mockUserManager{}, nil)
+		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.ListUserSessions(rr, req)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusServiceUnavailable)
+		}
+	})
+
+	t.Run("list sessions success", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{listResp: []session.SessionInfo{{ID: "s1"}}}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.ListUserSessions(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+		}
+		if sessions.lastListUserID != "u1" {
+			t.Fatalf("lastListUserID=%q want=u1", sessions.lastListUserID)
+		}
+	})
+
+	t.Run("list sessions error", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{listErr: errors.New("boom")}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.ListUserSessions(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("revoke all success", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.RevokeAllUserSessions(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+		}
+		if sessions.lastRevokeAllID != "u1" {
+			t.Fatalf("lastRevokeAllID=%q want=u1", sessions.lastRevokeAllID)
+		}
+	})
+
+	t.Run("revoke all error", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{revokeAllErr: errors.New("boom")}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.RevokeAllUserSessions(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("revoke one success", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions/s1", nil)
+		req = withURLParam(req, "id", "u1")
+		req = withURLParam(req, "sessionId", "s1")
+		rr := httptest.NewRecorder()
+		h.RevokeUserSession(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+		}
+		if sessions.lastRevokeID != "s1" || sessions.lastRevokeUserID != "u1" {
+			t.Fatalf("unexpected revoke call id=%q user=%q", sessions.lastRevokeID, sessions.lastRevokeUserID)
+		}
+	})
+
+	t.Run("revoke one error", func(t *testing.T) {
+		sessions := &mockSessionManagerUnit{revokeByIDErr: errors.New("boom")}
+		h := NewHandler(&mockUserManager{}, sessions)
+		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions/s1", nil)
+		req = withURLParam(req, "id", "u1")
+		req = withURLParam(req, "sessionId", "s1")
+		rr := httptest.NewRecorder()
+		h.RevokeUserSession(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+		}
+	})
 }

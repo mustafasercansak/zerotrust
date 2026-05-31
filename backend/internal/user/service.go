@@ -8,11 +8,26 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type Service struct {
-	repo *Repository
+type store interface {
+	Create(ctx context.Context, email, passwordHash, locale string) (*User, error)
+	CreateWithRoles(ctx context.Context, email, passwordHash, locale string, roles []string) (*User, error)
+	FindByEmail(ctx context.Context, email string) (*User, error)
+	FindByID(ctx context.Context, id string) (*User, error)
+	List(ctx context.Context, p ListParams) (ListResult, error)
+	SetRoles(ctx context.Context, userID string, roles []string) error
+	SetActive(ctx context.Context, userID string, active bool) error
+	UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error)
+	GetPermissions(ctx context.Context, userID string) ([]string, error)
+	UpdatePassword(ctx context.Context, userID, passwordHash string) error
+	AssignRoleByName(ctx context.Context, userID, roleName string) error
+	UpdateAvatar(ctx context.Context, userID, key string, size int) (*User, error)
 }
 
-func NewService(repo *Repository) *Service {
+type Service struct {
+	repo store
+}
+
+func NewService(repo store) *Service {
 	return &Service{repo: repo}
 }
 
@@ -99,4 +114,3 @@ func (s *Service) SeedAdmin(ctx context.Context, email, hash string) error {
 func (s *Service) UpdateAvatar(ctx context.Context, userID, key string, size int) (*User, error) {
 	return s.repo.UpdateAvatar(ctx, userID, key, size)
 }
-

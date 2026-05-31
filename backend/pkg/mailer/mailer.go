@@ -63,7 +63,7 @@ func (m *SMTPMailer) SendPasswordReset(_ context.Context, to, resetURL string) e
 }
 
 func (m *SMTPMailer) SendSecurityAlert(_ context.Context, to, alertType, ipAddress, location, details string) error {
-	subject := fmt.Sprintf("Security Alert: Unusual login activity detected")
+	subject := "Security Alert: Unusual login activity detected"
 	body := fmt.Sprintf("Hello,\n\nWe detected unusual login activity on your ZeroTrust account:\n\n"+
 		"Alert Type: %s\n"+
 		"IP Address: %s\n"+

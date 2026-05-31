@@ -22,11 +22,15 @@ type store interface {
 
 type Service struct {
 	repo  store
-	users *user.Service
+	users userFinder
 	mail  mailer.Mailer
 }
 
-func NewService(repo *Repository, users *user.Service, mail mailer.Mailer) *Service {
+type userFinder interface {
+	FindByEmail(ctx context.Context, email string) (*user.User, error)
+}
+
+func NewService(repo store, users userFinder, mail mailer.Mailer) *Service {
 	return &Service{repo: repo, users: users, mail: mail}
 }
 

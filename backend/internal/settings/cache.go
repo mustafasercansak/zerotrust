@@ -9,11 +9,15 @@ import (
 
 const cacheTTL = time.Minute
 
+type cacheStore interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
 // Cache wraps Repository with a per-key TTL so high-frequency callers (e.g.
 // every login) don't hammer the DB. Stale after cacheTTL — acceptable for
 // admin-set configuration values.
 type Cache struct {
-	repo *Repository
+	repo cacheStore
 	mu   sync.RWMutex
 	vals map[string]cachedEntry
 }
@@ -23,7 +27,7 @@ type cachedEntry struct {
 	expires time.Time
 }
 
-func NewCache(repo *Repository) *Cache {
+func NewCache(repo cacheStore) *Cache {
 	return &Cache{repo: repo, vals: make(map[string]cachedEntry)}
 }
 
@@ -101,4 +105,3 @@ func (c *Cache) GetBool(ctx context.Context, key string, defaultVal bool) bool {
 	}
 	return defaultVal
 }
-

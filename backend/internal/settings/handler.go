@@ -1,10 +1,12 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 )
+
 // allowedKeys defines which settings are admin-editable and validates their values.
 var allowedKeys = map[string]func(string) bool{
 	"max_sessions_per_user": func(v string) bool {
@@ -36,10 +38,15 @@ var allowedKeys = map[string]func(string) bool{
 }
 
 type Handler struct {
-	repo *Repository
+	repo SettingsStore
 }
 
-func NewHandler(repo *Repository) *Handler {
+type SettingsStore interface {
+	All(ctx context.Context) (map[string]string, error)
+	Set(ctx context.Context, key, value string) error
+}
+
+func NewHandler(repo SettingsStore) *Handler {
 	return &Handler{repo: repo}
 }
 

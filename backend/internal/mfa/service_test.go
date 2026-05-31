@@ -13,12 +13,15 @@ import (
 
 // stubStore implements store for testing without a real database.
 type stubStore struct {
-	enabled      bool
-	secretEnc    string // active encrypted secret
-	pendingEnc   string // pending encrypted secret (written by UpsertPending)
-	upsertErr    error
-	enableErr    error
-	enableCalled bool
+	enabled       bool
+	secretEnc     string // active encrypted secret
+	pendingEnc    string // pending encrypted secret (written by UpsertPending)
+	upsertErr     error
+	enableErr     error
+	deleteErr     error
+	updateErr     error
+	enableCalled  bool
+	deleteCalled  bool
 	recoveryCodes []string
 	pendingCodes  []string
 }
@@ -38,7 +41,10 @@ func (s *stubStore) Enable(_ context.Context, _ string) error {
 	return s.enableErr
 }
 
-func (s *stubStore) Delete(_ context.Context, _ string) error { return nil }
+func (s *stubStore) Delete(_ context.Context, _ string) error {
+	s.deleteCalled = true
+	return s.deleteErr
+}
 
 func (s *stubStore) SecretEnc(_ context.Context, _ string) (string, error) {
 	if s.secretEnc == "" {
@@ -59,6 +65,9 @@ func (s *stubStore) RecoveryCodes(_ context.Context, _ string) ([]string, error)
 }
 
 func (s *stubStore) UpdateRecoveryCodes(_ context.Context, _ string, codes []string) error {
+	if s.updateErr != nil {
+		return s.updateErr
+	}
 	s.recoveryCodes = codes
 	return nil
 }
@@ -263,5 +272,80 @@ func TestRecoveryCodes_ValidationAndSingleUse(t *testing.T) {
 	// 6. Validating with an invalid code format/value must fail
 	if svc.Validate(context.Background(), "user1", "invalid-code-here") {
 		t.Error("expected invalid recovery code to fail validation")
+	}
+}
+
+func TestDisable(t *testing.T) {
+	t.Run("valid code deletes secret", func(t *testing.T) {
+		key := testKey()
+		secret, code := newTOTPKey(t)
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+		svc := &Service{repo: stub, encKey: key}
+
+		if err := svc.Disable(context.Background(), "user1", code); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !stub.deleteCalled {
+			t.Fatal("expected Delete to be called")
+		}
+	})
+
+	t.Run("wrong code rejected", func(t *testing.T) {
+		key := testKey()
+		secret, _ := newTOTPKey(t)
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+		svc := &Service{repo: stub, encKey: key}
+
+		err := svc.Disable(context.Background(), "user1", "000000")
+		if err == nil || err.Error() != "invalid_code" {
+			t.Fatalf("Disable error=%v want invalid_code", err)
+		}
+		if stub.deleteCalled {
+			t.Fatal("Delete must not be called for invalid code")
+		}
+	})
+
+	t.Run("delete error returned", func(t *testing.T) {
+		key := testKey()
+		secret, code := newTOTPKey(t)
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret), deleteErr: ErrNotFound}
+		svc := &Service{repo: stub, encKey: key}
+
+		err := svc.Disable(context.Background(), "user1", code)
+		if err != ErrNotFound {
+			t.Fatalf("Disable error=%v want=%v", err, ErrNotFound)
+		}
+	})
+}
+
+func TestIsEnabledDelegatesToStore(t *testing.T) {
+	svc := &Service{repo: &stubStore{enabled: true}, encKey: testKey()}
+	if !svc.IsEnabled(context.Background(), "user1") {
+		t.Fatal("expected IsEnabled to return store value")
+	}
+}
+
+func TestValidateFailsWhenRecoveryCodesCannotBeUpdated(t *testing.T) {
+	key := testKey()
+	stub := &stubStore{updateErr: ErrNotFound}
+	svc := &Service{repo: stub, encKey: key}
+
+	_, _, rawCodes, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	stub.recoveryCodes = append([]string(nil), stub.pendingCodes...)
+
+	if svc.Validate(context.Background(), "user1", rawCodes[0]) {
+		t.Fatal("expected Validate to fail when recovery codes cannot be updated")
+	}
+}
+
+func TestValidBase32(t *testing.T) {
+	if !ValidBase32("JBSWY3DPEHPK3PXP") {
+		t.Fatal("expected valid base32 secret to pass")
+	}
+	if ValidBase32("not-base32!") {
+		t.Fatal("expected invalid base32 secret to fail")
 	}
 }

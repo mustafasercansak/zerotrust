@@ -22,7 +22,14 @@ func TestAuthenticate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, _ := pgxpool.New(ctx, dbURL)
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Skipf("test db unreachable: %v", err)
+	}
 	defer pool.Close()
 
 	userRepo := user.NewRepository(pool)
@@ -72,7 +79,7 @@ func TestAuthenticate(t *testing.T) {
 	}
 
 	sessionRepo.Create(ctx, u.ID, "session1", "127.0.0.1", "test", nil, time.Now().Add(time.Hour))
-	
+
 	req4 := httptest.NewRequest("GET", "/", nil)
 	req4.Header.Set("Authorization", "Bearer "+tokenPair.AccessToken)
 	rr4 := httptest.NewRecorder()
@@ -83,7 +90,7 @@ func TestAuthenticate(t *testing.T) {
 
 	authSvc.Logout(ctx, "session1", u.ID)
 	rr5 := httptest.NewRecorder()
-	handler.ServeHTTP(rr5, req4) 
+	handler.ServeHTTP(rr5, req4)
 	if rr5.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for revoked session")
 	}

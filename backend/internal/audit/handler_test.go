@@ -13,28 +13,36 @@ import (
 	"github.com/zerotrust/backend/internal/user"
 )
 
-func mockHandlerDeps() (*Handler, *Repository, *user.Repository, *pgxpool.Pool, context.Context) {
+func mockHandlerDeps(t *testing.T) (*Handler, *Repository, *user.Repository, *pgxpool.Pool, context.Context) {
+	t.Helper()
 	dbURL := os.Getenv("TEST_DATABASE_URL")
 	if dbURL == "" {
 		return nil, nil, nil, nil, nil
 	}
 	ctx := context.Background()
-	pool, _ := pgxpool.New(ctx, dbURL)
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Skipf("test db unreachable: %v", err)
+	}
 	repo := NewRepository(pool)
 	userRepo := user.NewRepository(pool)
-	
+
 	pool.Exec(ctx, "DELETE FROM audit_logs")
 	pool.Exec(ctx, "DELETE FROM user_roles")
 	pool.Exec(ctx, "DELETE FROM users")
 	pool.Exec(ctx, "DELETE FROM roles")
-	
+
 	h := NewHandler(repo)
-	
+
 	return h, repo, userRepo, pool, ctx
 }
 
 func TestHandler_List(t *testing.T) {
-	h, repo, userRepo, pool, ctx := mockHandlerDeps()
+	h, repo, userRepo, pool, ctx := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -42,7 +50,7 @@ func TestHandler_List(t *testing.T) {
 
 	// Seed data
 	u, _ := userRepo.Create(ctx, "list@example.com", "hash", "en")
-	
+
 	err := repo.Log(ctx, Entry{Action: "test_action", Resource: "resource1", UserID: &u.ID, IPAddress: "127.0.0.1", UserAgent: "ua", Metadata: map[string]interface{}{"key": "val", "outcome": "success"}})
 	if err != nil {
 		t.Fatalf("Log failed: %v", err)
@@ -76,7 +84,7 @@ func TestHandler_List(t *testing.T) {
 }
 
 func TestHandler_Trends(t *testing.T) {
-	h, repo, userRepo, pool, ctx := mockHandlerDeps()
+	h, repo, userRepo, pool, ctx := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -85,7 +93,7 @@ func TestHandler_Trends(t *testing.T) {
 	// Seed data for trends
 	u1, _ := userRepo.Create(ctx, "trend1@example.com", "hash", "en")
 	u2, _ := userRepo.Create(ctx, "trend2@example.com", "hash", "en")
-	
+
 	repo.Log(ctx, Entry{Action: "login", Resource: "auth", UserID: &u1.ID, IPAddress: "127.0.0.1", UserAgent: "ua", Metadata: map[string]interface{}{"outcome": "success"}})
 	repo.Log(ctx, Entry{Action: "login", Resource: "auth", UserID: &u2.ID, IPAddress: "127.0.0.1", UserAgent: "ua", Metadata: map[string]interface{}{"outcome": "failure"}})
 
@@ -99,7 +107,7 @@ func TestHandler_Trends(t *testing.T) {
 
 	var points []TrendPoint
 	json.NewDecoder(rr.Body).Decode(&points)
-	
+
 	// There should be at least one day
 	if len(points) == 0 {
 		t.Fatal("Expected trend points")

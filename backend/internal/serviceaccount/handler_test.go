@@ -3,6 +3,7 @@ package serviceaccount
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -100,14 +101,20 @@ func TestEventsAcceptsAccessTokenCookie(t *testing.T) {
 type fakeServiceAccountService struct {
 	createErr      error
 	updateErr      error
+	listErr        error
 	revokeErr      error
 	setActiveErr   error
+	rotateErr      error
 	createdScopes  []string
+	createdName    string
+	updatedName    string
 	updatedScopes  []string
 	setActiveValue bool
+	listResult     ListResult
 }
 
 func (s *fakeServiceAccountService) Create(ctx context.Context, name, createdBy string, caller *auth.Claims, scopes []string, expiresAt *time.Time) (*ServiceAccount, string, error) {
+	s.createdName = name
 	s.createdScopes = scopes
 	if s.createErr != nil {
 		return nil, "", s.createErr
@@ -116,6 +123,7 @@ func (s *fakeServiceAccountService) Create(ctx context.Context, name, createdBy 
 }
 
 func (s *fakeServiceAccountService) Update(ctx context.Context, id, name string, caller *auth.Claims, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error) {
+	s.updatedName = name
 	s.updatedScopes = scopes
 	if s.updateErr != nil {
 		return nil, s.updateErr
@@ -124,7 +132,10 @@ func (s *fakeServiceAccountService) Update(ctx context.Context, id, name string,
 }
 
 func (s *fakeServiceAccountService) List(ctx context.Context, p ListParams) (ListResult, error) {
-	return ListResult{}, nil
+	if s.listErr != nil {
+		return ListResult{}, s.listErr
+	}
+	return s.listResult, nil
 }
 
 func (s *fakeServiceAccountService) Revoke(ctx context.Context, id string) error {
@@ -137,6 +148,9 @@ func (s *fakeServiceAccountService) SetActive(ctx context.Context, id string, ac
 }
 
 func (s *fakeServiceAccountService) RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error) {
+	if s.rotateErr != nil {
+		return nil, "", s.rotateErr
+	}
 	return &ServiceAccount{ID: id, Name: "rotated", ClientID: "svc_1", IsActive: true, CreatedAt: time.Now()}, "newsecret", nil
 }
 
@@ -181,6 +195,81 @@ func TestCreateMapsScopePolicyErrors(t *testing.T) {
 	}
 }
 
+func TestCreateValidationAndSuccess(t *testing.T) {
+	t.Run("invalid request", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts", bytes.NewReader([]byte(`{"scopes":["users:read"]}`)))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+	})
+
+	t.Run("invalid expires at", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts", bytes.NewReader([]byte(`{"name":"bot","expires_at":"2026/01/01"}`)))
+		rr := httptest.NewRecorder()
+		h.Create(rr, requestWithClaims(req))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+	})
+
+	t.Run("name taken", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{createErr: ErrNameTaken}, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts", bytes.NewReader([]byte(`{"name":"bot"}`)))
+		rr := httptest.NewRecorder()
+		h.Create(rr, requestWithClaims(req))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusConflict, rr.Body.String())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts", bytes.NewReader([]byte(`{"name":"bot","scopes":["users:read"]}`)))
+		rr := httptest.NewRecorder()
+		h.Create(rr, requestWithClaims(req))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusCreated, rr.Body.String())
+		}
+		if !bytes.Contains(rr.Body.Bytes(), []byte(`"client_secret":"secret"`)) {
+			t.Fatalf("expected secret in response, got %s", rr.Body.String())
+		}
+	})
+}
+
+func TestListHandler(t *testing.T) {
+	t.Run("internal error", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{listErr: errors.New("boom")}, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts", nil)
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		svc := &fakeServiceAccountService{listResult: ListResult{Accounts: []*ServiceAccount{{ID: "sa1", Name: "bot", ClientID: "svc_1", CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}}, Total: 1}}
+		h := &Handler{svc: svc, hub: NewEventHub()}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts?limit=5&sort_by=name", nil)
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+		}
+		var payload pagedSAResponse
+		if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Total != 1 || len(payload.Data) != 1 {
+			t.Fatalf("payload=%+v", payload)
+		}
+	})
+}
+
 func TestSetStatusAndRevokeReturnNotFound(t *testing.T) {
 	h := &Handler{svc: &fakeServiceAccountService{setActiveErr: ErrNotFound, revokeErr: ErrNotFound}, hub: NewEventHub()}
 
@@ -221,6 +310,28 @@ func TestSetStatusSuccessUsesRequestedActiveValue(t *testing.T) {
 	if !svc.setActiveValue {
 		t.Fatal("SetActive did not receive requested active=true value")
 	}
+}
+
+func TestSetStatusValidationAndInternalError(t *testing.T) {
+	t.Run("invalid request", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1/status", bytes.NewReader([]byte(`{bad`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+		h.SetStatus(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+	})
+
+	t.Run("internal error", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{setActiveErr: errors.New("boom")}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1/status", bytes.NewReader([]byte(`{"is_active":true}`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+		h.SetStatus(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+		}
+	})
 }
 
 func TestUpdateMapsNotFoundAndScopePolicyErrors(t *testing.T) {
@@ -276,4 +387,36 @@ func TestRotateSecretSuccess(t *testing.T) {
 	if !bytes.Contains(rr.Body.Bytes(), []byte(`"client_secret":"newsecret"`)) {
 		t.Fatalf("expected response to contain rotated secret, got %s", rr.Body.String())
 	}
+}
+
+func TestRevokeAndRotateInternalErrors(t *testing.T) {
+	t.Run("revoke internal", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{revokeErr: errors.New("boom")}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodDelete, "/api/v1/admin/service-accounts/sa1", nil), "id", "sa1")
+		rr := httptest.NewRecorder()
+		h.Revoke(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+		}
+	})
+
+	t.Run("rotate not found", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{rotateErr: ErrNotFound}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts/sa1/rotate", nil), "id", "sa1")
+		rr := httptest.NewRecorder()
+		h.RotateSecret(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
+		}
+	})
+
+	t.Run("rotate internal", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{rotateErr: errors.New("boom")}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPost, "/api/v1/admin/service-accounts/sa1/rotate", nil), "id", "sa1")
+		rr := httptest.NewRecorder()
+		h.RotateSecret(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+		}
+	})
 }

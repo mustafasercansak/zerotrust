@@ -1,16 +1,22 @@
 package audit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 )
 
-type Handler struct {
-	repo *Repository
+type AuditStore interface {
+	List(ctx context.Context, p ListParams) (ListResult, error)
+	Trends(ctx context.Context) ([]TrendPoint, error)
 }
 
-func NewHandler(repo *Repository) *Handler {
+type Handler struct {
+	repo AuditStore
+}
+
+func NewHandler(repo AuditStore) *Handler {
 	return &Handler{repo: repo}
 }
 

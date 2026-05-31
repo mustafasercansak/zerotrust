@@ -13,8 +13,19 @@ import (
 var ErrUnknownScope = errors.New("unknown_scope")
 var ErrForbiddenScope = errors.New("forbidden_scope")
 
+type serviceAccountRepository interface {
+	Create(ctx context.Context, name, createdBy string, scopes []string, expiresAt *time.Time) (*ServiceAccount, string, error)
+	Update(ctx context.Context, id, name string, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error)
+	FindByClientID(ctx context.Context, clientID string) (*ServiceAccount, error)
+	List(ctx context.Context, p ListParams) (ListResult, error)
+	Revoke(ctx context.Context, id string) error
+	SetActive(ctx context.Context, id string, active bool) error
+	CheckSecret(hash, secret string) bool
+	RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error)
+}
+
 type Service struct {
-	repo           *Repository
+	repo           serviceAccountRepository
 	scopeValidator interface {
 		allPermissions(ctx context.Context) (map[string]bool, error)
 	}

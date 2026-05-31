@@ -48,13 +48,21 @@ func (m *mockSessionManager) RevokeByID(ctx context.Context, sessionID, userID s
 	return nil
 }
 
-func mockHandlerDeps() (*Handler, *user.Service, *pgxpool.Pool, context.Context, *mockSessionManager) {
+func mockHandlerDeps(t *testing.T) (*Handler, *user.Service, *pgxpool.Pool, context.Context, *mockSessionManager) {
+	t.Helper()
 	dbURL := os.Getenv("TEST_DATABASE_URL")
 	if dbURL == "" {
 		return nil, nil, nil, nil, nil
 	}
 	ctx := context.Background()
-	pool, _ := pgxpool.New(ctx, dbURL)
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Skipf("test db unreachable: %v", err)
+	}
 	repo := user.NewRepository(pool)
 	svc := user.NewService(repo)
 
@@ -68,7 +76,7 @@ func mockHandlerDeps() (*Handler, *user.Service, *pgxpool.Pool, context.Context,
 }
 
 func TestHandler_ListUsers(t *testing.T) {
-	h, svc, pool, ctx, _ := mockHandlerDeps()
+	h, svc, pool, ctx, _ := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -94,7 +102,7 @@ func TestHandler_ListUsers(t *testing.T) {
 }
 
 func TestHandler_CreateUser(t *testing.T) {
-	h, _, pool, _, _ := mockHandlerDeps()
+	h, _, pool, _, _ := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -136,7 +144,7 @@ func TestHandler_CreateUser(t *testing.T) {
 }
 
 func TestHandler_UpdateRoles(t *testing.T) {
-	h, svc, pool, ctx, _ := mockHandlerDeps()
+	h, svc, pool, ctx, _ := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -171,7 +179,7 @@ func TestHandler_UpdateRoles(t *testing.T) {
 }
 
 func TestHandler_SetStatus(t *testing.T) {
-	h, svc, pool, ctx, mockSessions := mockHandlerDeps()
+	h, svc, pool, ctx, mockSessions := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -210,7 +218,7 @@ func TestHandler_SetStatus(t *testing.T) {
 }
 
 func TestHandler_SessionEndpoints(t *testing.T) {
-	h, _, pool, _, mockSessions := mockHandlerDeps()
+	h, _, pool, _, mockSessions := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -255,7 +263,7 @@ func TestHandler_SessionEndpoints(t *testing.T) {
 }
 
 func TestHandler_NoSessionsManager(t *testing.T) {
-	h, _, pool, _, _ := mockHandlerDeps()
+	h, _, pool, _, _ := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -286,7 +294,7 @@ func TestHandler_NoSessionsManager(t *testing.T) {
 }
 
 func TestHandler_CoverageEdges(t *testing.T) {
-	h, svc, pool, ctx, mockSessions := mockHandlerDeps()
+	h, svc, pool, ctx, mockSessions := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}

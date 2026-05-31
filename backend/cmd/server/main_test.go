@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zerotrust/backend/internal/audit"
+	"github.com/zerotrust/backend/internal/serviceaccount"
 )
 
 func TestLoadConfig_MFADisabledAllowsMissingOrInvalidKey(t *testing.T) {
@@ -228,5 +230,144 @@ func TestLoadConfig_ConnectionPoolTuning(t *testing.T) {
 	}
 	if cfg.RedisPoolSize != 10 {
 		t.Errorf("expected default RedisPoolSize to be 10, got %d", cfg.RedisPoolSize)
+	}
+}
+
+func TestSkipPathsBypassesWrappedMiddlewareForConfiguredPaths(t *testing.T) {
+	mwCalled := false
+	nextCalled := false
+
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mwCalled = true
+			next.ServeHTTP(w, r)
+		})
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	h := skipPaths(mw, "/health")(next)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	if !nextCalled {
+		t.Fatal("expected next handler to be called")
+	}
+	if mwCalled {
+		t.Fatal("expected wrapped middleware to be bypassed for skipped path")
+	}
+}
+
+func TestSkipPathsAppliesWrappedMiddlewareForOtherPaths(t *testing.T) {
+	mwCalled := false
+	nextCalled := false
+
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mwCalled = true
+			next.ServeHTTP(w, r)
+		})
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	h := skipPaths(mw, "/health")(next)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil))
+
+	if !nextCalled || !mwCalled {
+		t.Fatalf("expected both next and middleware to be called, got next=%v middleware=%v", nextCalled, mwCalled)
+	}
+}
+
+func TestRunSessionCleanupReturnsWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := &cleanupProbe{ctxSeen: make(chan struct{})}
+
+	done := make(chan struct{})
+	go func() {
+		runSessionCleanup(ctx, repo)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runSessionCleanup did not return after context cancellation")
+	}
+}
+
+type fakeServiceAccountLookup struct {
+	findResp       *serviceaccount.ServiceAccount
+	findErr        error
+	findClientID   string
+	checkHash      string
+	checkSecret    string
+	checkSecretRet bool
+}
+
+func (f *fakeServiceAccountLookup) FindByClientID(ctx context.Context, clientID string) (*serviceaccount.ServiceAccount, error) {
+	f.findClientID = clientID
+	if f.findErr != nil {
+		return nil, f.findErr
+	}
+	return f.findResp, nil
+}
+
+func (f *fakeServiceAccountLookup) CheckSecret(hash, secret string) bool {
+	f.checkHash = hash
+	f.checkSecret = secret
+	return f.checkSecretRet
+}
+
+func TestSAStoreAdapterFindByClientIDMapsFields(t *testing.T) {
+	future := time.Now().Add(time.Hour).UTC()
+	oldHash := "old-hash"
+	lookup := &fakeServiceAccountLookup{findResp: &serviceaccount.ServiceAccount{
+		Name:                "Deploy Bot",
+		ClientSecretHash:    "new-hash",
+		Scopes:              []string{"users:read"},
+		IsActive:            true,
+		ExpiresAt:           &future,
+		OldClientSecretHash: &oldHash,
+		OldSecretExpiresAt:  &future,
+	}}
+	adapter := &saStoreAdapter{svc: lookup}
+
+	record, err := adapter.FindByClientID(context.Background(), "svc-1")
+	if err != nil {
+		t.Fatalf("FindByClientID returned error: %v", err)
+	}
+	if lookup.findClientID != "svc-1" {
+		t.Fatalf("lookup called with clientID=%q want=svc-1", lookup.findClientID)
+	}
+	if record.Name != "Deploy Bot" || record.ClientSecretHash != "new-hash" || !record.IsActive {
+		t.Fatalf("unexpected mapped record: %+v", record)
+	}
+	if len(record.Scopes) != 1 || record.Scopes[0] != "users:read" {
+		t.Fatalf("unexpected mapped scopes: %+v", record.Scopes)
+	}
+	if record.ExpiresAt == nil || !record.ExpiresAt.Equal(future) {
+		t.Fatalf("unexpected mapped ExpiresAt: %v", record.ExpiresAt)
+	}
+	if record.OldClientSecretHash == nil || *record.OldClientSecretHash != oldHash {
+		t.Fatalf("unexpected mapped OldClientSecretHash: %v", record.OldClientSecretHash)
+	}
+}
+
+func TestSAStoreAdapterCheckSecretDelegates(t *testing.T) {
+	lookup := &fakeServiceAccountLookup{checkSecretRet: true}
+	adapter := &saStoreAdapter{svc: lookup}
+
+	if ok := adapter.CheckSecret("hash", "secret"); !ok {
+		t.Fatal("CheckSecret returned false, want true")
+	}
+	if lookup.checkHash != "hash" || lookup.checkSecret != "secret" {
+		t.Fatalf("unexpected delegated args hash=%q secret=%q", lookup.checkHash, lookup.checkSecret)
 	}
 }

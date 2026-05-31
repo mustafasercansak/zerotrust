@@ -74,7 +74,13 @@ func setupAuthIntegrationDB(t *testing.T) *pgxpool.Pool {
 
 	admin, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("connect integration database: %v", err)
+		t.Skipf("integration database unavailable: %v", err)
+		return nil
+	}
+	if err := admin.Ping(ctx); err != nil {
+		admin.Close()
+		t.Skipf("integration database unreachable: %v", err)
+		return nil
 	}
 	if _, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`); err != nil {
 		admin.Close()

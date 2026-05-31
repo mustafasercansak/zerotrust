@@ -21,7 +21,11 @@ func TestSettingsIntegration(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		t.Fatalf("Failed to connect to test db: %v", err)
+		t.Skipf("test db unavailable: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Skipf("test db unreachable: %v", err)
 	}
 	defer pool.Close()
 
@@ -103,7 +107,7 @@ func TestSettingsIntegration(t *testing.T) {
 	if cache.GetInt(ctx, "test_int", 0) != 42 {
 		t.Fatal("Cache GetInt did not cache")
 	}
-	
+
 	// Corrupted values
 	repo.Set(ctx, "corrupted_int", "abc")
 	if cache.GetInt(ctx, "corrupted_int", 77) != 77 {
@@ -114,13 +118,13 @@ func TestSettingsIntegration(t *testing.T) {
 	if cache.GetBool(ctx, "corrupted_bool", false) != false {
 		t.Fatal("Cache GetBool should return default on parsing error")
 	}
-	
+
 	// Invalidate cache manually for coverage
 	cache.mu.Lock()
 	entry := cache.vals["test_int"]
 	entry.expires = time.Now().Add(-time.Hour)
 	cache.vals["test_int"] = entry
-	
+
 	entryBool := cache.vals["test_bool"]
 	entryBool.expires = time.Now().Add(-time.Hour)
 	cache.vals["test_bool"] = entryBool
@@ -133,7 +137,7 @@ func TestSettingsIntegration(t *testing.T) {
 	if cache.GetInt(ctx, "test_int", 0) != 100 {
 		t.Fatal("Cache GetInt should fetch fresh from DB after expiration")
 	}
-	
+
 	// For bool, we didn't change DB value, but it should refresh
 	if cache.GetBool(ctx, "test_bool", false) != true {
 		t.Fatal("Cache GetBool should fetch fresh from DB after expiration")
@@ -156,7 +160,11 @@ func TestSettingsHandler(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		t.Fatalf("Failed to connect to test db: %v", err)
+		t.Skipf("test db unavailable: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Skipf("test db unreachable: %v", err)
 	}
 	defer pool.Close()
 
@@ -219,7 +227,7 @@ func TestSettingsHandler(t *testing.T) {
 	if rrInvalidValue.Code != http.StatusBadRequest {
 		t.Fatalf("Expected 400 for invalid value, got %d", rrInvalidValue.Code)
 	}
-	
+
 	// Test validators directly for coverage
 	if !allowedKeys["max_sessions_per_user"]("5") || allowedKeys["max_sessions_per_user"]("0") || allowedKeys["max_sessions_per_user"]("abc") {
 		t.Fatal("Validator max_sessions_per_user failed")
@@ -242,7 +250,7 @@ func TestSettingsHandler(t *testing.T) {
 	if !allowedKeys["max_login_attempts"]("5") || allowedKeys["max_login_attempts"]("99") || allowedKeys["max_login_attempts"]("abc") {
 		t.Fatal("Validator max_login_attempts failed")
 	}
-	
+
 	// Test update bad json
 	reqBadJson, _ := http.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString("{bad"))
 	rrBadJson := httptest.NewRecorder()

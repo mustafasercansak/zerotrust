@@ -134,3 +134,31 @@ func TestResilientMailer_MaxRetriesReached(t *testing.T) {
 		t.Errorf("expected callback error, got nil")
 	}
 }
+
+func TestResilientMailer_SendPasswordResetDelegatesToUnderlying(t *testing.T) {
+	base := &mockBaseMailer{}
+	rm := NewResilientMailer(base, 1, nil)
+
+	if err := rm.SendPasswordReset(context.Background(), "user@example.com", "https://example/reset"); err != nil {
+		t.Fatalf("SendPasswordReset returned error: %v", err)
+	}
+
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if base.resetCount != 1 {
+		t.Fatalf("expected 1 password reset send, got %d", base.resetCount)
+	}
+}
+
+func TestResilientMailer_SendSecurityAlertReturnsErrorWhenQueueIsFull(t *testing.T) {
+	base := &mockBaseMailer{}
+	rm := NewResilientMailer(base, 1, nil)
+	rm.BaseDelay = time.Millisecond
+
+	rm.jobs <- AlertJob{To: "existing@example.com"}
+
+	err := rm.SendSecurityAlert(context.Background(), "user@example.com", "impossible_travel", "1.1.1.1", "US", "details")
+	if err == nil {
+		t.Fatal("expected queue full error, got nil")
+	}
+}

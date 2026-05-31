@@ -835,8 +835,13 @@ func runSessionCleanupLoop(ctx context.Context, repo sessionCleaner, staleInterv
 	}
 }
 
-// saStoreAdapter bridges *serviceaccount.Service to auth.ServiceAccountStore.
-type saStoreAdapter struct{ svc *serviceaccount.Service }
+type serviceAccountLookup interface {
+	FindByClientID(ctx context.Context, clientID string) (*serviceaccount.ServiceAccount, error)
+	CheckSecret(hash, secret string) bool
+}
+
+// saStoreAdapter bridges service-account lookups to auth.ServiceAccountStore.
+type saStoreAdapter struct{ svc serviceAccountLookup }
 
 func (a *saStoreAdapter) FindByClientID(ctx context.Context, clientID string) (*auth.ServiceAccountRecord, error) {
 	sa, err := a.svc.FindByClientID(ctx, clientID)

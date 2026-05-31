@@ -56,17 +56,18 @@ type SessionStore interface {
 	// the security response when token reuse is detected.
 	RevokeAllForUser(ctx context.Context, userID string) error
 }
+
 // ServiceAccountRecord maps data returned from saStoreAdapter.
 type ServiceAccountRecord struct {
-	ID                    string
-	ClientID              string
-	Name                  string
-	ClientSecretHash      string
-	OldClientSecretHash   *string
-	OldSecretExpiresAt    *time.Time
-	IsActive              bool
-	Scopes                []string
-	ExpiresAt             *time.Time
+	ID                  string
+	ClientID            string
+	Name                string
+	ClientSecretHash    string
+	OldClientSecretHash *string
+	OldSecretExpiresAt  *time.Time
+	IsActive            bool
+	Scopes              []string
+	ExpiresAt           *time.Time
 }
 
 // ServiceAccountStore abstracts service account lookups for the auth service.
@@ -187,7 +188,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, u.ID, u.Email, ip, ua, deviceInfo)
 	if hasAnomaly {
 		slog.Warn("Login anomaly detected", "user_id", u.ID, "type", anomalyType, "details", anomalyDetails)
-		
+
 		// Send security alert email
 		if s.mailer != nil {
 			var locStr string
@@ -257,13 +258,13 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		return nil, err
 	}
 	return &LoginResult{
-		Pair:            pair,
-		AnomalyType:     anomalyType,
-		AnomalyDetails:  anomalyDetails,
+		Pair:           pair,
+		AnomalyType:    anomalyType,
+		AnomalyDetails: anomalyDetails,
 	}, nil
 }
 
-func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, email string, currentIP, currentUA string, currentDeviceInfo map[string]string) (bool, string, string) {
+func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ string, currentIP, currentUA string, _ map[string]string) (bool, string, string) {
 	if s.geoip == nil {
 		return false, "", ""
 	}

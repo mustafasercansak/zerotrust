@@ -1,6 +1,7 @@
 package mfa
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,12 +14,20 @@ import (
 )
 
 type Handler struct {
-	svc          *Service
+	svc          mfaService
 	rdb          *redis.Client
 	recentWindow time.Duration
 }
 
-func NewHandler(svc *Service, rdb *redis.Client, recentWindow time.Duration) *Handler {
+type mfaService interface {
+	Setup(ctx context.Context, userID, email, currentCode string) (otpAuthURL, secret string, recoveryCodes []string, err error)
+	VerifyAndEnable(ctx context.Context, userID, code string) error
+	Disable(ctx context.Context, userID, code string) error
+	IsEnabled(ctx context.Context, userID string) bool
+	Validate(ctx context.Context, userID, code string) bool
+}
+
+func NewHandler(svc mfaService, rdb *redis.Client, recentWindow time.Duration) *Handler {
 	return &Handler{svc: svc, rdb: rdb, recentWindow: recentWindow}
 }
 
