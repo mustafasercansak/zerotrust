@@ -556,6 +556,9 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken string) 
 }
 
 func (s *Service) IsRevoked(ctx context.Context, jti string) bool {
+	if s.rdb == nil {
+		return false
+	}
 	exists, err := s.rdb.Exists(ctx, jtiBlocklistKey(jti)).Result()
 	return err == nil && exists > 0
 }

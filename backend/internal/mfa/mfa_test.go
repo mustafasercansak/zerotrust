@@ -34,8 +34,14 @@ func mockHandlerDeps(t *testing.T) (*Handler, *Service, *Repository, *user.Repos
 	key := []byte("thisis32byteslongsecretkey123456")
 	svc := NewService(repo, key, nil)
 
-	pool.Exec(ctx, "DELETE FROM mfa")
-	pool.Exec(ctx, "DELETE FROM users")
+	if _, err := pool.Exec(ctx, "DELETE FROM user_mfa"); err != nil {
+		pool.Close()
+		t.Fatalf("cleanup user_mfa failed: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM users"); err != nil {
+		pool.Close()
+		t.Fatalf("cleanup users failed: %v", err)
+	}
 
 	h := NewHandler(svc, nil, 0)
 	return h, svc, repo, userRepo, pool, ctx
