@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
@@ -40,8 +42,15 @@ func TestAuthenticate(t *testing.T) {
 	userRepo := user.NewRepository(pool)
 	userSvc := user.NewService(userRepo)
 	sessionRepo := session.NewRepository(pool, nil)
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
 	ks, _ := auth.LoadOrGenerateKeyStore("", "")
-	authSvc := auth.NewService(userSvc, sessionRepo, nil, nil, ks, nil, nil)
+	authSvc := auth.NewService(userSvc, sessionRepo, nil, rdb, ks, nil, nil)
 
 	handler := middleware.Authenticate(ks, authSvc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := middleware.ClaimsFrom(r.Context())
