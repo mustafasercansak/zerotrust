@@ -71,3 +71,24 @@ func TestEventHubListenOnceReturnsConnectError(t *testing.T) {
 		t.Fatal("expected listenOnce to return a connection error")
 	}
 }
+
+func TestEventHubListenForChangesStopsDuringRetryWaitOnCancel(t *testing.T) {
+	hub := NewEventHub()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		hub.ListenForChanges(ctx, "postgres://127.0.0.1:1/doesnotexist?connect_timeout=1")
+		close(done)
+	}()
+
+	// Give the goroutine a chance to enter retry wait, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ListenForChanges did not stop after context cancellation")
+	}
+}

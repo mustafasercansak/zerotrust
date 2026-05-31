@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -369,5 +370,16 @@ func TestSAStoreAdapterCheckSecretDelegates(t *testing.T) {
 	}
 	if lookup.checkHash != "hash" || lookup.checkSecret != "secret" {
 		t.Fatalf("unexpected delegated args hash=%q secret=%q", lookup.checkHash, lookup.checkSecret)
+	}
+}
+
+func TestSAStoreAdapterFindByClientIDPropagatesError(t *testing.T) {
+	wantErr := errors.New("lookup failed")
+	lookup := &fakeServiceAccountLookup{findErr: wantErr}
+	adapter := &saStoreAdapter{svc: lookup}
+
+	_, err := adapter.FindByClientID(context.Background(), "svc-x")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("FindByClientID error=%v want=%v", err, wantErr)
 	}
 }

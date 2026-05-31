@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/pquerna/otp/totp"
+	"github.com/redis/go-redis/v9"
 
 	appCrypto "github.com/zerotrust/backend/pkg/crypto"
 )
@@ -314,6 +316,34 @@ func TestDisable(t *testing.T) {
 		err := svc.Disable(context.Background(), "user1", code)
 		if err != ErrNotFound {
 			t.Fatalf("Disable error=%v want=%v", err, ErrNotFound)
+		}
+	})
+
+	t.Run("already used code rejected", func(t *testing.T) {
+		key := testKey()
+		secret, code := newTOTPKey(t)
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+		mr, err := miniredis.Run()
+		if err != nil {
+			t.Fatalf("start miniredis: %v", err)
+		}
+		defer mr.Close()
+
+		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		defer rdb.Close()
+
+		if err := rdb.Set(context.Background(), "mfa:used:user1:"+code, "1", time.Minute).Err(); err != nil {
+			t.Fatalf("seed used-code key: %v", err)
+		}
+
+		svc := &Service{repo: stub, encKey: key, rdb: rdb}
+
+		err = svc.Disable(context.Background(), "user1", code)
+		if err == nil || err.Error() != "code_already_used" {
+			t.Fatalf("Disable error=%v want code_already_used", err)
+		}
+		if stub.deleteCalled {
+			t.Fatal("Delete must not be called when code is already used")
 		}
 	})
 }

@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/zerotrust/backend/internal/user"
 	"testing"
 	"time"
 
@@ -158,5 +160,111 @@ func TestAuthKeyHelpersDeterministic(t *testing.T) {
 	}
 	if failKey("u@example.com") == failKey("other@example.com") {
 		t.Fatal("fail keys should differ for different emails")
+	}
+}
+
+func TestAccountLockedError(t *testing.T) {
+	err := &AccountLockedError{RetryAfter: time.Minute}
+	if err.Error() != "account_locked" {
+		t.Errorf("expected account_locked, got %s", err.Error())
+	}
+}
+
+type testMFAChecker struct {
+	valid bool
+}
+
+func (m *testMFAChecker) IsEnabled(ctx context.Context, userID string) bool { return true }
+func (m *testMFAChecker) Validate(ctx context.Context, userID, code string) bool { return m.valid }
+func (m *testMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
+	return "", "", nil, nil
+}
+func (m *testMFAChecker) VerifyAndEnable(ctx context.Context, userID, code string) error { return nil }
+
+func TestMFAChallenge(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, err := LoadOrGenerateKeyStore("", "")
+	if err != nil {
+		t.Fatalf("keystore: %v", err)
+	}
+
+	mockUser := &user.User{
+		ID:    "u1",
+		Email: "test@example.com",
+	}
+	usersReader := &testUserReader{byID: map[string]*user.User{"u1": mockUser}}
+	mfaChecker := &testMFAChecker{valid: true}
+	
+	svc := NewService(usersReader, &logoutSessionStore{}, &testServiceAccountStore{}, rdb, ks, mfaChecker, nil)
+	
+	// Setup pending token in redis
+	pendingToken := "pending123"
+	hash := hashToken(pendingToken)
+	key := mfaPendingKey(hash)
+	
+	m := map[string]interface{}{
+		"uid": "u1",
+		"ip":  "127.0.0.1",
+		"ua":  "test-ua",
+		"device_info": map[string]string{"os": "linux"},
+	}
+	raw, _ := json.Marshal(m)
+	rdb.Set(context.Background(), key, raw, time.Minute)
+	
+	pair, err := svc.MFAChallenge(context.Background(), pendingToken, "123456")
+	if err != nil {
+		t.Fatalf("MFAChallenge failed: %v", err)
+	}
+	if pair == nil || pair.AccessToken == "" {
+		t.Fatalf("expected valid token pair")
+	}
+}
+
+func TestLockout(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	svc := NewService(nil, nil, nil, rdb, nil, nil, nil)
+	email := "test@example.com"
+	ctx := context.Background()
+
+	// Initial
+	if err := svc.checkLockout(ctx, email); err != nil {
+		t.Fatalf("expected no lockout, got %v", err)
+	}
+
+	// 5 failed attempts
+	for i := 0; i < 5; i++ {
+		svc.recordFailedAttempt(ctx, email)
+	}
+
+	err = svc.checkLockout(ctx, email)
+	if err == nil {
+		t.Fatalf("expected lockout error")
+	}
+	lockedErr, ok := err.(*AccountLockedError)
+	if !ok {
+		t.Fatalf("expected AccountLockedError")
+	}
+	if lockedErr.RetryAfter <= 0 {
+		t.Fatalf("expected retry after > 0")
+	}
+
+	// Clear attempts
+	svc.clearFailedAttempts(ctx, email)
+	if err := svc.checkLockout(ctx, email); err != nil {
+		t.Fatalf("expected no lockout after clear, got %v", err)
 	}
 }
