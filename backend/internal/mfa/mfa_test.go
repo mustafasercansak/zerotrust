@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/database"
 )
 
 func mockHandlerDeps(t *testing.T) (*Handler, *Service, *Repository, *user.Repository, *pgxpool.Pool, context.Context) {
@@ -23,6 +24,10 @@ func mockHandlerDeps(t *testing.T) (*Handler, *Service, *Repository, *user.Repos
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		pool.Close()
+		t.Fatalf("migrations failed: %v", err)
 	}
 	repo := NewRepository(pool)
 	userRepo := user.NewRepository(pool)

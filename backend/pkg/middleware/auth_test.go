@@ -12,6 +12,7 @@ import (
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/database"
 	"github.com/zerotrust/backend/pkg/middleware"
 )
 
@@ -29,6 +30,10 @@ func TestAuthenticate(t *testing.T) {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		pool.Close()
+		t.Fatalf("migrations failed: %v", err)
 	}
 	defer pool.Close()
 

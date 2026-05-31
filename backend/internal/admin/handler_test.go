@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/database"
 )
 
 type mockSessionManager struct {
@@ -62,6 +63,10 @@ func mockHandlerDeps(t *testing.T) (*Handler, *user.Service, *pgxpool.Pool, cont
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		pool.Close()
+		t.Fatalf("migrations failed: %v", err)
 	}
 	repo := user.NewRepository(pool)
 	svc := user.NewService(repo)

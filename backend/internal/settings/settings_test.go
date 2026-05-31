@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/pkg/database"
 )
 
 func TestSettingsIntegration(t *testing.T) {
@@ -26,6 +27,10 @@ func TestSettingsIntegration(t *testing.T) {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		pool.Close()
+		t.Fatalf("migrations failed: %v", err)
 	}
 	defer pool.Close()
 
@@ -165,6 +170,10 @@ func TestSettingsHandler(t *testing.T) {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		pool.Close()
+		t.Fatalf("migrations failed: %v", err)
 	}
 	defer pool.Close()
 
