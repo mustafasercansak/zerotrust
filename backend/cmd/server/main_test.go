@@ -234,6 +234,81 @@ func TestLoadConfig_ConnectionPoolTuning(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_InvalidNumericAndDurationEnv(t *testing.T) {
+	t.Setenv("MFA_ENABLED", "false")
+
+	t.Run("invalid database max conns", func(t *testing.T) {
+		t.Setenv("DATABASE_MAX_CONNS", "not-int")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("expected invalid DATABASE_MAX_CONNS error")
+		}
+		t.Setenv("DATABASE_MAX_CONNS", "")
+	})
+
+	t.Run("invalid database min conns", func(t *testing.T) {
+		t.Setenv("DATABASE_MIN_CONNS", "not-int")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("expected invalid DATABASE_MIN_CONNS error")
+		}
+		t.Setenv("DATABASE_MIN_CONNS", "")
+	})
+
+	t.Run("invalid redis pool size", func(t *testing.T) {
+		t.Setenv("REDIS_POOL_SIZE", "not-int")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("expected invalid REDIS_POOL_SIZE error")
+		}
+		t.Setenv("REDIS_POOL_SIZE", "")
+	})
+
+	t.Run("invalid database conn timeout", func(t *testing.T) {
+		t.Setenv("DATABASE_CONN_TIMEOUT", "not-duration")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("expected invalid DATABASE_CONN_TIMEOUT error")
+		}
+		t.Setenv("DATABASE_CONN_TIMEOUT", "")
+	})
+}
+
+func TestLoadConfig_ParsesBooleanFlagsAndOrigins(t *testing.T) {
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("TLS_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "true")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://a.example.com,https://b.example.com")
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8,192.168.0.0/16")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+
+	if !cfg.TLSEnabled {
+		t.Fatal("TLSEnabled=false want true")
+	}
+	if !cfg.CookiesSecure {
+		t.Fatal("CookiesSecure=false want true")
+	}
+	if !cfg.RegistrationEnabled {
+		t.Fatal("RegistrationEnabled=false want true")
+	}
+	if len(cfg.CORSOrigins) != 2 || cfg.CORSOrigins[0] != "https://a.example.com" || cfg.CORSOrigins[1] != "https://b.example.com" {
+		t.Fatalf("unexpected CORS origins: %v", cfg.CORSOrigins)
+	}
+	if cfg.TrustedProxies != "10.0.0.0/8,192.168.0.0/16" {
+		t.Fatalf("TrustedProxies=%q want=10.0.0.0/8,192.168.0.0/16", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadConfig_MFAEnabledRejectsWrongKeyLength(t *testing.T) {
+	t.Setenv("MFA_ENABLED", "true")
+	t.Setenv("MFA_ENCRYPTION_KEY", "aa")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected error for invalid MFA key length")
+	}
+}
+
 func TestSkipPathsBypassesWrappedMiddlewareForConfiguredPaths(t *testing.T) {
 	mwCalled := false
 	nextCalled := false
