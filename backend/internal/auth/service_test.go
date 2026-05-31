@@ -3,12 +3,13 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"github.com/zerotrust/backend/internal/user"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/geoip"
 )
 
 // TestProgressiveLockout verifies the lockout escalation thresholds.
@@ -174,7 +175,7 @@ type testMFAChecker struct {
 	valid bool
 }
 
-func (m *testMFAChecker) IsEnabled(ctx context.Context, userID string) bool { return true }
+func (m *testMFAChecker) IsEnabled(ctx context.Context, userID string) bool      { return true }
 func (m *testMFAChecker) Validate(ctx context.Context, userID, code string) bool { return m.valid }
 func (m *testMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
 	return "", "", nil, nil
@@ -201,23 +202,23 @@ func TestMFAChallenge(t *testing.T) {
 	}
 	usersReader := &testUserReader{byID: map[string]*user.User{"u1": mockUser}}
 	mfaChecker := &testMFAChecker{valid: true}
-	
+
 	svc := NewService(usersReader, &logoutSessionStore{}, &testServiceAccountStore{}, rdb, ks, mfaChecker, nil)
-	
+
 	// Setup pending token in redis
 	pendingToken := "pending123"
 	hash := hashToken(pendingToken)
 	key := mfaPendingKey(hash)
-	
+
 	m := map[string]interface{}{
-		"uid": "u1",
-		"ip":  "127.0.0.1",
-		"ua":  "test-ua",
+		"uid":         "u1",
+		"ip":          "127.0.0.1",
+		"ua":          "test-ua",
 		"device_info": map[string]string{"os": "linux"},
 	}
 	raw, _ := json.Marshal(m)
 	rdb.Set(context.Background(), key, raw, time.Minute)
-	
+
 	pair, err := svc.MFAChallenge(context.Background(), pendingToken, "123456")
 	if err != nil {
 		t.Fatalf("MFAChallenge failed: %v", err)
@@ -266,5 +267,62 @@ func TestLockout(t *testing.T) {
 	svc.clearFailedAttempts(ctx, email)
 	if err := svc.checkLockout(ctx, email); err != nil {
 		t.Fatalf("expected no lockout after clear, got %v", err)
+	}
+}
+
+func TestFormatLocation(t *testing.T) {
+	if got := formatLocation(&geoip.Location{City: "Istanbul", Country: "Turkey"}); got != "Istanbul, Turkey" {
+		t.Fatalf("city+country got=%q want=Istanbul, Turkey", got)
+	}
+	if got := formatLocation(&geoip.Location{Country: "Turkey"}); got != "Turkey" {
+		t.Fatalf("country only got=%q want=Turkey", got)
+	}
+	if got := formatLocation(&geoip.Location{}); got != "Unknown" {
+		t.Fatalf("empty location got=%q want=Unknown", got)
+	}
+}
+
+func TestSessionTimeoutHelpers(t *testing.T) {
+	svcDefault := &Service{}
+	if got := svcDefault.sessionIdleTimeout(context.Background()); got != defaultSessionIdleTimeout {
+		t.Fatalf("sessionIdleTimeout default=%v want=%v", got, defaultSessionIdleTimeout)
+	}
+	if got := svcDefault.adminSessionIdleTimeout(context.Background()); got != defaultAdminSessionIdleTimeout {
+		t.Fatalf("adminSessionIdleTimeout default=%v want=%v", got, defaultAdminSessionIdleTimeout)
+	}
+	if got := svcDefault.sessionAbsoluteTimeout(context.Background()); got != defaultSessionAbsoluteTimeout {
+		t.Fatalf("sessionAbsoluteTimeout default=%v want=%v", got, defaultSessionAbsoluteTimeout)
+	}
+
+	settings := &testSettings{vals: map[string]int{
+		settingSessionIdleTimeoutSec:      120,
+		settingSessionIdleTimeoutAdminSec: 90,
+		settingSessionAbsoluteTimeoutSec:  3600,
+	}}
+	svcCustom := &Service{settings: settings}
+	if got := svcCustom.sessionIdleTimeout(context.Background()); got != 120*time.Second {
+		t.Fatalf("sessionIdleTimeout custom=%v want=120s", got)
+	}
+	if got := svcCustom.adminSessionIdleTimeout(context.Background()); got != 90*time.Second {
+		t.Fatalf("adminSessionIdleTimeout custom=%v want=90s", got)
+	}
+	if got := svcCustom.sessionAbsoluteTimeout(context.Background()); got != 3600*time.Second {
+		t.Fatalf("sessionAbsoluteTimeout custom=%v want=3600s", got)
+	}
+
+	settingsZero := &testSettings{vals: map[string]int{
+		settingSessionIdleTimeoutSec:      0,
+		settingSessionIdleTimeoutAdminSec: -1,
+		settingSessionAbsoluteTimeoutSec:  0,
+	}}
+	svcZero := &Service{settings: settingsZero}
+	if got := svcZero.sessionIdleTimeout(context.Background()); got != defaultSessionIdleTimeout {
+		t.Fatalf("sessionIdleTimeout fallback=%v want=%v", got, defaultSessionIdleTimeout)
+	}
+	if got := svcZero.adminSessionIdleTimeout(context.Background()); got != defaultAdminSessionIdleTimeout {
+		t.Fatalf("adminSessionIdleTimeout fallback=%v want=%v", got, defaultAdminSessionIdleTimeout)
+	}
+	if got := svcZero.sessionAbsoluteTimeout(context.Background()); got != defaultSessionAbsoluteTimeout {
+		t.Fatalf("sessionAbsoluteTimeout fallback=%v want=%v", got, defaultSessionAbsoluteTimeout)
 	}
 }

@@ -31,9 +31,11 @@ build: ## Build images only
 	cd infra && sudo docker compose build
 
 test: ## Run backend tests (set TEST_DATABASE_URL to include DB integration tests)
+	@if [ -z "$$TEST_DATABASE_URL" ]; then echo "Note: TEST_DATABASE_URL is not set; DB-backed integration tests may be skipped."; fi
 	cd backend && go test -p 1 ./...
 
 test-cover: ## Run backend tests and display coverage (set TEST_DATABASE_URL to include DB integration tests)
+	@if [ -z "$$TEST_DATABASE_URL" ]; then echo "Note: TEST_DATABASE_URL is not set; DB-backed integration tests may be skipped, which can lower reported coverage."; fi
 	cd backend && \
 	go test -p 1 -coverprofile=coverage.out ./... && \
 	go tool cover -func=coverage.out

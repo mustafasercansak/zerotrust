@@ -15,6 +15,27 @@ import (
 	"github.com/zerotrust/backend/pkg/middleware"
 )
 
+type nonFlushingResponseWriter struct {
+	header http.Header
+	code   int
+	body   bytes.Buffer
+}
+
+func (w *nonFlushingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *nonFlushingResponseWriter) Write(b []byte) (int, error) {
+	return w.body.Write(b)
+}
+
+func (w *nonFlushingResponseWriter) WriteHeader(statusCode int) {
+	w.code = statusCode
+}
+
 func newEventTestKeyStore(t *testing.T) *auth.KeyStore {
 	t.Helper()
 	ks, err := auth.LoadOrGenerateKeyStore("", "")
@@ -53,6 +74,67 @@ func TestEventsRejectsQueryToken(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusUnauthorized, rr.Body.String())
+	}
+}
+
+func TestEventsRejectsMissingOrInvalidToken(t *testing.T) {
+	t.Run("missing token", func(t *testing.T) {
+		h := NewHandler(nil, NewEventHub(), newEventTestKeyStore(t), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
+		rr := httptest.NewRecorder()
+
+		h.Events(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusUnauthorized, rr.Body.String())
+		}
+	})
+
+	t.Run("invalid token", func(t *testing.T) {
+		h := NewHandler(nil, NewEventHub(), newEventTestKeyStore(t), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
+		req.Header.Set("Authorization", "Bearer invalid.token")
+		rr := httptest.NewRecorder()
+
+		h.Events(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+		}
+	})
+}
+
+func TestEventsRejectsTokenWithoutPermission(t *testing.T) {
+	ks := newEventTestKeyStore(t)
+	pair, err := auth.GenerateTokenPair(ks, "user-1", "admin@example.com", "en", []string{"admin"}, []string{"users:read"}, time.Minute)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	h := NewHandler(nil, NewEventHub(), ks, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	rr := httptest.NewRecorder()
+
+	h.Events(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+	}
+}
+
+func TestEventsRejectsUnsupportedStreaming(t *testing.T) {
+	ks := newEventTestKeyStore(t)
+	token := newServiceAccountReadToken(t, ks)
+	h := NewHandler(nil, NewEventHub(), ks, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := &nonFlushingResponseWriter{}
+
+	h.Events(rw, req)
+
+	if rw.code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=%d body=%s", rw.code, http.StatusInternalServerError, rw.body.String())
 	}
 }
 
@@ -109,8 +191,13 @@ type fakeServiceAccountService struct {
 	createdName    string
 	updatedName    string
 	updatedScopes  []string
+	updatedActive  bool
+	updatedID      string
+	updatedExpiry  *time.Time
 	setActiveValue bool
 	listResult     ListResult
+	listParams     ListParams
+	revokeID       string
 }
 
 func (s *fakeServiceAccountService) Create(ctx context.Context, name, createdBy string, caller *auth.Claims, scopes []string, expiresAt *time.Time) (*ServiceAccount, string, error) {
@@ -123,8 +210,11 @@ func (s *fakeServiceAccountService) Create(ctx context.Context, name, createdBy 
 }
 
 func (s *fakeServiceAccountService) Update(ctx context.Context, id, name string, caller *auth.Claims, scopes []string, expiresAt *time.Time, active bool) (*ServiceAccount, error) {
+	s.updatedID = id
 	s.updatedName = name
 	s.updatedScopes = scopes
+	s.updatedActive = active
+	s.updatedExpiry = expiresAt
 	if s.updateErr != nil {
 		return nil, s.updateErr
 	}
@@ -132,6 +222,7 @@ func (s *fakeServiceAccountService) Update(ctx context.Context, id, name string,
 }
 
 func (s *fakeServiceAccountService) List(ctx context.Context, p ListParams) (ListResult, error) {
+	s.listParams = p
 	if s.listErr != nil {
 		return ListResult{}, s.listErr
 	}
@@ -139,6 +230,7 @@ func (s *fakeServiceAccountService) List(ctx context.Context, p ListParams) (Lis
 }
 
 func (s *fakeServiceAccountService) Revoke(ctx context.Context, id string) error {
+	s.revokeID = id
 	return s.revokeErr
 }
 
@@ -254,7 +346,7 @@ func TestListHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		svc := &fakeServiceAccountService{listResult: ListResult{Accounts: []*ServiceAccount{{ID: "sa1", Name: "bot", ClientID: "svc_1", CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}}, Total: 1}}
 		h := &Handler{svc: svc, hub: NewEventHub()}
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts?limit=5&sort_by=name", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts?limit=5&offset=2&sort_by=name&sort_dir=desc&name=bot&status=active", nil)
 		rr := httptest.NewRecorder()
 		h.List(rr, req)
 		if rr.Code != http.StatusOK {
@@ -266,6 +358,9 @@ func TestListHandler(t *testing.T) {
 		}
 		if payload.Total != 1 || len(payload.Data) != 1 {
 			t.Fatalf("payload=%+v", payload)
+		}
+		if svc.listParams.Limit != 5 || svc.listParams.Offset != 2 || svc.listParams.SortBy != "name" || svc.listParams.SortDir != "desc" || svc.listParams.Name != "bot" || svc.listParams.Status != "active" {
+			t.Fatalf("unexpected list params: %+v", svc.listParams)
 		}
 	})
 }
@@ -366,6 +461,82 @@ func TestUpdateMapsNotFoundAndScopePolicyErrors(t *testing.T) {
 				t.Fatalf("body=%s want %q", rr.Body.String(), tc.body)
 			}
 		})
+	}
+}
+
+func TestUpdateValidationAndSuccess(t *testing.T) {
+	t.Run("invalid request body", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1", bytes.NewReader([]byte(`{bad`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+
+		h.Update(rr, requestWithClaims(req))
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+	})
+
+	t.Run("invalid expires at", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1", bytes.NewReader([]byte(`{"name":"bot","expires_at":"2026/01/01","is_active":true}`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+
+		h.Update(rr, requestWithClaims(req))
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+	})
+
+	t.Run("name taken", func(t *testing.T) {
+		h := &Handler{svc: &fakeServiceAccountService{updateErr: ErrNameTaken}, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1", bytes.NewReader([]byte(`{"name":"bot","is_active":true}`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+
+		h.Update(rr, requestWithClaims(req))
+
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusConflict, rr.Body.String())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		svc := &fakeServiceAccountService{}
+		h := &Handler{svc: svc, hub: NewEventHub()}
+		req := requestWithURLParam(httptest.NewRequest(http.MethodPatch, "/api/v1/admin/service-accounts/sa1", bytes.NewReader([]byte(`{"name":"bot-updated","scopes":["users:read"],"expires_at":"2026-01-09","is_active":true}`))), "id", "sa1")
+		rr := httptest.NewRecorder()
+
+		h.Update(rr, requestWithClaims(req))
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+		}
+		if svc.updatedID != "sa1" || svc.updatedName != "bot-updated" || !svc.updatedActive {
+			t.Fatalf("unexpected update args: id=%q name=%q active=%v", svc.updatedID, svc.updatedName, svc.updatedActive)
+		}
+		if len(svc.updatedScopes) != 1 || svc.updatedScopes[0] != "users:read" {
+			t.Fatalf("unexpected update scopes: %v", svc.updatedScopes)
+		}
+		if svc.updatedExpiry == nil || svc.updatedExpiry.Format("2006-01-02T15:04:05Z") != "2026-01-09T23:59:59Z" {
+			t.Fatalf("unexpected update expiry: %v", svc.updatedExpiry)
+		}
+	})
+}
+
+func TestRevokeSuccess(t *testing.T) {
+	svc := &fakeServiceAccountService{}
+	h := &Handler{svc: svc, hub: NewEventHub()}
+	req := requestWithURLParam(httptest.NewRequest(http.MethodDelete, "/api/v1/admin/service-accounts/sa1", nil), "id", "sa1")
+	rr := httptest.NewRecorder()
+
+	h.Revoke(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusNoContent, rr.Body.String())
+	}
+	if svc.revokeID != "sa1" {
+		t.Fatalf("revoke id=%q want=sa1", svc.revokeID)
 	}
 }
 
