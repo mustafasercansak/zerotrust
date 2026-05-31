@@ -608,6 +608,9 @@ func (s *Service) clearFailedAttempts(ctx context.Context, email string) {
 }
 
 func (s *Service) revokeJTI(ctx context.Context, jti string, ttl time.Duration) {
+	if s.rdb == nil {
+		return
+	}
 	if ttl > 0 {
 		s.rdb.Set(ctx, jtiBlocklistKey(jti), "1", ttl)
 	}
