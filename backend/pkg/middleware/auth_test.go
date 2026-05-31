@@ -93,7 +93,9 @@ func TestAuthenticate(t *testing.T) {
 		t.Errorf("expected 200 for valid session, got %d", rr4.Code)
 	}
 
-	authSvc.Logout(ctx, "session1", u.ID)
+	if err := authSvc.Logout(ctx, "", tokenPair.AccessToken); err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
 	rr5 := httptest.NewRecorder()
 	handler.ServeHTTP(rr5, req4)
 	if rr5.Code != http.StatusUnauthorized {
