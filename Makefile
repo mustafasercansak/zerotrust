@@ -31,7 +31,19 @@ build: ## Build images only
 	cd infra && sudo docker compose build
 
 test: ## Run backend tests
-	cd backend && go test ./...
+	cd backend && TEST_DATABASE_URL="postgres://zerotrust:260d0077b4a47605e1f592477f1a53884ab748c4b8b8f114@localhost:5432/zerotrust_db?sslmode=disable" go test -p 1 ./...
+
+test-cover: ## Run backend tests and display coverage
+	cd backend && \
+	TEST_DATABASE_URL="postgres://zerotrust:260d0077b4a47605e1f592477f1a53884ab748c4b8b8f114@localhost:5432/zerotrust_db?sslmode=disable" \
+	go test -p 1 -coverprofile=coverage.out ./... && \
+	go tool cover -func=coverage.out
+
+test-front: ## Run frontend tests
+	cd frontend && npm run test
+
+test-cover-front: ## Run frontend tests and display coverage
+	cd frontend && npm run test:cover
 
 lint: ## Run go vet + frontend tsc
 	cd backend && go vet ./...

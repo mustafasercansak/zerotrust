@@ -769,9 +769,25 @@ Status update:
 - Registered a periodic background metrics worker inside the main `WaitGroup` logging connection pool stats every 5 minutes.
 - Added test coverage in `main_test.go` verifying pool parameter parsing and fallback values.
 
+---
 
+### 32. Achieve High Backend Test Coverage
 
+State: OPEN
 
+Status: We have implemented all P0, P1, P2 and Future Improvements, but test coverage remains low or zero for critical utility and domain packages (`admin`, `audit`, `user`, `settings`, `token`, `crypto`, `database`). 
 
+Related files:
+- [backend/internal/admin/handler_test.go](/home/m/projects/zerotrust/backend/internal/admin/handler_test.go)
+- [backend/internal/audit/handler_test.go](/home/m/projects/zerotrust/backend/internal/audit/handler_test.go)
+- [backend/internal/user/handler_test.go](/home/m/projects/zerotrust/backend/internal/user/handler_test.go)
+- [backend/internal/settings/settings_test.go](/home/m/projects/zerotrust/backend/internal/settings/settings_test.go)
+- [backend/pkg/token/jwt_test.go](/home/m/projects/zerotrust/backend/pkg/token/jwt_test.go)
+- [backend/pkg/crypto/crypto_test.go](/home/m/projects/zerotrust/backend/pkg/crypto/crypto_test.go)
+- [backend/pkg/database/database_test.go](/home/m/projects/zerotrust/backend/pkg/database/database_test.go)
 
-
+Acceptance criteria:
+- Write comprehensive unit and integration tests for the aforementioned packages.
+- Fix the `go: no such tool "covdata"` issue if it prevents coverage metrics reporting.
+- Hit an overall backend coverage of at least 80%.
+- Ensure tests verify edge cases like avatar upload content sniffing and summary chart data structures.

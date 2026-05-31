@@ -22,12 +22,22 @@ type SessionManager interface {
 	RevokeByID(ctx context.Context, id, userID string) error
 }
 
+// UserManager is the subset of user.Service used by admin endpoints.
+// *user.Service satisfies this interface directly.
+type UserManager interface {
+	List(ctx context.Context, p user.ListParams) (user.ListResult, error)
+	RegisterWithRoles(ctx context.Context, email, password, locale string, roles []string) (*user.User, error)
+	UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*user.User, error)
+	SetRoles(ctx context.Context, userID string, roles []string) error
+	SetActive(ctx context.Context, userID string, active bool) error
+}
+
 type Handler struct {
-	userSvc  *user.Service
+	userSvc  UserManager
 	sessions SessionManager // nil when not wired
 }
 
-func NewHandler(userSvc *user.Service, sessions SessionManager) *Handler {
+func NewHandler(userSvc UserManager, sessions SessionManager) *Handler {
 	return &Handler{userSvc: userSvc, sessions: sessions}
 }
 

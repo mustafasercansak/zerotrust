@@ -12,6 +12,12 @@ infra/certs/
 # ── Go ───────────────────────────────────────
 backend/server
 backend/tmp/
+backend/coverage.out
+backend/coverage.tmp.out
+backend/coverage_user.html
+backend/**/c.out
+frontend/coverage/
+coverage/
 
 # ── Next.js ──────────────────────────────────
 frontend/.next/

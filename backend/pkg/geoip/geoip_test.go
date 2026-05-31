@@ -39,3 +39,20 @@ func TestGeoIP_InvalidIP(t *testing.T) {
 		t.Error("expected error for invalid IP, got nil")
 	}
 }
+func TestGeoIP_UnmappedIP(t *testing.T) {
+	s := NewService("")
+	defer s.Close()
+
+	_, err := s.Lookup("203.0.113.1")
+	if err == nil {
+		t.Error("expected error for unmapped external IP, got nil")
+	}
+}
+
+func TestGeoIP_InvalidDB(t *testing.T) {
+	s := NewService("nonexistent.mmdb")
+	defer s.Close()
+	if s.db != nil {
+		t.Error("expected db to be nil for nonexistent file")
+	}
+}
