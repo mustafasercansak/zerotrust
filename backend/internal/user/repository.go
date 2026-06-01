@@ -2,6 +2,8 @@ package user
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/pkg/secrets"
 )
 
 var ErrNotFound = errors.New("user_not_found")
@@ -16,26 +19,79 @@ var ErrEmailTaken = errors.New("email_taken")
 var ErrUnknownRole = errors.New("unknown_role")
 
 type Repository struct {
-	db *pgxpool.Pool
+	db        *pgxpool.Pool
+	secClient *secrets.Client
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) SetSecretsClient(c *secrets.Client) {
+	r.secClient = c
+}
+
+func (r *Repository) encrypt(ctx context.Context, val string) (string, error) {
+	if r.secClient == nil || val == "" {
+		return val, nil
+	}
+	return r.secClient.EncryptData(ctx, val)
+}
+
+func (r *Repository) decrypt(ctx context.Context, val string) (string, error) {
+	if r.secClient == nil || val == "" {
+		return val, nil
+	}
+	return r.secClient.DecryptData(ctx, val)
+}
+
+func (r *Repository) decryptUser(ctx context.Context, u *User) error {
+	if u == nil {
+		return nil
+	}
+	var err error
+	u.Email, err = r.decrypt(ctx, u.Email)
+	if err != nil {
+		return err
+	}
+	u.FirstName, err = r.decrypt(ctx, u.FirstName)
+	if err != nil {
+		return err
+	}
+	u.LastName, err = r.decrypt(ctx, u.LastName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(s))))
+	return hex.EncodeToString(h[:])
+}
+
 func (r *Repository) Create(ctx context.Context, email, passwordHash, locale string) (*User, error) {
+	encEmail, err := r.encrypt(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	emailHash := sha256Hex(email)
+
 	u := &User{}
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, locale)
-		VALUES ($1, $2, $3)
+	err = r.db.QueryRow(ctx, `
+		INSERT INTO users (email, email_hash, password_hash, locale)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
-	`, email, passwordHash, locale).Scan(
+	`, encEmail, emailHash, passwordHash, locale).Scan(
 		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, ErrEmailTaken
 		}
+		return nil, err
+	}
+	if err := r.decryptUser(ctx, u); err != nil {
 		return nil, err
 	}
 	return u, nil
@@ -49,12 +105,18 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 	}
 	defer tx.Rollback(ctx)
 
+	encEmail, err := r.encrypt(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	emailHash := sha256Hex(email)
+
 	u := &User{}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, locale)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (email, email_hash, password_hash, locale)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
-	`, email, passwordHash, locale).Scan(
+	`, encEmail, emailHash, passwordHash, locale).Scan(
 		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
@@ -81,6 +143,10 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 		return nil, err
 	}
 
+	if err := r.decryptUser(ctx, u); err != nil {
+		return nil, err
+	}
+
 	u.Roles = roleNames
 	return u, nil
 }
@@ -104,6 +170,9 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 		return nil, err
 	}
 	u.Roles = roles
+	if err := r.decryptUser(ctx, u); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -116,13 +185,22 @@ func (r *Repository) UpdateLocale(ctx context.Context, userID, locale string) er
 }
 
 func (r *Repository) UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error) {
+	encFirstName, err := r.encrypt(ctx, firstName)
+	if err != nil {
+		return nil, err
+	}
+	encLastName, err := r.encrypt(ctx, lastName)
+	if err != nil {
+		return nil, err
+	}
+
 	u := &User{}
-	err := r.db.QueryRow(ctx, `
+	err = r.db.QueryRow(ctx, `
 		UPDATE users
 		SET first_name = $1, last_name = $2, updated_at = NOW()
 		WHERE id = $3
 		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
-	`, firstName, lastName, userID).Scan(
+	`, encFirstName, encLastName, userID).Scan(
 		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
@@ -136,15 +214,19 @@ func (r *Repository) UpdateProfile(ctx context.Context, userID, firstName, lastN
 		return nil, err
 	}
 	u.Roles = roles
+	if err := r.decryptUser(ctx, u); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
+	emailHash := sha256Hex(email)
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
 		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
-		FROM users WHERE email = $1
-	`, email).Scan(
+		FROM users WHERE email_hash = $1
+	`, emailHash).Scan(
 		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
@@ -158,6 +240,9 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 		return nil, err
 	}
 	u.Roles = roles
+	if err := r.decryptUser(ctx, u); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -203,8 +288,8 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	n := 1
 
 	if p.Email != "" {
-		conds = append(conds, fmt.Sprintf("LOWER(u.email) LIKE $%d", n))
-		args = append(args, "%"+strings.ToLower(p.Email)+"%")
+		conds = append(conds, fmt.Sprintf("u.email_hash = $%d", n))
+		args = append(args, sha256Hex(p.Email))
 		n++
 	}
 	switch p.Status {
@@ -267,6 +352,9 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 			u.Roles = strings.Split(rolesStr, ",")
 		} else {
 			u.Roles = []string{}
+		}
+		if err := r.decryptUser(ctx, u); err != nil {
+			return ListResult{}, err
 		}
 		users = append(users, u)
 		activeSessions[u.ID] = sessionCount
@@ -402,6 +490,9 @@ func (r *Repository) UpdateAvatar(ctx context.Context, userID, key string, size 
 		return nil, err
 	}
 	u.Roles = roles
+	if err := r.decryptUser(ctx, u); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 

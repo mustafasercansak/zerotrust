@@ -36,6 +36,7 @@ import (
 	"github.com/zerotrust/backend/pkg/geoip"
 	"github.com/zerotrust/backend/pkg/mailer"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
+	"github.com/zerotrust/backend/pkg/secrets"
 )
 
 func main() {
@@ -119,6 +120,20 @@ func main() {
 	slog.Info("all connections and keys ready")
 
 	userRepo := user.NewRepository(db)
+	// Initialize Secrets Client
+	var secClient *secrets.Client
+	if os.Getenv("BAO_ADDR") != "" || os.Getenv("VAULT_ADDR") != "" {
+		var sErr error
+		secClient, sErr = secrets.NewClient("db-encryption-key")
+		if sErr != nil {
+			slog.Error("failed to initialize secrets client", "error", sErr)
+			os.Exit(1)
+		}
+		slog.Info("secrets client initialized for application-level encryption")
+		userRepo.SetSecretsClient(secClient)
+	} else {
+		slog.Warn("BAO_ADDR/VAULT_ADDR not set — secrets client disabled (running without encryption)")
+	}
 	userSvc := user.NewService(userRepo)
 
 	if cfg.InitialAdminEmail != "" && cfg.InitialAdminPasswordHash != "" {
@@ -175,6 +190,9 @@ func main() {
 	}()
 
 	auditRepo := audit.NewRepository(db)
+	if secClient != nil {
+		auditRepo.SetSecretsClient(secClient)
+	}
 	auditHandler := audit.NewHandler(auditRepo)
 
 	// MFA

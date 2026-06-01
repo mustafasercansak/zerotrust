@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/pkg/secrets"
 )
 
 type Entry struct {
@@ -20,20 +21,62 @@ type Entry struct {
 }
 
 type Repository struct {
-	db *pgxpool.Pool
+	db        *pgxpool.Pool
+	secClient *secrets.Client
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) SetSecretsClient(c *secrets.Client) {
+	r.secClient = c
+}
+
 func (r *Repository) Log(ctx context.Context, e Entry) error {
 	var meta []byte
 	if len(e.Metadata) > 0 {
 		var err error
-		meta, err = json.Marshal(e.Metadata)
-		if err != nil {
-			return fmt.Errorf("marshal audit metadata: %w", err)
+		if r.secClient != nil {
+			outcome := e.Metadata["outcome"]
+			status := e.Metadata["status"]
+
+			sensitiveMeta := make(map[string]any)
+			for k, v := range e.Metadata {
+				if k != "outcome" && k != "status" {
+					sensitiveMeta[k] = v
+				}
+			}
+
+			sensBytes, err := json.Marshal(sensitiveMeta)
+			if err != nil {
+				return fmt.Errorf("marshal sensitive metadata: %w", err)
+			}
+
+			ciphertext, err := r.secClient.EncryptData(ctx, string(sensBytes))
+			if err != nil {
+				return fmt.Errorf("encrypt audit metadata: %w", err)
+			}
+
+			dbMeta := map[string]any{
+				"payload": ciphertext,
+			}
+			if outcome != nil {
+				dbMeta["outcome"] = outcome
+			}
+			if status != nil {
+				dbMeta["status"] = status
+			}
+
+			meta, err = json.Marshal(dbMeta)
+			if err != nil {
+				return fmt.Errorf("marshal db metadata: %w", err)
+			}
+		} else {
+			meta, err = json.Marshal(e.Metadata)
+			if err != nil {
+				return fmt.Errorf("marshal audit metadata: %w", err)
+			}
 		}
 	}
 	_, err := r.db.Exec(ctx, `
@@ -167,6 +210,20 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 		}
 		if err := json.Unmarshal(metadata, &e.Metadata); err != nil {
 			e.Metadata = map[string]any{}
+		}
+		if r.secClient != nil && e.Metadata["payload"] != nil {
+			if payloadStr, ok := e.Metadata["payload"].(string); ok && payloadStr != "" {
+				decryptedStr, err := r.secClient.DecryptData(ctx, payloadStr)
+				if err == nil {
+					var decryptedMeta map[string]any
+					if err := json.Unmarshal([]byte(decryptedStr), &decryptedMeta); err == nil {
+						delete(e.Metadata, "payload")
+						for k, v := range decryptedMeta {
+							e.Metadata[k] = v
+						}
+					}
+				}
+			}
 		}
 		entries = append(entries, e)
 	}
