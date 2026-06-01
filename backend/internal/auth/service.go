@@ -177,7 +177,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		return nil, ErrInvalidCredentials
 	}
 	if !s.users.CheckPassword(u.PasswordHash, password) {
-		s.recordFailedAttempt(ctx, email)
+		s.recordFailedAttempt(ctx, email, ip)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -573,7 +573,7 @@ func (s *Service) checkLockout(ctx context.Context, email string) error {
 	}
 	return nil
 }
-func (s *Service) recordFailedAttempt(ctx context.Context, email string) {
+func (s *Service) recordFailedAttempt(ctx context.Context, email, ip string) {
 	if s.rdb == nil {
 		return
 	}
@@ -597,6 +597,21 @@ func (s *Service) recordFailedAttempt(ctx context.Context, email string) {
 			d = 30 * time.Minute
 		}
 		s.rdb.Set(ctx, lockoutKey(email), "1", d)
+
+		// Send lockout email alert
+		if s.mailer != nil {
+			var locStr string
+			if s.geoip != nil && ip != "" {
+				if loc, err := s.geoip.Lookup(ip); err == nil {
+					locStr = formatLocation(loc)
+				}
+			}
+			if locStr == "" {
+				locStr = "Unknown"
+			}
+			details := fmt.Sprintf("Your account has been temporarily locked for %v due to multiple failed login attempts.", d)
+			_ = s.mailer.SendSecurityAlert(ctx, email, "account_lockout", ip, locStr, details)
+		}
 	}
 }
 

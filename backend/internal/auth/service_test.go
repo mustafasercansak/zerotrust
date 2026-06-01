@@ -248,7 +248,7 @@ func TestLockout(t *testing.T) {
 
 	// 5 failed attempts
 	for i := 0; i < 5; i++ {
-		svc.recordFailedAttempt(ctx, email)
+		svc.recordFailedAttempt(ctx, email, "1.1.1.1")
 	}
 
 	err = svc.checkLockout(ctx, email)
@@ -326,3 +326,71 @@ func TestSessionTimeoutHelpers(t *testing.T) {
 		t.Fatalf("sessionAbsoluteTimeout fallback=%v want=%v", got, defaultSessionAbsoluteTimeout)
 	}
 }
+
+type mockMailer struct {
+	sentAlerts []struct {
+		to        string
+		alertType string
+		ipAddress string
+		location  string
+		details   string
+	}
+}
+
+func (m *mockMailer) SendPasswordReset(ctx context.Context, to, resetURL string) error {
+	return nil
+}
+
+func (m *mockMailer) SendSecurityAlert(ctx context.Context, to, alertType, ipAddress, location, details string) error {
+	m.sentAlerts = append(m.sentAlerts, struct {
+		to        string
+		alertType string
+		ipAddress string
+		location  string
+		details   string
+	}{to, alertType, ipAddress, location, details})
+	return nil
+}
+
+func TestLockoutEmailAlert(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr: s.Addr(),
+	})
+
+	svc := NewService(nil, nil, nil, rdb, nil, nil, nil)
+	m := &mockMailer{}
+	g := geoip.NewService("")
+	svc.ConfigureSecurityAnomalies(g, m)
+
+	email := "lockout_alert@example.com"
+	ctx := context.Background()
+
+	// 5 failed attempts
+	for i := 0; i < 5; i++ {
+		svc.recordFailedAttempt(ctx, email, "1.1.1.1")
+	}
+
+	if len(m.sentAlerts) != 1 {
+		t.Fatalf("expected 1 alert sent, got %d", len(m.sentAlerts))
+	}
+	alert := m.sentAlerts[0]
+	if alert.to != email {
+		t.Errorf("expected recipient %s, got %s", email, alert.to)
+	}
+	if alert.alertType != "account_lockout" {
+		t.Errorf("expected alert type 'account_lockout', got %s", alert.alertType)
+	}
+	if alert.ipAddress != "1.1.1.1" {
+		t.Errorf("expected IP '1.1.1.1', got %s", alert.ipAddress)
+	}
+	if alert.location != "Sydney, Australia" {
+		t.Errorf("expected location 'Sydney, Australia', got %q", alert.location)
+	}
+}
+
