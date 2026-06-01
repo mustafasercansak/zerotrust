@@ -119,7 +119,7 @@ func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, 
 
 func ValidateAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, ErrInvalidToken
 		}
 		kid, ok := t.Header["kid"].(string)
@@ -146,7 +146,7 @@ func ValidateAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
 }
 
 func signClaims(ks *KeyStore, claims Claims) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	token.Header["kid"] = ks.PrimaryKID()
 	return token.SignedString(ks.PrimaryKey())
 }

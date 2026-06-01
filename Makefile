@@ -9,7 +9,7 @@ secrets: ## Generate secrets (infra/.env, infra/.env.admin, EC key pair)
 certs: ## Generate a self-signed TLS certificate (for local HTTPS testing)
 	bash infra/scripts/gen-selfsigned-cert.sh
 
-jwt-key: ## Generate a persistent EC P-256 JWT signing key
+jwt-key: ## Generate a persistent Ed25519 JWT signing key
 	bash infra/scripts/gen-jwt-key.sh
 
 up: ## Start in development mode (HTTP, ports exposed)

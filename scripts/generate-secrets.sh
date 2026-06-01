@@ -68,17 +68,17 @@ REDIS_PASSWORD=$(openssl rand -hex 24)
 log "Redis password generated (48 hex characters)"
 
 # ─────────────────────────────────────────────
-head "4. JWT EC Key Pair (P-256)"
-JWT_KEY_FILE="$SECRETS_DIR/jwt_ec_primary.pem"
-openssl ecparam -name prime256v1 -genkey -noout -out "$JWT_KEY_FILE"
+head "4. JWT Ed25519 Key Pair"
+JWT_KEY_FILE="$SECRETS_DIR/jwt_primary.pem"
+openssl genpkey -algorithm ed25519 -out "$JWT_KEY_FILE"
 chmod 600 "$JWT_KEY_FILE"
-log "EC private key: secrets/jwt_ec_primary.pem"
+log "Ed25519 private key: secrets/jwt_primary.pem"
 
 # Extract public key as well (can be used by services for verification)
-JWT_PUB_FILE="$SECRETS_DIR/jwt_ec_public.pem"
-openssl ec -in "$JWT_KEY_FILE" -pubout -out "$JWT_PUB_FILE" 2>/dev/null
+JWT_PUB_FILE="$SECRETS_DIR/jwt_public.pem"
+openssl pkey -in "$JWT_KEY_FILE" -pubout -out "$JWT_PUB_FILE" 2>/dev/null
 chmod 644 "$JWT_PUB_FILE"
-log "EC public key:  secrets/jwt_ec_public.pem"
+log "Ed25519 public key:  secrets/jwt_public.pem"
 
 # ─────────────────────────────────────────────
 head "5. Writing infra/.env"
@@ -98,7 +98,7 @@ DATABASE_URL=postgres://zerotrust:${DB_PASSWORD}@postgres:5432/zerotrust_db?sslm
 REDIS_PASSWORD=${REDIS_PASSWORD}
 
 # ── JWT ─────────────────────────────────────
-JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_ec_primary.pem
+JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_primary.pem
 
 # ── MFA ─────────────────────────────────────
 MFA_ENABLED=true
@@ -140,8 +140,8 @@ echo ""
 echo -e "${BOLD}Generated files:${NC}"
 echo -e "  ${GREEN}infra/.env${NC}                 → docker-compose variable substitution"
 echo -e "  ${GREEN}infra/.env.admin${NC}           → admin credentials (env_file)"
-echo -e "  ${GREEN}secrets/jwt_ec_primary.pem${NC} → JWT signing private key (chmod 600)"
-echo -e "  ${GREEN}secrets/jwt_ec_public.pem${NC}  → JWT public key (for verifying services)"
+echo -e "  ${GREEN}secrets/jwt_primary.pem${NC}    → JWT signing private key (chmod 600)"
+echo -e "  ${GREEN}secrets/jwt_public.pem${NC}     → JWT public key (for verifying services)"
 echo ""
 echo -e "${BOLD}Next step:${NC}"
 echo -e "  cd infra && sudo docker compose up --build"

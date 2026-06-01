@@ -1,8 +1,7 @@
 package auth
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -15,11 +14,11 @@ import (
 	"sync"
 )
 
-// KeyStore holds one or more EC keys indexed by kid.
+// KeyStore holds one or more Ed25519 keys indexed by kid.
 // The primary key signs new tokens; secondary keys are kept for validation during rotation.
 type KeyStore struct {
 	mu      sync.RWMutex
-	keys    map[string]*ecdsa.PrivateKey
+	keys    map[string]ed25519.PrivateKey
 	primary string
 }
 
@@ -31,7 +30,7 @@ type JWK struct {
 	Use string `json:"use"`
 	Alg string `json:"alg"`
 	X   string `json:"x"`
-	Y   string `json:"y"`
+	Y   string `json:"y,omitempty"`
 }
 
 // JWKS is the JSON Web Key Set returned from /.well-known/jwks.json.
@@ -40,19 +39,19 @@ type JWKS struct {
 }
 
 func NewKeyStore() *KeyStore {
-	return &KeyStore{keys: make(map[string]*ecdsa.PrivateKey)}
+	return &KeyStore{keys: make(map[string]ed25519.PrivateKey)}
 }
 
 func LoadOrGenerateKeyStore(primaryPath, secondaryPath string) (*KeyStore, error) {
 	ks := NewKeyStore()
 
 	if primaryPath == "" {
-		slog.Warn("JWT_PRIVATE_KEY_FILE not set — generating ephemeral EC key (development only!)")
+		slog.Warn("JWT_PRIVATE_KEY_FILE not set — generating ephemeral Ed25519 key (development only!)")
 		key, err := generateKey()
 		if err != nil {
 			return nil, err
 		}
-		kid := keyID(&key.PublicKey)
+		kid := keyID(key.Public().(ed25519.PublicKey))
 		ks.addKey(kid, key)
 		ks.primary = kid
 		return ks, nil
@@ -62,7 +61,7 @@ func LoadOrGenerateKeyStore(primaryPath, secondaryPath string) (*KeyStore, error
 	if err != nil {
 		return nil, err
 	}
-	kid := keyID(&primary.PublicKey)
+	kid := keyID(primary.Public().(ed25519.PublicKey))
 	ks.addKey(kid, primary)
 	ks.primary = kid
 
@@ -71,7 +70,7 @@ func LoadOrGenerateKeyStore(primaryPath, secondaryPath string) (*KeyStore, error
 		if err != nil {
 			slog.Warn("secondary JWT key could not be loaded", "error", err)
 		} else {
-			ks.addKey(keyID(&secondary.PublicKey), secondary)
+			ks.addKey(keyID(secondary.Public().(ed25519.PublicKey)), secondary)
 		}
 	}
 
@@ -84,20 +83,20 @@ func (ks *KeyStore) PrimaryKID() string {
 	return ks.primary
 }
 
-func (ks *KeyStore) PrimaryKey() *ecdsa.PrivateKey {
+func (ks *KeyStore) PrimaryKey() ed25519.PrivateKey {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
 	return ks.keys[ks.primary]
 }
 
-func (ks *KeyStore) PublicKey(kid string) (*ecdsa.PublicKey, bool) {
+func (ks *KeyStore) PublicKey(kid string) (ed25519.PublicKey, bool) {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
 	k, ok := ks.keys[kid]
 	if !ok {
 		return nil, false
 	}
-	return &k.PublicKey, true
+	return k.Public().(ed25519.PublicKey), true
 }
 
 // PublicJWKS exports all public keys as a JWKS document.
@@ -106,29 +105,30 @@ func (ks *KeyStore) PublicJWKS() JWKS {
 	defer ks.mu.RUnlock()
 	jwks := JWKS{Keys: make([]JWK, 0, len(ks.keys))}
 	for kid, key := range ks.keys {
-		jwks.Keys = append(jwks.Keys, ecKeyToJWK(kid, &key.PublicKey))
+		jwks.Keys = append(jwks.Keys, ed25519KeyToJWK(kid, key.Public().(ed25519.PublicKey)))
 	}
 	return jwks
 }
 
-func (ks *KeyStore) addKey(kid string, key *ecdsa.PrivateKey) {
+func (ks *KeyStore) addKey(kid string, key ed25519.PrivateKey) {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 	ks.keys[kid] = key
 }
 
 // keyID returns the first 8 bytes of the SHA-256 fingerprint of the DER-encoded public key.
-func keyID(pub *ecdsa.PublicKey) string {
+func keyID(pub ed25519.PublicKey) string {
 	der, _ := x509.MarshalPKIXPublicKey(pub)
 	h := sha256.Sum256(der)
 	return hex.EncodeToString(h[:8])
 }
 
-func generateKey() (*ecdsa.PrivateKey, error) {
-	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+func generateKey() (ed25519.PrivateKey, error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	return priv, err
 }
 
-func loadKeyFromFile(path string) (*ecdsa.PrivateKey, error) {
+func loadKeyFromFile(path string) (ed25519.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -137,37 +137,25 @@ func loadKeyFromFile(path string) (*ecdsa.PrivateKey, error) {
 	if block == nil {
 		return nil, errors.New("PEM decode failed")
 	}
-	// Try PKCS#8 first — produced by `openssl pkcs8 -topk8` (gen-jwt-key.sh output).
+	// Try PKCS#8.
 	if keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		ecKey, ok := keyAny.(*ecdsa.PrivateKey)
+		edKey, ok := keyAny.(ed25519.PrivateKey)
 		if !ok {
-			return nil, errors.New("key is not ECDSA")
+			return nil, errors.New("key is not Ed25519")
 		}
-		return ecKey, nil
+		return edKey, nil
 	}
-	// Fall back to SEC1 / legacy EC PRIVATE KEY format.
-	return x509.ParseECPrivateKey(block.Bytes)
+	return nil, errors.New("failed to parse Ed25519 private key")
 }
 
-// ecKeyToJWK converts a P-256 public key to JWK format.
-// X and Y are zero-padded to 32 bytes before base64url encoding.
-func ecKeyToJWK(kid string, pub *ecdsa.PublicKey) JWK {
+// ed25519KeyToJWK converts an Ed25519 public key to JWK format.
+func ed25519KeyToJWK(kid string, pub ed25519.PublicKey) JWK {
 	return JWK{
-		Kty: "EC",
-		Crv: "P-256",
+		Kty: "OKP",
+		Crv: "Ed25519",
 		Kid: kid,
 		Use: "sig",
-		Alg: "ES256",
-		X:   base64.RawURLEncoding.EncodeToString(padTo32(pub.X.Bytes())),
-		Y:   base64.RawURLEncoding.EncodeToString(padTo32(pub.Y.Bytes())),
+		Alg: "EdDSA",
+		X:   base64.RawURLEncoding.EncodeToString(pub),
 	}
-}
-
-func padTo32(b []byte) []byte {
-	if len(b) == 32 {
-		return b
-	}
-	out := make([]byte, 32)
-	copy(out[32-len(b):], b)
-	return out
 }
