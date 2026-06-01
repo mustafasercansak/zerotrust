@@ -79,7 +79,7 @@ func TestServiceToken(t *testing.T) {
 	ks := newTestKeyStore(t)
 
 	resp, err := auth.GenerateServiceToken(ks, "client-1", "ci-bot",
-		[]string{"users:read", "service_accounts:read"}, 5*time.Minute)
+		[]string{"users:read", "service_accounts:read"}, 5*time.Minute, "")
 	if err != nil {
 		t.Fatalf("generate service token: %v", err)
 	}

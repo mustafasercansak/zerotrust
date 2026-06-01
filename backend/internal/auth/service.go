@@ -521,7 +521,7 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 	return pair, nil
 }
 
-func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string) (*ServiceTokenResponse, error) {
+func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
 	sa, err := s.saSvc.FindByClientID(ctx, clientID)
 	if err != nil {
 		return nil, ErrInvalidCredentials
@@ -539,7 +539,7 @@ func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string
 	if !secretValid {
 		return nil, ErrInvalidCredentials
 	}
-	return GenerateServiceToken(s.ks, clientID, sa.Name, sa.Scopes, serviceTokenTTL)
+	return GenerateServiceToken(s.ks, clientID, sa.Name, sa.Scopes, serviceTokenTTL, dpopJKT)
 }
 
 // Logout revokes the session and blocklists the access token JTI.

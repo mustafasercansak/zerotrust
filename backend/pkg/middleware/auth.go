@@ -37,6 +37,19 @@ func Authenticate(ks *auth.KeyStore, authSvc *auth.Service) func(http.Handler) h
 				return
 			}
 
+			if claims.Confirmation != nil && claims.Confirmation.JKT != "" {
+				dpopHeader := r.Header.Get("DPoP")
+				if dpopHeader == "" {
+					writeError(w, http.StatusUnauthorized, "invalid_dpop_proof")
+					return
+				}
+				jkt, err := auth.ValidateDPoPProof(dpopHeader, r.Method, r.URL.Path)
+				if err != nil || jkt != claims.Confirmation.JKT {
+					writeError(w, http.StatusUnauthorized, "invalid_dpop_proof")
+					return
+				}
+			}
+
 			ctx := context.WithValue(r.Context(), ClaimsKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

@@ -52,7 +52,7 @@ type fakeAuthService struct {
 	refreshErr        error
 }
 
-func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string) (*ServiceTokenResponse, error) {
+func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
 	if s.clientErr != nil {
 		return nil, s.clientErr
 	}

@@ -20,6 +20,10 @@ const (
 	SubTypeService = "service"
 )
 
+type Confirmation struct {
+	JKT string `json:"jkt,omitempty"`
+}
+
 type Claims struct {
 	// User token fields
 	UserID      string   `json:"uid,omitempty"`
@@ -34,6 +38,8 @@ type Claims struct {
 
 	// Common
 	SubType string `json:"sub_type"`
+
+	Confirmation *Confirmation `json:"cnf,omitempty"`
 
 	jwt.RegisteredClaims
 }
@@ -92,7 +98,7 @@ func GenerateTokenPair(ks *KeyStore, userID, email, locale string, roles, permis
 	return &TokenPair{AccessToken: signed, RefreshToken: refresh}, nil
 }
 
-func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, ttl time.Duration) (*ServiceTokenResponse, error) {
+func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, ttl time.Duration, dpopJKT string) (*ServiceTokenResponse, error) {
 	now := time.Now()
 	claims := Claims{
 		ClientID: clientID,
@@ -104,6 +110,11 @@ func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, 
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
+	}
+	if dpopJKT != "" {
+		claims.Confirmation = &Confirmation{
+			JKT: dpopJKT,
+		}
 	}
 
 	signed, err := signClaims(ks, claims)

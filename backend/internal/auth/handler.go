@@ -27,7 +27,7 @@ type auditLogger interface {
 }
 
 type authService interface {
-	ClientCredentials(ctx context.Context, clientID, secret string) (*ServiceTokenResponse, error)
+	ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error)
 	Login(ctx context.Context, email, password, ip, ua string, deviceInfo map[string]string) (*LoginResult, error)
 	MFAChallenge(ctx context.Context, pendingToken, totpCode string) (*TokenPair, error)
 	RefreshTokens(ctx context.Context, refreshToken, ip, ua string, deviceInfo map[string]string) (*TokenPair, error)
@@ -81,7 +81,18 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.authSvc.ClientCredentials(r.Context(), req.ClientID, req.ClientSecret)
+	dpopProof := r.Header.Get("DPoP")
+	var dpopJKT string
+	if dpopProof != "" {
+		var err error
+		dpopJKT, err = ValidateDPoPProof(dpopProof, r.Method, "/api/v1/auth/token")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_dpop_proof")
+			return
+		}
+	}
+
+	resp, err := h.authSvc.ClientCredentials(r.Context(), req.ClientID, req.ClientSecret, dpopJKT)
 	if err != nil {
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "auth.client_credentials_failed",
