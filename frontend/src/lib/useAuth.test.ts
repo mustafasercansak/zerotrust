@@ -1,8 +1,57 @@
-import { describe, expect, it } from "vitest";
-import { ApiError } from "./api";
-import { authBootstrapFailureAction, classifyAuthBootstrapError, isAuthRedirectError } from "./useAuth";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAuth, authBootstrapFailureAction, classifyAuthBootstrapError, isAuthRedirectError } from "./useAuth";
+import { ApiError, api } from "./api";
 
-describe("auth bootstrap error handling", () => {
+// Stub variables for mock React state
+let stateCalls: any[] = [];
+let callIdx = 0;
+
+// Mock router navigation
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => mockNavigate,
+}));
+
+// Mock localization
+const mockChangeLanguage = vi.fn();
+const mockI18n = {
+  language: "en",
+  changeLanguage: mockChangeLanguage,
+};
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    i18n: mockI18n,
+    t: (key: string) => key,
+  }),
+}));
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", {
+    setItem: vi.fn(),
+    getItem: vi.fn(),
+  });
+});
+
+// Mock React
+vi.mock("react", async (importOriginal) => {
+  const original = await importOriginal<typeof import("react")>();
+  return {
+    ...original,
+    useState: (init: any) => {
+      const idx = callIdx;
+      callIdx++;
+      if (!stateCalls[idx]) {
+        stateCalls[idx] = [init, vi.fn()];
+      }
+      return stateCalls[idx];
+    },
+    useEffect: (fn: any) => {
+      fn();
+    },
+  };
+});
+
+describe("auth bootstrap helper error handling", () => {
   it.each([401, 403])("redirects HTTP %s auth failures to login", (status) => {
     expect(isAuthRedirectError(new ApiError("auth_error", undefined, status))).toBe(true);
   });
@@ -31,6 +80,65 @@ describe("auth bootstrap error handling", () => {
     expect(authBootstrapFailureAction(new TypeError("Failed to fetch"))).toEqual({
       type: "error",
       error: "network",
+    });
+  });
+});
+
+describe("useAuth React hook", () => {
+  beforeEach(() => {
+    callIdx = 0;
+    stateCalls = [
+      [null, vi.fn()], // me
+      [true, vi.fn()], // loading
+      [null, vi.fn()], // bootstrapError
+    ];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("loads profile on mount, syncs mismatching locale, and sets state", async () => {
+    const mockMe = vi.spyOn(api, "me").mockResolvedValue({
+      user_id: "u1",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      locale: "tr", // mismatching locale
+      roles: ["admin"],
+    });
+
+    useAuth();
+
+    await vi.waitFor(() => {
+      expect(mockMe).toHaveBeenCalled();
+      expect(mockChangeLanguage).toHaveBeenCalledWith("tr");
+      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.any(Object)); // setMe
+      expect(stateCalls[1][1]).toHaveBeenCalledWith(false); // setLoading
+    });
+  });
+
+  it("redirects to login on auth failure (401/403)", async () => {
+    const mockMe = vi.spyOn(api, "me").mockRejectedValue(new ApiError("unauthorized", undefined, 401));
+
+    useAuth();
+
+    await vi.waitFor(() => {
+      expect(mockMe).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/auth/login", { replace: true });
+    });
+  });
+
+  it("sets bootstrap error on network/infrastructure failure", async () => {
+    const mockMe = vi.spyOn(api, "me").mockRejectedValue(new ApiError("server_error", undefined, 500));
+
+    useAuth();
+
+    await vi.waitFor(() => {
+      expect(mockMe).toHaveBeenCalled();
+      expect(stateCalls[2][1]).toHaveBeenCalledWith("server"); // setBootstrapError
+      expect(stateCalls[1][1]).toHaveBeenCalledWith(false); // setLoading
     });
   });
 });
