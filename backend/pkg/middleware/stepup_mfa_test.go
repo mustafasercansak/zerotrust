@@ -117,3 +117,44 @@ func TestRequireRecentMFA(t *testing.T) {
 		t.Errorf("expected 200 for recent MFA, got %d", rr6.Code)
 	}
 }
+
+func TestRequireRecentMFA_EdgeCases(t *testing.T) {
+	mr, _ := miniredis.Run()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	defer mr.Close()
+
+	claims := &auth.Claims{UserID: "user1"}
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	// 1. MFA checker is nil
+	handlerNilMFA := RequireRecentMFA(nil, rdb, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req1 := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	rr1 := httptest.NewRecorder()
+	handlerNilMFA.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when MFA checker is nil, got %d", rr1.Code)
+	}
+
+	// 2. Redis client is nil
+	mfa := &mockMFAChecker{enabled: true, valid: true}
+	handlerNilRdb := RequireRecentMFA(mfa, nil, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req2 := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	rr2 := httptest.NewRecorder()
+	handlerNilRdb.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when redis is nil, got %d", rr2.Code)
+	}
+
+	// 3. Redis error during marking
+	badRdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:23456"}) // invalid port to cause connection error
+	handlerBadRdb := RequireRecentMFA(mfa, badRdb, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req3 := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	req3.AddCookie(&http.Cookie{Name: "refresh_token", Value: "token1"})
+	req3.Header.Set("X-MFA-Code", "123456")
+	rr3 := httptest.NewRecorder()
+	handlerBadRdb.ServeHTTP(rr3, req3)
+	if rr3.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when marking MFA fails, got %d", rr3.Code)
+	}
+}

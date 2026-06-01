@@ -209,3 +209,15 @@ func TestGenerateToken(t *testing.T) {
 		t.Fatal("expected two generated tokens to differ")
 	}
 }
+
+func TestReset_BcryptError(t *testing.T) {
+	svc := &Service{repo: &stubStore{}}
+	longPassword := make([]byte, 100)
+	for i := range longPassword {
+		longPassword[i] = 'a'
+	}
+	err := svc.Reset(context.Background(), "any-token", string(longPassword))
+	if err == nil {
+		t.Fatal("expected error with password > 72 bytes, got nil")
+	}
+}

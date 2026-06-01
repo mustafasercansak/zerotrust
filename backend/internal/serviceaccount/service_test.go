@@ -322,3 +322,20 @@ func TestServicePassthroughMethods(t *testing.T) {
 		t.Fatalf("unexpected RotateSecret arg: %q", repo.rotateID)
 	}
 }
+
+func TestServiceUpdateReturnsValidationErrorWithoutCallingRepository(t *testing.T) {
+	repo := &fakeServiceAccountRepo{}
+	svc := &Service{
+		repo:           repo,
+		scopeValidator: &scopePolicyRepo{permissions: map[string]bool{"users:read": true}},
+	}
+	caller := &auth.Claims{Permissions: []string{"audit:read"}}
+
+	_, err := svc.Update(context.Background(), "sa1", "updated", caller, []string{"users:read"}, nil, true)
+	if !errors.Is(err, ErrForbiddenScope) {
+		t.Fatalf("Update error=%v want ErrForbiddenScope", err)
+	}
+	if repo.updateID != "" {
+		t.Fatal("repository should not be called when validation fails")
+	}
+}

@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -122,6 +125,145 @@ func TestAuthenticate(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("dpop token - missing proof", func(t *testing.T) {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate client key: %v", err)
+		}
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+		}
+		jkt, err := auth.CalculateJKT(jwk)
+		if err != nil {
+			t.Fatalf("failed to calculate JKT: %v", err)
+		}
+
+		resp, err := auth.GenerateServiceToken(ks, "client1", "service1", []string{"read"}, time.Hour, jkt)
+		if err != nil {
+			t.Fatalf("failed to generate service token: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+		req.Header.Set("Authorization", "Bearer "+resp.AccessToken)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", rr.Code)
+		}
+	})
+
+	t.Run("dpop token - invalid proof", func(t *testing.T) {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate client key: %v", err)
+		}
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+		}
+		jkt, err := auth.CalculateJKT(jwk)
+		if err != nil {
+			t.Fatalf("failed to calculate JKT: %v", err)
+		}
+
+		resp, err := auth.GenerateServiceToken(ks, "client1", "service1", []string{"read"}, time.Hour, jkt)
+		if err != nil {
+			t.Fatalf("failed to generate service token: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+		req.Header.Set("Authorization", "Bearer "+resp.AccessToken)
+		req.Header.Set("DPoP", "invalid-proof-value")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", rr.Code)
+		}
+	})
+
+	t.Run("dpop token - JKT mismatch", func(t *testing.T) {
+		pubA, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate key A: %v", err)
+		}
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pubA),
+		}
+		jktA, err := auth.CalculateJKT(jwk)
+		if err != nil {
+			t.Fatalf("failed to calculate JKT A: %v", err)
+		}
+
+		resp, err := auth.GenerateServiceToken(ks, "client1", "service1", []string{"read"}, time.Hour, jktA)
+		if err != nil {
+			t.Fatalf("failed to generate service token: %v", err)
+		}
+
+		// Sign proof with key B
+		_, privB, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate key B: %v", err)
+		}
+
+		proof, err := auth.GenerateDPoPProofForTest(privB, "GET", "/api/resource")
+		if err != nil {
+			t.Fatalf("failed to generate proof: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+		req.Header.Set("Authorization", "Bearer "+resp.AccessToken)
+		req.Header.Set("DPoP", proof)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", rr.Code)
+		}
+	})
+
+	t.Run("dpop token - success", func(t *testing.T) {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate client key: %v", err)
+		}
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+		}
+		jkt, err := auth.CalculateJKT(jwk)
+		if err != nil {
+			t.Fatalf("failed to calculate JKT: %v", err)
+		}
+
+		resp, err := auth.GenerateServiceToken(ks, "client1", "service1", []string{"read"}, time.Hour, jkt)
+		if err != nil {
+			t.Fatalf("failed to generate service token: %v", err)
+		}
+
+		proof, err := auth.GenerateDPoPProofForTest(priv, "GET", "/api/resource")
+		if err != nil {
+			t.Fatalf("failed to generate proof: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+		req.Header.Set("Authorization", "Bearer "+resp.AccessToken)
+		req.Header.Set("DPoP", proof)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
 		}
 	})
 }

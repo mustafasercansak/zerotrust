@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/zerotrust/backend/internal/auth"
 )
 
@@ -110,5 +111,35 @@ func TestRefreshTokenIsOpaque(t *testing.T) {
 	_, err := auth.ValidateAccessToken(ks, pair.RefreshToken)
 	if err == nil {
 		t.Error("refresh token validated as JWT — it should be opaque")
+	}
+}
+
+func TestValidateAccessTokenFailures(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// 1. Signed with HMAC (wrong algorithm)
+	tokenHMAC := jwt.NewWithClaims(jwt.SigningMethodHS256, &auth.Claims{})
+	tokenHMAC.Header["kid"] = ks.PrimaryKID()
+	tokenStr, _ := tokenHMAC.SignedString([]byte("secret-key"))
+	_, err := auth.ValidateAccessToken(ks, tokenStr)
+	if err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken, got %v", err)
+	}
+
+	// 2. Missing kid
+	tokenNoKid := jwt.NewWithClaims(jwt.SigningMethodEdDSA, &auth.Claims{})
+	tokenStr, _ = tokenNoKid.SignedString(ks.PrimaryKey())
+	_, err = auth.ValidateAccessToken(ks, tokenStr)
+	if err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken, got %v", err)
+	}
+
+	// 3. Invalid kid type
+	tokenBadKid := jwt.NewWithClaims(jwt.SigningMethodEdDSA, &auth.Claims{})
+	tokenBadKid.Header["kid"] = 12345 // non-string kid
+	tokenStr, _ = tokenBadKid.SignedString(ks.PrimaryKey())
+	_, err = auth.ValidateAccessToken(ks, tokenStr)
+	if err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken, got %v", err)
 	}
 }

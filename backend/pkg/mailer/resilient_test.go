@@ -162,3 +162,40 @@ func TestResilientMailer_SendSecurityAlertReturnsErrorWhenQueueIsFull(t *testing
 		t.Fatal("expected queue full error, got nil")
 	}
 }
+
+func TestResilientMailer_EdgeCases(t *testing.T) {
+	base := &mockBaseMailer{alertFail: true}
+	
+	// 1. BaseDelay is 0
+	rm := NewResilientMailer(base, 1, nil)
+	rm.BaseDelay = 0
+	err := rm.SendSecurityAlert(context.Background(), "user@example.com", "impossible_travel", "1.1.1.1", "US", "details")
+	if err != nil {
+		t.Fatalf("unexpected queue error: %v", err)
+	}
+
+	// 2. MaxRetriesReached with nil auditLogFn
+	rm2 := NewResilientMailer(base, 1, nil)
+	rm2.BaseDelay = time.Millisecond
+	rm2.processJob(AlertJob{
+		To:         "user@example.com",
+		MaxRetries: 1,
+		Attempt:    1,
+	})
+
+	// 3. Retry fallback when queue is full
+	rm3 := NewResilientMailer(base, 1, nil)
+	rm3.BaseDelay = time.Millisecond
+	// Put a job in the queue to block retry
+	rm3.jobs <- AlertJob{To: "blocker@example.com"}
+	
+	rm3.processJob(AlertJob{
+		To:         "user@example.com",
+		MaxRetries: 5,
+		Attempt:    1,
+		BaseDelay:  time.Millisecond,
+	})
+	
+	// Clean up / stop rm3 context to exit any spawned fallback goroutines
+	rm3.Stop()
+}

@@ -39,6 +39,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Feature | Detail |
 |---|---|
 | Ed25519 JWT | EdDSA Curve25519 signed access tokens (1 min TTL) |
+| DPoP (RFC 9449) | Proof-of-Possession binding access tokens to asymmetric client keys |
 | httpOnly Cookies | Access + refresh tokens never exposed to JS |
 | CSRF Protection | Double-submit cookie pattern (`X-CSRF-Token`) |
 | Opaque Refresh Tokens | Stored as SHA-256 hashes in PostgreSQL |
@@ -270,6 +271,12 @@ Designed for secure machine-to-machine integrations:
 - **Credentials**: Created by administrators with fine-grained scopes. The system outputs a unique Client ID and a 32-byte cryptographically secure Client Secret (hashed with bcrypt cost factor 12 before database insertion).
 - **Token Issuance**: Service accounts retrieve access tokens via `/api/v1/auth/token` by utilizing the OAuth 2.0 `client_credentials` grant.
 - **Lifecycle & Enforcement**: Token generation fails immediately if the service account has expired or been marked inactive. The resulting M2M Bearer tokens are restricted strictly to the scopes assigned to the account.
+
+### 6. DPoP (Demonstrating Proof-of-Possession, RFC 9449)
+For machine-to-machine integrations, the backend enforces DPoP:
+- **Proof Validation**: The client signs an ephemeral JWT proof using a private key and includes it in the `DPoP` request header. The server validates this proof's signature, HTTP method (`htm`), and path (`htu`).
+- **Token Binding**: The backend extracts the public key from the proof, computes its thumbprint (JWK JKT, RFC 7638), and binds the issued access token by embedding this thumbprint as a confirmation claim (`cnf.jkt`).
+- **Access Verification**: On protected endpoints, the middleware validates the client's DPoP proof signature and ensures the public key's thumbprint matches the `cnf.jkt` embedded in the access token. This makes the token useless if stolen without the corresponding private key.
 
 ## Development Checks
 

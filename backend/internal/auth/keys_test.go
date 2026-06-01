@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"os"
@@ -83,6 +84,67 @@ func TestLoadKeyFromFileErrors(t *testing.T) {
 	_, err = loadKeyFromFile(bad)
 	if err == nil {
 		t.Fatal("expected error for invalid pem content")
+	}
+}
+
+func TestLoadKeyFromFileNonEd25519(t *testing.T) {
+	tmp := t.TempDir()
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+	if err != nil {
+		t.Fatalf("marshal rsa pkcs8: %v", err)
+	}
+	rsaPath := filepath.Join(tmp, "rsa.pem")
+	writePEMFile(t, rsaPath, "PRIVATE KEY", der)
+
+	_, err = loadKeyFromFile(rsaPath)
+	if err == nil {
+		t.Fatal("expected error for loading non-Ed25519 key, got nil")
+	}
+}
+
+func TestLoadOrGenerateKeyStoreWithFiles(t *testing.T) {
+	tmp := t.TempDir()
+	k1 := mustGenerateEd25519Key(t)
+	k2 := mustGenerateEd25519Key(t)
+
+	der1, _ := x509.MarshalPKCS8PrivateKey(k1)
+	der2, _ := x509.MarshalPKCS8PrivateKey(k2)
+
+	p1 := filepath.Join(tmp, "p1.pem")
+	p2 := filepath.Join(tmp, "p2.pem")
+
+	writePEMFile(t, p1, "PRIVATE KEY", der1)
+	writePEMFile(t, p2, "PRIVATE KEY", der2)
+
+	// 1. Valid primary only
+	ks, err := LoadOrGenerateKeyStore(p1, "")
+	if err != nil {
+		t.Fatalf("failed to load valid primary: %v", err)
+	}
+	if ks.PrimaryKID() == "" {
+		t.Fatal("expected primary kid to be set")
+	}
+
+	// 2. Valid primary and secondary
+	ks, err = LoadOrGenerateKeyStore(p1, p2)
+	if err != nil {
+		t.Fatalf("failed to load valid primary and secondary: %v", err)
+	}
+
+	// 3. Valid primary, invalid secondary (should log warning but succeed)
+	ks, err = LoadOrGenerateKeyStore(p1, "/nonexistent/sec.pem")
+	if err != nil {
+		t.Fatalf("failed to load keystore when secondary is invalid: %v", err)
+	}
+
+	// 4. Invalid primary (should fail)
+	_, err = LoadOrGenerateKeyStore("/nonexistent/primary.pem", "")
+	if err == nil {
+		t.Fatal("expected error for nonexistent primary key file")
 	}
 }
 

@@ -16,6 +16,7 @@ backend/coverage.out
 backend/coverage.tmp.out
 backend/coverage_user.html
 backend/**/c.out
+*.out
 frontend/coverage/
 coverage/
 
