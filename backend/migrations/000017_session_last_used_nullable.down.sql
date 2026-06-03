@@ -1,0 +1,2 @@
+ALTER TABLE sessions ALTER COLUMN last_used_at SET NOT NULL;
+ALTER TABLE sessions ALTER COLUMN last_used_at SET DEFAULT NOW();

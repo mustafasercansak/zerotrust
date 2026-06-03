@@ -48,21 +48,31 @@ func main() {
 		slog.Error("configuration invalid", "error", err)
 		os.Exit(1)
 	}
+
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
-	rootCtx, cancelRoot := context.WithCancel(signalCtx)
+
+	if err := run(signalCtx, cfg); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run contains the full server lifecycle: initialise dependencies, register routes,
+// start the HTTP server, and block until ctx is cancelled or the server fails.
+// Returning an error causes main() to exit with code 1.
+func run(ctx context.Context, cfg config) error {
+	rootCtx, cancelRoot := context.WithCancel(ctx)
 	defer cancelRoot()
 
 	if err := database.RunMigrations(cfg.DatabaseURL, cfg.MigrationsPath); err != nil {
-		slog.Error("migration failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("migration failed: %w", err)
 	}
 	slog.Info("migrations applied")
 
 	dbCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("database parse config failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("database parse config failed: %w", err)
 	}
 	if cfg.DatabaseMaxConns > 0 {
 		dbCfg.MaxConns = int32(cfg.DatabaseMaxConns)
@@ -76,15 +86,13 @@ func main() {
 
 	db, err := pgxpool.NewWithConfig(context.Background(), dbCfg)
 	if err != nil {
-		slog.Error("database connection failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("database connection failed: %w", err)
 	}
 	defer db.Close()
 	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer pingCancel()
 	if err := db.Ping(pingCtx); err != nil {
-		slog.Error("database ping failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("database ping failed: %w", err)
 	}
 	slog.Info("database connection pool initialized",
 		"max_conns", db.Stat().MaxConns(),
@@ -103,8 +111,7 @@ func main() {
 	defer rdb.Close()
 
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		slog.Error("redis connection failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("redis connection failed: %w", err)
 	}
 	slog.Info("redis connection pool initialized",
 		"pool_size", rdb.Options().PoolSize,
@@ -114,8 +121,7 @@ func main() {
 
 	ks, err := auth.LoadOrGenerateKeyStore(cfg.JWTPrivateKeyFile, cfg.JWTSecondaryKeyFile)
 	if err != nil {
-		slog.Error("JWT key load failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("JWT key load failed: %w", err)
 	}
 	slog.Info("all connections and keys ready")
 
@@ -126,8 +132,7 @@ func main() {
 		var sErr error
 		secClient, sErr = secrets.NewClient("db-encryption-key")
 		if sErr != nil {
-			slog.Error("failed to initialize secrets client", "error", sErr)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize secrets client: %w", sErr)
 		}
 		slog.Info("secrets client initialized for application-level encryption")
 		userRepo.SetSecretsClient(secClient)
@@ -138,8 +143,7 @@ func main() {
 
 	if cfg.InitialAdminEmail != "" && cfg.InitialAdminPasswordHash != "" {
 		if err := userSvc.SeedAdmin(context.Background(), cfg.InitialAdminEmail, cfg.InitialAdminPasswordHash); err != nil {
-			slog.Error("admin seed failed", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("admin seed failed: %w", err)
 		}
 		slog.Info("admin seed complete", "email", cfg.InitialAdminEmail)
 	}
@@ -604,7 +608,6 @@ func main() {
 		serverFailed = true
 		slog.Error("server error", "error", err)
 		cancelRoot()
-		stopSignals()
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -623,8 +626,9 @@ func main() {
 		slog.Error("background workers did not stop before timeout")
 	}
 	if serverFailed {
-		os.Exit(1)
+		return fmt.Errorf("server terminated unexpectedly")
 	}
+	return nil
 }
 
 func writeMetrics(w http.ResponseWriter) {

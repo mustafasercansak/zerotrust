@@ -17,21 +17,28 @@ type Location struct {
 	Longitude float64 `json:"longitude"`
 }
 
+// mmdbReader is the subset of *geoip2.Reader used by Service.
+// Extracted as an interface so tests can inject a mock without a real .mmdb file.
+type mmdbReader interface {
+	City(ipAddress net.IP) (*geoip2.City, error)
+	Close() error
+}
+
 // Service performs IP geolocation lookups.
 type Service struct {
 	dbPath string
 	mu     sync.RWMutex
-	db     *geoip2.Reader
+	db     mmdbReader
 }
 
 // mockIPs maps specific test IPs to distinct locations to allow testing and dev without a real database file.
 var mockIPs = map[string]Location{
-	"8.8.8.8":       {Country: "United States", City: "Mountain View", Latitude: 37.386, Longitude: -122.083},
-	"81.2.69.142":   {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
-	"1.1.1.1":       {Country: "Australia", City: "Sydney", Latitude: -33.868, Longitude: 151.209},
-	"100.0.0.1":     {Country: "Japan", City: "Tokyo", Latitude: 35.676, Longitude: 139.65},
-	"100.0.0.2":     {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
-	"100.0.0.3":     {Country: "United States", City: "New York", Latitude: 40.7128, Longitude: -74.006},
+	"8.8.8.8":     {Country: "United States", City: "Mountain View", Latitude: 37.386, Longitude: -122.083},
+	"81.2.69.142": {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
+	"1.1.1.1":     {Country: "Australia", City: "Sydney", Latitude: -33.868, Longitude: 151.209},
+	"100.0.0.1":   {Country: "Japan", City: "Tokyo", Latitude: 35.676, Longitude: 139.65},
+	"100.0.0.2":   {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
+	"100.0.0.3":   {Country: "United States", City: "New York", Latitude: 40.7128, Longitude: -74.006},
 }
 
 // NewService initializes a GeoIP service using the provided path to a MaxMind DB file.
@@ -48,6 +55,11 @@ func NewService(dbPath string) *Service {
 		}
 	}
 	return s
+}
+
+// newServiceWithReader creates a Service with a pre-opened reader. Used in tests.
+func newServiceWithReader(r mmdbReader) *Service {
+	return &Service{db: r}
 }
 
 // Close releases database resources.

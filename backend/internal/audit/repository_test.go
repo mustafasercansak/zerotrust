@@ -182,3 +182,169 @@ func TestRepositoryLogClosedPoolWrapsInsertError(t *testing.T) {
 		t.Fatalf("unexpected context cancellation error: %v", err)
 	}
 }
+
+// mockEncrypter is an in-process encrypter used to test the encrypted metadata path.
+type mockEncrypter struct{}
+
+func (m *mockEncrypter) EncryptData(_ context.Context, plaintext string) (string, error) {
+	return "enc:" + plaintext, nil
+}
+
+func (m *mockEncrypter) DecryptData(_ context.Context, ciphertext string) (string, error) {
+	if len(ciphertext) > 4 && ciphertext[:4] == "enc:" {
+		return ciphertext[4:], nil
+	}
+	return ciphertext, nil
+}
+
+func TestRepository_LogWithGeoIPLocator(t *testing.T) {
+	pool, ctx, repo, _ := setupTestDB(t)
+	defer pool.Close()
+
+	repo.SetIPLocator(func(ip string) (string, string) {
+		if ip == "8.8.8.8" {
+			return "United States", "Mountain View"
+		}
+		return "", ""
+	})
+
+	// IP with known location — location stored in metadata
+	if err := repo.Log(ctx, Entry{
+		Action:    "test.geoip",
+		IPAddress: "8.8.8.8",
+	}); err != nil {
+		t.Fatalf("Log with locator (known IP): %v", err)
+	}
+
+	// IP with no location returned — metadata nil branch (no location added)
+	if err := repo.Log(ctx, Entry{
+		Action:    "test.geoip.unknown",
+		IPAddress: "1.2.3.4",
+	}); err != nil {
+		t.Fatalf("Log with locator (unknown IP): %v", err)
+	}
+
+	// Non-empty existing metadata + locator → location merged
+	if err := repo.Log(ctx, Entry{
+		Action:    "test.geoip.meta",
+		IPAddress: "8.8.8.8",
+		Metadata:  map[string]any{"outcome": "success"},
+	}); err != nil {
+		t.Fatalf("Log with locator + existing metadata: %v", err)
+	}
+
+	res, err := repo.List(ctx, ListParams{Action: "test.geoip", Limit: 10})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if res.Total != 3 {
+		t.Fatalf("expected 3 geoip entries, got %d", res.Total)
+	}
+	// First entry should have location in metadata
+	found := false
+	for _, e := range res.Entries {
+		if loc, ok := e.Metadata["location"].(map[string]any); ok {
+			if loc["country"] == "United States" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected location metadata in at least one entry")
+	}
+}
+
+func TestRepository_LogWithEncryptedMetadata(t *testing.T) {
+	pool, ctx, repo, _ := setupTestDB(t)
+	defer pool.Close()
+
+	repo.SetSecretsClient(&mockEncrypter{})
+
+	// Log with all plaintext-preserved keys
+	if err := repo.Log(ctx, Entry{
+		Action: "test.enc",
+		Metadata: map[string]any{
+			"outcome": "success",
+			"status":  200,
+			"reason":  "ok",
+		},
+	}); err != nil {
+		t.Fatalf("Log with secClient: %v", err)
+	}
+
+	// Log with only sensitive metadata (no outcome/status/location)
+	if err := repo.Log(ctx, Entry{
+		Action: "test.enc.sensitive",
+		Metadata: map[string]any{
+			"reason": "internal",
+		},
+	}); err != nil {
+		t.Fatalf("Log with secClient (sensitive only): %v", err)
+	}
+
+	// Log with GeoIP + encryption
+	repo.SetIPLocator(func(ip string) (string, string) { return "US", "NYC" })
+	if err := repo.Log(ctx, Entry{
+		Action:    "test.enc.geo",
+		IPAddress: "8.8.8.8",
+		Metadata:  map[string]any{"outcome": "failure"},
+	}); err != nil {
+		t.Fatalf("Log with secClient + locator: %v", err)
+	}
+
+	// Read back and verify decryption works
+	res, err := repo.List(ctx, ListParams{Action: "test.enc", Limit: 10})
+	if err != nil {
+		t.Fatalf("List encrypted entries: %v", err)
+	}
+	if res.Total < 2 {
+		t.Fatalf("expected at least 2 encrypted entries, got %d", res.Total)
+	}
+	for _, e := range res.Entries {
+		if _, hasPayload := e.Metadata["payload"]; hasPayload {
+			t.Fatalf("payload key should be decrypted and removed, got %+v", e.Metadata)
+		}
+	}
+}
+
+func TestRepository_ListFilters(t *testing.T) {
+	pool, ctx, repo, userRepo := setupTestDB(t)
+	defer pool.Close()
+
+	uid := seedAuditUser(t, ctx, userRepo, "filter-test@example.com")
+
+	entries := []Entry{
+		{UserID: &uid, Action: "auth.login", Resource: "/api/auth", Metadata: map[string]any{"outcome": "success"}},
+		{UserID: &uid, Action: "auth.logout", Resource: "/api/auth", Metadata: map[string]any{"outcome": "success"}},
+		{Action: "admin.create", Resource: "/api/admin"},
+	}
+	for _, e := range entries {
+		if err := repo.Log(ctx, e); err != nil {
+			t.Fatalf("Log: %v", err)
+		}
+	}
+
+	cases := []struct {
+		name   string
+		params ListParams
+		want   int
+	}{
+		{"action filter", ListParams{Action: "auth", Limit: 10}, 2},
+		{"resource filter", ListParams{Resource: "/api/admin", Limit: 10}, 1},
+		{"user_id filter", ListParams{UserID: uid, Limit: 10}, 2},
+		{"outcome filter", ListParams{Outcome: "success", Limit: 10}, 2},
+		{"combined filters", ListParams{Action: "auth", UserID: uid, Limit: 10}, 2},
+		{"asc sort", ListParams{Limit: 10, SortDir: "asc", SortBy: "action"}, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := repo.List(ctx, tc.params)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if res.Total != tc.want {
+				t.Fatalf("total=%d want=%d", res.Total, tc.want)
+			}
+		})
+	}
+}

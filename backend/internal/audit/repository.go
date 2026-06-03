@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/zerotrust/backend/pkg/secrets"
 )
 
 type Entry struct {
@@ -20,13 +19,20 @@ type Entry struct {
 	Metadata  map[string]any
 }
 
+// encrypter is the subset of secrets.Client used by Repository.
+// *secrets.Client satisfies it directly.
+type encrypter interface {
+	EncryptData(ctx context.Context, plaintext string) (string, error)
+	DecryptData(ctx context.Context, ciphertext string) (string, error)
+}
+
 // IPLocator resolves an IP string to a country and city name.
 // *geoip.Service satisfies this via a thin closure wrapper (see main.go).
 type IPLocator func(ip string) (country, city string)
 
 type Repository struct {
 	db        *pgxpool.Pool
-	secClient *secrets.Client
+	secClient encrypter
 	locator   IPLocator
 }
 
@@ -34,7 +40,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) SetSecretsClient(c *secrets.Client) {
+func (r *Repository) SetSecretsClient(c encrypter) {
 	r.secClient = c
 }
 

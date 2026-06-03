@@ -118,3 +118,19 @@ func TestHandlerTrendsWithMockStoreError(t *testing.T) {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
 	}
 }
+
+func TestRepositorySetters(t *testing.T) {
+	r := &Repository{}
+	r.SetSecretsClient(nil)
+	if r.secClient != nil {
+		t.Fatal("expected secClient to be nil")
+	}
+	r.SetIPLocator(func(ip string) (string, string) { return "US", "New York" })
+	if r.locator == nil {
+		t.Fatal("expected locator to be set")
+	}
+	country, city := r.locator("any")
+	if country != "US" || city != "New York" {
+		t.Fatalf("locator returned %q %q want US New York", country, city)
+	}
+}

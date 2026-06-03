@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -560,5 +561,180 @@ func TestRunSessionCleanupLoopRunsBothTickers(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("cleanup loop did not stop after cancel")
+	}
+}
+
+func TestRun_BadDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://bad:bad@127.0.0.1:19999/bad?sslmode=disable")
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := run(ctx, cfg); err == nil {
+		t.Fatal("expected error from bad database URL, got nil")
+	}
+}
+
+func TestRun_BadRedisAddr(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("REDIS_ADDR", "127.0.0.1:19999")
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("MFA_ENABLED", "false")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := run(ctx, cfg); err == nil {
+		t.Fatal("expected error from bad redis addr, got nil")
+	}
+}
+
+func TestRun_WithMFAAndSMTPAndAdminSeed(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	addr := "127.0.0.1:18766"
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "true")
+	t.Setenv("MFA_ENCRYPTION_KEY", strings.Repeat("ab", 32)) // 64-char hex
+	t.Setenv("REGISTRATION_ENABLED", "false")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+	// Seed admin with a pre-hashed password (bcrypt of "Admin1234!")
+	t.Setenv("INITIAL_ADMIN_EMAIL", "test-run-admin@example.com")
+	t.Setenv("INITIAL_ADMIN_PASSWORD_HASH", "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	client := &http.Client{Timeout: time.Second}
+	var resp *http.Response
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		resp, err = client.Get("http://" + addr + "/health")
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("server did not become ready: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health check status=%d want=200", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+func TestRun_ServerStartsAndResponds(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	// Pick an ephemeral port so multiple test runs don't collide
+	addr := "127.0.0.1:18765"
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	client := &http.Client{Timeout: time.Second}
+	var resp *http.Response
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		resp, err = client.Get("http://" + addr + "/health")
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("server did not become ready: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health check status=%d want=200", resp.StatusCode)
+	}
+
+	metricsResp, err := client.Get("http://" + addr + "/metrics")
+	if err != nil {
+		t.Fatalf("metrics endpoint: %v", err)
+	}
+	defer metricsResp.Body.Close()
+	if metricsResp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status=%d want=200", metricsResp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
 	}
 }
