@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -82,7 +83,7 @@ type tokenRow struct {
 // the user's password hash, and revokes all their sessions in a single
 // transaction. bcrypt hashing must be done by the caller before this call.
 // If any step fails the transaction is rolled back and the token remains valid.
-func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPasswordHash string) error {
+func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword, newPasswordHash string) error {
 	hash := hashToken(rawToken)
 
 	tx, err := r.db.Begin(ctx)
@@ -109,6 +110,19 @@ func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPasswordH
 	}
 	if time.Now().After(row.ExpiresAt) {
 		return ErrExpired
+	}
+
+	// Retrieve user's current password hash to check for reuse
+	var currentPasswordHash string
+	err = tx.QueryRow(ctx, `
+		SELECT password_hash FROM users WHERE id = $1::uuid
+	`, row.UserID).Scan(&currentPasswordHash)
+	if err != nil {
+		return err
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(currentPasswordHash), []byte(newPassword)) == nil {
+		return ErrPasswordReuseForbidden
 	}
 
 	if _, err = tx.Exec(ctx, `

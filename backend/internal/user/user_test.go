@@ -150,7 +150,7 @@ func TestUserServiceIntegration(t *testing.T) {
 	}
 
 	// List by Email filter
-	resEmail, _ := svc.List(ctx, ListParams{Limit: 10, SortBy: "is_active", SortDir: "desc", Email: "test1@"})
+	resEmail, _ := svc.List(ctx, ListParams{Limit: 10, SortBy: "is_active", SortDir: "desc", Email: "test1@example.com"})
 	if resEmail.Total != 1 {
 		t.Fatalf("List returned incorrect count for email filter: %v", resEmail.Total)
 	}

@@ -28,7 +28,7 @@ func (s *stubStore) Create(_ context.Context, userID string) (string, error) {
 	return "raw-token", nil
 }
 
-func (s *stubStore) ConsumeAndReset(_ context.Context, _, _ string) error {
+func (s *stubStore) ConsumeAndReset(_ context.Context, _, _, _ string) error {
 	return s.consumeErr
 }
 
@@ -221,3 +221,12 @@ func TestReset_BcryptError(t *testing.T) {
 		t.Fatal("expected error with password > 72 bytes, got nil")
 	}
 }
+
+func TestReset_PasswordReuseForbidden(t *testing.T) {
+	svc := &Service{repo: &stubStore{consumeErr: ErrPasswordReuseForbidden}}
+	err := svc.Reset(context.Background(), "any-token", "Secret123!")
+	if !errors.Is(err, ErrPasswordReuseForbidden) {
+		t.Fatalf("expected ErrPasswordReuseForbidden error, got %v", err)
+	}
+}
+

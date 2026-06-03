@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/m/projects/zerotrust diff --stat HEAD)",
+      "Bash(git -C /home/m/projects/zerotrust diff HEAD -- backend/internal/auth/handler.go backend/internal/passwdreset/service.go backend/internal/passwdreset/repository.go)",
+      "Bash(git -C /home/m/projects/zerotrust diff HEAD -- frontend/src/locales/en.json frontend/src/locales/tr.json)",
+      "Bash(git -C /home/m/projects/zerotrust diff HEAD -- backend/internal/passwdreset/service_test.go backend/internal/passwdreset/repository_integration_test.go)"
+    ]
+  }
+}

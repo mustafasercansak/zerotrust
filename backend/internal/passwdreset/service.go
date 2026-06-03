@@ -13,11 +13,13 @@ import (
 	"github.com/zerotrust/backend/pkg/mailer"
 )
 
+var ErrPasswordReuseForbidden = errors.New("password_reuse_forbidden")
+
 // store is the persistence interface consumed by Service.
 // *Repository satisfies it; tests may supply a stub.
 type store interface {
 	Create(ctx context.Context, userID string) (string, error)
-	ConsumeAndReset(ctx context.Context, rawToken, newPasswordHash string) error
+	ConsumeAndReset(ctx context.Context, rawToken, newPassword, newPasswordHash string) error
 }
 
 type Service struct {
@@ -64,7 +66,7 @@ func (s *Service) Reset(ctx context.Context, rawToken, newPassword string) error
 		return err
 	}
 
-	if err := s.repo.ConsumeAndReset(ctx, rawToken, string(hash)); err != nil {
+	if err := s.repo.ConsumeAndReset(ctx, rawToken, newPassword, string(hash)); err != nil {
 		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrExpired) || errors.Is(err, ErrUsed) {
 			return errors.New("invalid_token")
 		}

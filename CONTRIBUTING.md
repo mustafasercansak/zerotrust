@@ -55,4 +55,4 @@ Types: `feat`, `fix`, `security`, `refactor`, `docs`, `test`, `chore`.
 
 ## License
 
-By submitting a pull request you agree that your contribution will be licensed under the [GNU Affero General Public License v3.0](LICENSE).
+By submitting a pull request you agree that your contribution will be licensed under the [MIT License](LICENSE).

@@ -62,7 +62,8 @@
       "password_no_special": "Şifre en az bir özel karakter içermelidir (örn. !@#$%).",
       "forbidden": "Bu işlem için yetkiniz yok.",
       "registration_disabled": "Kayıt şu anda devre dışıdır.",
-      "passwords_mismatch": "Şifreler eşleşmiyor."
+      "passwords_mismatch": "Şifreler eşleşmiyor.",
+      "password_reuse_forbidden": "Yeni şifre eski şifrenizle aynı olamaz."
     }
   },
   "nav": {

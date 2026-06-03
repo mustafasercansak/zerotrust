@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zerotrust/backend/internal/audit"
+	"github.com/zerotrust/backend/internal/passwdreset"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/validation"
 )
@@ -463,14 +464,18 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.passwordResetter.Reset(r.Context(), req.Token, req.Password); err != nil {
+		auditErr := "invalid_token"
+		if errors.Is(err, passwdreset.ErrPasswordReuseForbidden) {
+			auditErr = "password_reuse_forbidden"
+		}
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "auth.password_reset_failed",
 			Resource:  "/api/v1/auth/reset-password",
 			IPAddress: r.RemoteAddr,
 			UserAgent: r.Header.Get("User-Agent"),
-			Metadata:  statusMetadata("invalid_token", http.StatusBadRequest),
+			Metadata:  statusMetadata(auditErr, http.StatusBadRequest),
 		}, true)
-		writeError(w, http.StatusBadRequest, "invalid_token")
+		writeError(w, http.StatusBadRequest, auditErr)
 		return
 	}
 	h.logAudit(r.Context(), audit.Entry{

@@ -62,7 +62,8 @@
       "password_no_special": "Password must contain at least one special character (e.g. !@#$%).",
       "forbidden": "You do not have permission to perform this action.",
       "registration_disabled": "Registration is currently disabled.",
-      "passwords_mismatch": "Passwords do not match."
+      "passwords_mismatch": "Passwords do not match.",
+      "password_reuse_forbidden": "New password cannot be the same as your old password."
     }
   },
   "nav": {

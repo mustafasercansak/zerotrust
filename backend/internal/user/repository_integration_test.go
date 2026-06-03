@@ -230,7 +230,7 @@ func TestRepositoryMutationsAndListFilters(t *testing.T) {
 		t.Fatalf("inactive total=%d want=1", resInactive.Total)
 	}
 
-	resEmail, err := repo.List(ctx, ListParams{Limit: 10, Email: "ALPHA@"})
+	resEmail, err := repo.List(ctx, ListParams{Limit: 10, Email: "alpha@example.com"})
 	if err != nil {
 		t.Fatalf("list email filter failed: %v", err)
 	}
