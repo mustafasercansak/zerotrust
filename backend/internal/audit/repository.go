@@ -20,9 +20,14 @@ type Entry struct {
 	Metadata  map[string]any
 }
 
+// IPLocator resolves an IP string to a country and city name.
+// *geoip.Service satisfies this via a thin closure wrapper (see main.go).
+type IPLocator func(ip string) (country, city string)
+
 type Repository struct {
 	db        *pgxpool.Pool
 	secClient *secrets.Client
+	locator   IPLocator
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
@@ -33,17 +38,31 @@ func (r *Repository) SetSecretsClient(c *secrets.Client) {
 	r.secClient = c
 }
 
+func (r *Repository) SetIPLocator(fn IPLocator) {
+	r.locator = fn
+}
+
 func (r *Repository) Log(ctx context.Context, e Entry) error {
+	if r.locator != nil && e.IPAddress != "" {
+		if country, city := r.locator(e.IPAddress); country != "" {
+			if e.Metadata == nil {
+				e.Metadata = map[string]any{}
+			}
+			e.Metadata["location"] = map[string]any{"country": country, "city": city}
+		}
+	}
+
 	var meta []byte
 	if len(e.Metadata) > 0 {
 		var err error
 		if r.secClient != nil {
 			outcome := e.Metadata["outcome"]
 			status := e.Metadata["status"]
+			location := e.Metadata["location"]
 
 			sensitiveMeta := make(map[string]any)
 			for k, v := range e.Metadata {
-				if k != "outcome" && k != "status" {
+				if k != "outcome" && k != "status" && k != "location" {
 					sensitiveMeta[k] = v
 				}
 			}
@@ -66,6 +85,9 @@ func (r *Repository) Log(ctx context.Context, e Entry) error {
 			}
 			if status != nil {
 				dbMeta["status"] = status
+			}
+			if location != nil {
+				dbMeta["location"] = location
 			}
 
 			meta, err = json.Marshal(dbMeta)

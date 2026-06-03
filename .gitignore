@@ -20,10 +20,11 @@ backend/**/c.out
 frontend/coverage/
 coverage/
 
-# ── Next.js ──────────────────────────────────
+# ── Next.js / Vite ───────────────────────────
 frontend/.next/
 frontend/node_modules/
 frontend/*.tsbuildinfo
+frontend/dist/
 
 # ── OS ───────────────────────────────────────
 .DS_Store

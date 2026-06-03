@@ -68,6 +68,42 @@ func withRouteID(r *http.Request, id string) *http.Request {
 	return r.WithContext(ctx)
 }
 
+func TestRevoke_RequiresAuth(t *testing.T) {
+	h := NewHandler(&fakeStore{}, NewEventHub())
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req = withRouteID(req, "s1")
+	rr := httptest.NewRecorder()
+	h.Revoke(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusUnauthorized, rr.Body.String())
+	}
+}
+
+func TestRevoke_EmptyID(t *testing.T) {
+	h := NewHandler(&fakeStore{}, NewEventHub())
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/", nil)
+	req = withClaims(req, "u1")
+	// no chi route param → chi.URLParam returns ""
+	rr := httptest.NewRecorder()
+	h.Revoke(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestRevoke_StoreError(t *testing.T) {
+	store := &fakeStore{revokeByIDErr: errors.New("db down")}
+	h := NewHandler(store, NewEventHub())
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req = withClaims(req, "u1")
+	req = withRouteID(req, "s1")
+	rr := httptest.NewRecorder()
+	h.Revoke(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+	}
+}
+
 func TestRevoke_ByID_Success(t *testing.T) {
 	store := &fakeStore{}
 	h := NewHandler(store, NewEventHub())

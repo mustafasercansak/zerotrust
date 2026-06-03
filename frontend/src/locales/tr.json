@@ -180,6 +180,8 @@
     "tabFailures": "Hatalar",
     "tabAuth": "Kimlik İstekleri",
     "action": "Eylem",
+    "outcome": "Sonuç",
+    "details": "Detaylar",
     "user": "Kullanıcı ID",
     "ip": "IP Adresi",
     "client": "İstemci",

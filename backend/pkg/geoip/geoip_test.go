@@ -56,3 +56,26 @@ func TestGeoIP_InvalidDB(t *testing.T) {
 		t.Error("expected db to be nil for nonexistent file")
 	}
 }
+
+func TestGeoIP_PrivateIP(t *testing.T) {
+	s := NewService("")
+	defer s.Close()
+
+	loc, err := s.Lookup("192.168.1.1")
+	if err != nil {
+		t.Fatalf("Lookup(private) failed: %v", err)
+	}
+	if loc.Country != "Localhost" || loc.City != "Local" {
+		t.Fatalf("country=%q city=%q want Localhost/Local", loc.Country, loc.City)
+	}
+}
+
+func TestGeoIP_CloseNilDB(t *testing.T) {
+	s := NewService("")
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close with nil db returned error: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close returned error: %v", err)
+	}
+}

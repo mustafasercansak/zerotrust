@@ -93,6 +93,10 @@ export interface AuditEntry {
   ip_address: string | null;
   user_agent: string | null;
   metadata: {
+    outcome?: string;
+    status?: number;
+    reason?: string;
+    location?: { country?: string; city?: string };
     client_info?: {
       architecture?: string;
       browser?: string;
@@ -101,6 +105,7 @@ export interface AuditEntry {
       os?: string;
       os_version?: string;
     };
+    [key: string]: unknown;
   } | null;
   created_at: string;
 }

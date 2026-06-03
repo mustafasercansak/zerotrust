@@ -48,6 +48,19 @@ func TestCacheGetIntReturnsDefaultOnParseOrRepoError(t *testing.T) {
 	}
 }
 
+func TestCacheGetStringReturnsCachedValue(t *testing.T) {
+	store := &fakeCacheStore{values: map[string]string{"key": "val"}}
+	cache := NewCache(store)
+	cache.GetString(context.Background(), "key", "default") // populate cache
+	got := cache.GetString(context.Background(), "key", "default")
+	if got != "val" {
+		t.Fatalf("GetString cached=%q want=val", got)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store calls=%d want=1 (second call must use cache)", len(store.calls))
+	}
+}
+
 func TestCacheGetStringCachesAndRefreshesExpiredValue(t *testing.T) {
 	store := &fakeCacheStore{values: map[string]string{"password_complexity": "strong"}}
 	cache := NewCache(store)
@@ -76,6 +89,19 @@ func TestCacheGetStringReturnsDefaultOnRepoError(t *testing.T) {
 	}
 }
 
+func TestCacheGetIntCachedNonIntegerReturnsDefault(t *testing.T) {
+	store := &fakeCacheStore{values: map[string]string{"key": "nope"}}
+	cache := NewCache(store)
+	cache.GetInt(context.Background(), "key", 7) // populates cache with "nope"
+	got := cache.GetInt(context.Background(), "key", 7)
+	if got != 7 {
+		t.Fatalf("GetInt with cached non-int=%d want=7", got)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store calls=%d want=1 (second call must use cache)", len(store.calls))
+	}
+}
+
 func TestCacheGetBoolCachesAndFallsBackToDefault(t *testing.T) {
 	store := &fakeCacheStore{values: map[string]string{"global_mfa_required": "true", "bad": "not-bool"}}
 	cache := NewCache(store)
@@ -97,5 +123,18 @@ func TestCacheGetBoolCachesAndFallsBackToDefault(t *testing.T) {
 	cache = NewCache(&fakeCacheStore{err: errors.New("boom")})
 	if got := cache.GetBool(context.Background(), "global_mfa_required", true); !got {
 		t.Fatal("GetBool repo error should return default true")
+	}
+}
+
+func TestCacheGetBoolCachedNonBoolReturnsDefault(t *testing.T) {
+	store := &fakeCacheStore{values: map[string]string{"key": "nope"}}
+	cache := NewCache(store)
+	cache.GetBool(context.Background(), "key", true) // populates cache with "nope"
+	got := cache.GetBool(context.Background(), "key", true)
+	if !got {
+		t.Fatal("GetBool with cached non-bool should return default true")
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store calls=%d want=1 (second call must use cache)", len(store.calls))
 	}
 }

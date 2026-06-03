@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/zerotrust/backend/internal/auth"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
@@ -154,6 +157,155 @@ func TestMFAHandlerStepUpGuards(t *testing.T) {
 		h.StepUp(rr, req)
 		if rr.Code != http.StatusServiceUnavailable {
 			t.Fatalf("status=%d want=%d", rr.Code, http.StatusServiceUnavailable)
+		}
+	})
+}
+
+func TestMFAHandlerVerify_AuthAndSuccess(t *testing.T) {
+	t.Run("unauthorized", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"123456"}`))
+		rr := httptest.NewRecorder()
+		h.Verify(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"123456"}`)))
+		rr := httptest.NewRecorder()
+		h.Verify(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+		}
+	})
+}
+
+func TestMFAHandlerDisable_AllPaths(t *testing.T) {
+	t.Run("unauthorized", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/mfa/disable", bytes.NewBufferString(`{"code":"123456"}`))
+		rr := httptest.NewRecorder()
+		h.Disable(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/disable", bytes.NewBufferString("{bad")))
+		rr := httptest.NewRecorder()
+		h.Disable(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("empty code", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/disable", bytes.NewBufferString(`{"code":""}`)))
+		rr := httptest.NewRecorder()
+		h.Disable(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/disable", bytes.NewBufferString(`{"code":"123456"}`)))
+		rr := httptest.NewRecorder()
+		h.Disable(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+		}
+	})
+}
+
+func TestMFAHandlerStatus_Unauthorized(t *testing.T) {
+	h := NewHandler(&mockMFAService{}, nil, 0)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mfa/status", nil)
+	rr := httptest.NewRecorder()
+	h.Status(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestMFAHandlerSetup_CurrentCodeRequired(t *testing.T) {
+	h := NewHandler(&mockMFAService{setupErr: errors.New("current_code_required")}, nil, 0)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/setup", bytes.NewBufferString(`{}`)))
+	rr := httptest.NewRecorder()
+	h.Setup(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestMFAHandlerSetup_InternalError(t *testing.T) {
+	h := NewHandler(&mockMFAService{setupErr: errors.New("database down")}, nil, 0)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/setup", bytes.NewBufferString(`{}`)))
+	rr := httptest.NewRecorder()
+	h.Setup(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestMFAHandlerStepUp_ExtendedPaths(t *testing.T) {
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:9999"})
+
+	t.Run("bad json", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, rdb, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString("{bad")))
+		rr := httptest.NewRecorder()
+		h.StepUp(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("empty code", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, rdb, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString(`{"code":""}`)))
+		rr := httptest.NewRecorder()
+		h.StepUp(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("invalid code", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{validateOK: false}, rdb, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString(`{"code":"000000"}`)))
+		rr := httptest.NewRecorder()
+		h.StepUp(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("no refresh cookie", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{validateOK: true}, rdb, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString(`{"code":"123456"}`)))
+		rr := httptest.NewRecorder()
+		h.StepUp(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("redis error returns 500", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{validateOK: true}, rdb, time.Minute)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString(`{"code":"123456"}`)))
+		req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "some-token"})
+		rr := httptest.NewRecorder()
+		h.StepUp(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
 		}
 	})
 }

@@ -183,6 +183,21 @@ export default function AuditPage() {
 
   const columns = useMemo<GridColDef<AuditEntry>[]>(() => [
     {
+      field: "outcome", headerName: t("outcome"), width: 110, sortable: false,
+      renderCell: ({ row }) => {
+        const outcome = row.metadata?.outcome;
+        if (!outcome) return null;
+        return (
+          <Chip
+            size="small"
+            label={outcome === "success" ? t("success") : t("failure")}
+            color={outcome === "success" ? "success" : "error"}
+            variant="outlined"
+          />
+        );
+      },
+    },
+    {
       field: "action", headerName: t("action"), minWidth: 180, flex: 1,
       renderCell: ({ row }) => (
         <Typography variant="caption" color="primary" sx={{ fontFamily: "monospace" }}>{row.action}</Typography>
@@ -193,6 +208,32 @@ export default function AuditPage() {
       renderCell: ({ row }) => (
         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>{row.resource}</Typography>
       ),
+    },
+    {
+      field: "details", headerName: t("details"), minWidth: 160, flex: 0.8, sortable: false,
+      renderCell: ({ row }) => {
+        const status = row.metadata?.status;
+        const reason = row.metadata?.reason;
+        if (!status && !reason) return null;
+        return (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+            {status != null && (
+              <Chip
+                size="small"
+                label={String(status)}
+                variant="outlined"
+                color={status >= 400 ? "warning" : "default"}
+                sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+              />
+            )}
+            {reason && (
+              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                {reason}
+              </Typography>
+            )}
+          </Box>
+        );
+      },
     },
     {
       field: "user_id", headerName: t("user"), minWidth: 240, flex: 1.2,
@@ -211,10 +252,23 @@ export default function AuditPage() {
         ),
     },
     {
-      field: "ip_address", headerName: t("ip"), minWidth: 140, flex: 0.7,
-      renderCell: ({ row }) => (
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>{row.ip_address ?? "—"}</Typography>
-      ),
+      field: "ip_address", headerName: t("ip"), minWidth: 160, flex: 0.8,
+      renderCell: ({ row }) => {
+        const loc = row.metadata?.location;
+        const place = [loc?.city, loc?.country].filter(Boolean).join(", ");
+        return (
+          <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", py: 0.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", lineHeight: 1.4 }}>
+              {row.ip_address ?? "—"}
+            </Typography>
+            {place && (
+              <Typography variant="caption" color="text.disabled" sx={{ lineHeight: 1.2 }}>
+                {place}
+              </Typography>
+            )}
+          </Box>
+        );
+      },
     },
     {
       field: "user_agent", headerName: t("client"), minWidth: 210, flex: 0.9, sortable: false,
@@ -253,6 +307,7 @@ export default function AuditPage() {
           emptyMessage={t("noEntries")}
           pageSizeOptions={[10, 25, 50]}
           defaultPageSize={25}
+          rowHeight={64}
         />
       </Box>
     </Box>

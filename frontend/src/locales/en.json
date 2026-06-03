@@ -180,6 +180,8 @@
     "tabFailures": "Failures",
     "tabAuth": "Auth Requests",
     "action": "Action",
+    "outcome": "Outcome",
+    "details": "Details",
     "user": "User ID",
     "ip": "IP Address",
     "client": "Client",

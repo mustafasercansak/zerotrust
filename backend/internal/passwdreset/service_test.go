@@ -230,3 +230,17 @@ func TestReset_PasswordReuseForbidden(t *testing.T) {
 	}
 }
 
+func TestHashToken_Deterministic(t *testing.T) {
+	h1 := hashToken("test-token-abc")
+	h2 := hashToken("test-token-abc")
+	if h1 != h2 {
+		t.Fatal("hashToken should be deterministic")
+	}
+	if len(h1) != 64 {
+		t.Fatalf("hash length=%d want=64 (SHA-256 hex)", len(h1))
+	}
+	if hashToken("a") == hashToken("b") {
+		t.Fatal("different inputs must produce different hashes")
+	}
+}
+

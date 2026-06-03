@@ -260,6 +260,13 @@ func main() {
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
 	authSvc.ConfigureSecurityAnomalies(geoipSvc, resilientMailer)
+	auditRepo.SetIPLocator(func(ip string) (string, string) {
+		loc, err := geoipSvc.Lookup(ip)
+		if err != nil || loc == nil {
+			return "", ""
+		}
+		return loc.Country, loc.City
+	})
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
