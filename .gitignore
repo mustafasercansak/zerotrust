@@ -33,6 +33,10 @@ desktop.ini
 # ── IDE ──────────────────────────────────────
 .vscode/
 .idea/
+
+# ── Tool config dot-directories — never commit ──
+.*/
+!.github/
 *.swp
 *.swo
 *.swn
