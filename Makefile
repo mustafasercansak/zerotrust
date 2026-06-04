@@ -1,5 +1,13 @@
 .PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean
 
+TEST_DB_DOCKER_IMAGE ?= postgres:16-alpine
+TEST_DB_CONTAINER ?= zerotrust-test-db
+TEST_DB_PORT ?= 55432
+TEST_DB_NAME ?= zerotrust_test
+TEST_DB_USER ?= postgres
+TEST_DB_PASSWORD ?= postgres
+BACKEND_COVERAGE_MIN ?= 90.0
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
@@ -35,10 +43,63 @@ test: ## Run backend tests (set TEST_DATABASE_URL to include DB integration test
 	cd backend && go test -p 1 ./...
 
 test-cover: ## Run backend tests and display coverage (set TEST_DATABASE_URL to include DB integration tests)
-	@if [ -z "$$TEST_DATABASE_URL" ]; then echo "Note: TEST_DATABASE_URL is not set; DB-backed integration tests may be skipped, which can lower reported coverage."; fi
-	cd backend && \
-	go test -p 1 -coverprofile=coverage.out ./... && \
-	go tool cover -func=coverage.out
+	@set -e; \
+	if [ -n "$$TEST_DATABASE_URL" ]; then \
+		echo "Using TEST_DATABASE_URL from environment."; \
+		cd backend && go test -p 1 -coverprofile=coverage.out ./... && go tool cover -func=coverage.out; \
+		backend_total=$$(go tool cover -func=coverage.out | awk '/^total:/{v=$$3; gsub("%", "", v); print v}'); \
+		if awk "BEGIN {exit !($$backend_total >= $(BACKEND_COVERAGE_MIN))}"; then \
+			echo "Backend coverage $$backend_total% meets minimum $(BACKEND_COVERAGE_MIN)%."; \
+		else \
+			echo "Backend coverage $$backend_total% is below minimum $(BACKEND_COVERAGE_MIN)%."; \
+			exit 1; \
+		fi; \
+	elif command -v docker >/dev/null 2>&1; then \
+		echo "TEST_DATABASE_URL is not set; starting temporary Postgres for integration coverage."; \
+		docker rm -f $(TEST_DB_CONTAINER) >/dev/null 2>&1 || true; \
+		db_port=$(TEST_DB_PORT); \
+		started=0; \
+		while [ $$db_port -lt $$(( $(TEST_DB_PORT) + 20 )) ]; do \
+			if docker run -d --name $(TEST_DB_CONTAINER) \
+				-e POSTGRES_USER=$(TEST_DB_USER) \
+				-e POSTGRES_PASSWORD=$(TEST_DB_PASSWORD) \
+				-e POSTGRES_DB=$(TEST_DB_NAME) \
+				-p $$db_port:5432 \
+				$(TEST_DB_DOCKER_IMAGE) >/dev/null 2>&1; then \
+				started=1; \
+				break; \
+			fi; \
+			db_port=$$((db_port + 1)); \
+		done; \
+		if [ $$started -ne 1 ]; then \
+			echo "Could not start temporary Postgres on ports $(TEST_DB_PORT)-$$(( $(TEST_DB_PORT) + 19 ))."; \
+			exit 1; \
+		fi; \
+		echo "Temporary Postgres is running on host port $$db_port."; \
+		trap 'docker rm -f $(TEST_DB_CONTAINER) >/dev/null 2>&1 || true' EXIT; \
+		i=0; \
+		until docker exec $(TEST_DB_CONTAINER) pg_isready -U $(TEST_DB_USER) -d $(TEST_DB_NAME) >/dev/null 2>&1; do \
+			i=$$((i + 1)); \
+			if [ $$i -ge 40 ]; then \
+				echo "Temporary Postgres did not become ready in time."; \
+				exit 1; \
+			fi; \
+			sleep 1; \
+		done; \
+		TEST_DATABASE_URL="postgres://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@127.0.0.1:$$db_port/$(TEST_DB_NAME)?sslmode=disable"; \
+		export TEST_DATABASE_URL; \
+		cd backend && go test -p 1 -coverprofile=coverage.out ./... && go tool cover -func=coverage.out; \
+		backend_total=$$(go tool cover -func=coverage.out | awk '/^total:/{v=$$3; gsub("%", "", v); print v}'); \
+		if awk "BEGIN {exit !($$backend_total >= $(BACKEND_COVERAGE_MIN))}"; then \
+			echo "Backend coverage $$backend_total% meets minimum $(BACKEND_COVERAGE_MIN)%."; \
+		else \
+			echo "Backend coverage $$backend_total% is below minimum $(BACKEND_COVERAGE_MIN)%."; \
+			exit 1; \
+		fi; \
+	else \
+		echo "TEST_DATABASE_URL is not set and docker is unavailable; DB integration tests will be skipped."; \
+		exit 1; \
+	fi
 
 test-front: ## Run frontend tests
 	cd frontend && npm run test

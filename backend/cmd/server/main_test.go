@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -727,6 +733,618 @@ func TestRun_ServerStartsAndResponds(t *testing.T) {
 	if metricsResp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status=%d want=200", metricsResp.StatusCode)
 	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+func TestMain_ExitsOnInvalidConfig(t *testing.T) {
+	if os.Getenv("ZT_MAIN_HELPER") == "1" {
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_ExitsOnInvalidConfig")
+	cmd.Env = append(os.Environ(),
+		"ZT_MAIN_HELPER=1",
+		"MFA_ENABLED=not-bool",
+	)
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected process exit error, got %v", err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("exit code=%d want=1", exitErr.ExitCode())
+	}
+}
+
+func TestMain_ExitsWhenRunFails(t *testing.T) {
+	if os.Getenv("ZT_MAIN_HELPER") == "1" {
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_ExitsWhenRunFails")
+	cmd.Env = append(os.Environ(),
+		"ZT_MAIN_HELPER=1",
+		"MFA_ENABLED=false",
+		"DATABASE_URL=postgres://bad:bad@127.0.0.1:19999/bad?sslmode=disable",
+		"MIGRATIONS_PATH=../../migrations",
+		"REDIS_ADDR=127.0.0.1:6379",
+	)
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected process exit error, got %v", err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("exit code=%d want=1", exitErr.ExitCode())
+	}
+}
+
+func TestRun_AuthenticatedMeRoutes(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	addr := "127.0.0.1:18767"
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	base := "http://" + addr
+	for i := 0; i < 50; i++ {
+		resp, reqErr := client.Get(base + "/health")
+		if reqErr == nil {
+			resp.Body.Close()
+			break
+		}
+		if i == 49 {
+			t.Fatalf("server did not become ready: %v", reqErr)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	registerBody := map[string]any{
+		"email":    "me-routes@example.com",
+		"password": "StrongPassword123!",
+		"locale":   "en",
+	}
+	regPayload, _ := json.Marshal(registerBody)
+	regResp, err := client.Post(base+"/api/v1/auth/register", "application/json", bytes.NewReader(regPayload))
+	if err != nil {
+		t.Fatalf("register request failed: %v", err)
+	}
+	regResp.Body.Close()
+	if regResp.StatusCode != http.StatusCreated {
+		t.Fatalf("register status=%d want=%d", regResp.StatusCode, http.StatusCreated)
+	}
+
+	loginBody := map[string]any{
+		"email":    "me-routes@example.com",
+		"password": "StrongPassword123!",
+	}
+	loginPayload, _ := json.Marshal(loginBody)
+	loginResp, err := client.Post(base+"/api/v1/auth/login", "application/json", bytes.NewReader(loginPayload))
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("login status=%d want=%d", loginResp.StatusCode, http.StatusOK)
+	}
+
+	var accessToken string
+	for _, c := range loginResp.Cookies() {
+		if c.Name == "access_token" {
+			accessToken = c.Value
+			break
+		}
+	}
+	if accessToken == "" {
+		t.Fatal("missing access_token cookie after login")
+	}
+
+	newAuthedRequest := func(method, path, body string) *http.Request {
+		req, reqErr := http.NewRequest(method, base+path, strings.NewReader(body))
+		if reqErr != nil {
+			t.Fatalf("new request %s %s: %v", method, path, reqErr)
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+	meResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me", ""))
+	if err != nil {
+		t.Fatalf("GET /me failed: %v", err)
+	}
+	var mePayload map[string]any
+	if err := json.NewDecoder(meResp.Body).Decode(&mePayload); err != nil {
+		meResp.Body.Close()
+		t.Fatalf("decode /me payload failed: %v", err)
+	}
+	meResp.Body.Close()
+	if meResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /me status=%d want=%d", meResp.StatusCode, http.StatusOK)
+	}
+	userID, _ := mePayload["user_id"].(string)
+	if userID == "" {
+		t.Fatal("GET /me returned empty user_id")
+	}
+
+	jwksResp, err := client.Get(base + "/.well-known/jwks.json")
+	if err != nil {
+		t.Fatalf("GET /.well-known/jwks.json failed: %v", err)
+	}
+	jwksResp.Body.Close()
+	if jwksResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /.well-known/jwks.json status=%d want=%d", jwksResp.StatusCode, http.StatusOK)
+	}
+
+	profileReq := newAuthedRequest(http.MethodPatch, "/api/v1/me/profile", `{"first_name":"Jane","last_name":"Doe"}`)
+	profileResp, err := client.Do(profileReq)
+	if err != nil {
+		t.Fatalf("PATCH /me/profile failed: %v", err)
+	}
+	profileResp.Body.Close()
+	if profileResp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH /me/profile status=%d want=%d", profileResp.StatusCode, http.StatusOK)
+	}
+
+	localeBadReq := newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"de"}`)
+	localeBadResp, err := client.Do(localeBadReq)
+	if err != nil {
+		t.Fatalf("PATCH /me/locale invalid failed: %v", err)
+	}
+	localeBadResp.Body.Close()
+	if localeBadResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PATCH /me/locale invalid status=%d want=%d", localeBadResp.StatusCode, http.StatusBadRequest)
+	}
+
+	localeReq := newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"tr"}`)
+	localeResp, err := client.Do(localeReq)
+	if err != nil {
+		t.Fatalf("PATCH /me/locale failed: %v", err)
+	}
+	localeResp.Body.Close()
+	if localeResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/locale status=%d want=%d", localeResp.StatusCode, http.StatusNoContent)
+	}
+
+	mfaResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/mfa/status", ""))
+	if err != nil {
+		t.Fatalf("GET /mfa/status failed: %v", err)
+	}
+	mfaResp.Body.Close()
+	if mfaResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /mfa/status status=%d want=%d", mfaResp.StatusCode, http.StatusOK)
+	}
+
+	mfaChallengeResp, err := client.Post(base+"/api/v1/auth/mfa/challenge", "application/json", strings.NewReader(`{"mfa_token":"","totp_code":""}`))
+	if err != nil {
+		t.Fatalf("POST /auth/mfa/challenge failed: %v", err)
+	}
+	mfaChallengeResp.Body.Close()
+	if mfaChallengeResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /auth/mfa/challenge status=%d want=%d", mfaChallengeResp.StatusCode, http.StatusBadRequest)
+	}
+
+	tokenUnsupportedResp, err := client.Post(base+"/api/v1/auth/token", "application/json", strings.NewReader(`{"grant_type":"password"}`))
+	if err != nil {
+		t.Fatalf("POST /auth/token unsupported grant failed: %v", err)
+	}
+	tokenUnsupportedResp.Body.Close()
+	if tokenUnsupportedResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /auth/token unsupported grant status=%d want=%d", tokenUnsupportedResp.StatusCode, http.StatusBadRequest)
+	}
+
+	tokenMissingFieldsResp, err := client.Post(base+"/api/v1/auth/token", "application/json", strings.NewReader(`{"grant_type":"client_credentials"}`))
+	if err != nil {
+		t.Fatalf("POST /auth/token missing fields failed: %v", err)
+	}
+	tokenMissingFieldsResp.Body.Close()
+	if tokenMissingFieldsResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /auth/token missing fields status=%d want=%d", tokenMissingFieldsResp.StatusCode, http.StatusBadRequest)
+	}
+
+	refreshResp, err := client.Post(base+"/api/v1/auth/refresh", "application/json", strings.NewReader(`{"client_info":{"ua":"test"}}`))
+	if err != nil {
+		t.Fatalf("POST /auth/refresh failed: %v", err)
+	}
+	refreshResp.Body.Close()
+	if refreshResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /auth/refresh status=%d want=%d", refreshResp.StatusCode, http.StatusBadRequest)
+	}
+
+	forgotResp, err := client.Post(base+"/api/v1/auth/forgot-password", "application/json", strings.NewReader(`{"email":"me-routes@example.com"}`))
+	if err != nil {
+		t.Fatalf("POST /auth/forgot-password failed: %v", err)
+	}
+	forgotResp.Body.Close()
+	if forgotResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /auth/forgot-password status=%d want=%d", forgotResp.StatusCode, http.StatusOK)
+	}
+
+	resetMissingResp, err := client.Post(base+"/api/v1/auth/reset-password", "application/json", strings.NewReader(`{"token":"","password":"StrongPassword123!"}`))
+	if err != nil {
+		t.Fatalf("POST /auth/reset-password missing token failed: %v", err)
+	}
+	resetMissingResp.Body.Close()
+	if resetMissingResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /auth/reset-password missing token status=%d want=%d", resetMissingResp.StatusCode, http.StatusBadRequest)
+	}
+
+	logoutResp, err := client.Post(base+"/api/v1/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /auth/logout failed: %v", err)
+	}
+	logoutResp.Body.Close()
+	if logoutResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST /auth/logout status=%d want=%d", logoutResp.StatusCode, http.StatusNoContent)
+	}
+
+	var avatarBuf bytes.Buffer
+	writer := multipart.NewWriter(&avatarBuf)
+	part, err := writer.CreateFormFile("avatar", "avatar.txt")
+	if err != nil {
+		t.Fatalf("CreateFormFile failed: %v", err)
+	}
+	if _, err := part.Write([]byte("not-an-image")); err != nil {
+		t.Fatalf("write multipart body failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+
+	avatarReq, err := http.NewRequest(http.MethodPost, base+"/api/v1/me/avatar", &avatarBuf)
+	if err != nil {
+		t.Fatalf("new avatar request failed: %v", err)
+	}
+	avatarReq.Header.Set("Authorization", "Bearer "+accessToken)
+	avatarReq.Header.Set("Content-Type", writer.FormDataContentType())
+	avatarResp, err := client.Do(avatarReq)
+	if err != nil {
+		t.Fatalf("POST /me/avatar failed: %v", err)
+	}
+	avatarResp.Body.Close()
+	if avatarResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST /me/avatar status=%d want=%d", avatarResp.StatusCode, http.StatusBadRequest)
+	}
+
+	myAvatarResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me/avatar", ""))
+	if err != nil {
+		t.Fatalf("GET /me/avatar failed: %v", err)
+	}
+	myAvatarResp.Body.Close()
+	if myAvatarResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /me/avatar status=%d want=%d", myAvatarResp.StatusCode, http.StatusNotFound)
+	}
+
+	userAvatarResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/users/"+userID+"/avatar", ""))
+	if err != nil {
+		t.Fatalf("GET /users/{id}/avatar failed: %v", err)
+	}
+	userAvatarResp.Body.Close()
+	if userAvatarResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /users/{id}/avatar status=%d want=%d", userAvatarResp.StatusCode, http.StatusNotFound)
+	}
+
+	deleteAvatarReq := newAuthedRequest(http.MethodDelete, "/api/v1/me/avatar", "")
+	deleteAvatarResp, err := client.Do(deleteAvatarReq)
+	if err != nil {
+		t.Fatalf("DELETE /me/avatar failed: %v", err)
+	}
+	deleteAvatarResp.Body.Close()
+	if deleteAvatarResp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /me/avatar status=%d want=%d", deleteAvatarResp.StatusCode, http.StatusOK)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+func TestRun_ServerListenFailureReturnsError(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:18769")
+	if err != nil {
+		t.Fatalf("pre-bind listener failed: %v", err)
+	}
+	defer ln.Close()
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", "127.0.0.1:18769")
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = run(ctx, cfg)
+	if err == nil {
+		t.Fatal("expected run to fail when listen address is already in use")
+	}
+}
+
+func TestRun_InvalidBaoAddrFailsSecretsClientInit(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", "127.0.0.1:18770")
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+	t.Setenv("BAO_ADDR", "://bad-url")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = run(ctx, cfg)
+	if err == nil {
+		t.Fatal("expected run to fail when BAO_ADDR is invalid")
+	}
+	if !strings.Contains(err.Error(), "failed to initialize secrets client") {
+		t.Fatalf("error=%q does not contain expected secrets init failure", err.Error())
+	}
+}
+
+func TestRun_RefreshAndAvatarSuccessPaths(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	addr := "127.0.0.1:18771"
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	t.Setenv("REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	base := "http://" + addr
+	for i := 0; i < 50; i++ {
+		resp, reqErr := client.Get(base + "/health")
+		if reqErr == nil {
+			resp.Body.Close()
+			break
+		}
+		if i == 49 {
+			t.Fatalf("server did not become ready: %v", reqErr)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	registerResp, err := client.Post(base+"/api/v1/auth/register", "application/json", strings.NewReader(`{"email":"avatar-flow@example.com","password":"StrongPassword123!","locale":"en"}`))
+	if err != nil {
+		t.Fatalf("register request failed: %v", err)
+	}
+	if registerResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(registerResp.Body)
+		registerResp.Body.Close()
+		t.Fatalf("register status=%d want=%d body=%s", registerResp.StatusCode, http.StatusCreated, string(body))
+	}
+	registerResp.Body.Close()
+
+	loginResp, err := client.Post(base+"/api/v1/auth/login", "application/json", strings.NewReader(`{"email":"avatar-flow@example.com","password":"StrongPassword123!"}`))
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	if loginResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(loginResp.Body)
+		loginResp.Body.Close()
+		t.Fatalf("login status=%d want=%d body=%s", loginResp.StatusCode, http.StatusOK, string(body))
+	}
+	loginResp.Body.Close()
+
+	var accessToken, refreshToken, csrfToken string
+	for _, c := range loginResp.Cookies() {
+		switch c.Name {
+		case "access_token":
+			accessToken = c.Value
+		case "refresh_token":
+			refreshToken = c.Value
+		case "csrf_token":
+			csrfToken = c.Value
+		}
+	}
+	if accessToken == "" || refreshToken == "" || csrfToken == "" {
+		t.Fatal("expected access_token, refresh_token and csrf_token cookies from login")
+	}
+
+	refreshReq, err := http.NewRequest(http.MethodPost, base+"/api/v1/auth/refresh", strings.NewReader(`{"client_info":{"browser":"itest"}}`))
+	if err != nil {
+		t.Fatalf("new refresh request: %v", err)
+	}
+	refreshReq.Header.Set("Content-Type", "application/json")
+	refreshReq.Header.Set("X-CSRF-Token", csrfToken)
+	refreshReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
+	refreshReq.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrfToken})
+	refreshResp, err := client.Do(refreshReq)
+	if err != nil {
+		t.Fatalf("refresh request failed: %v", err)
+	}
+	if refreshResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(refreshResp.Body)
+		refreshResp.Body.Close()
+		t.Fatalf("refresh status=%d want=%d body=%s", refreshResp.StatusCode, http.StatusOK, string(body))
+	}
+	refreshResp.Body.Close()
+
+	authedReq := func(method, path string, body io.Reader) *http.Request {
+		req, reqErr := http.NewRequest(method, base+path, body)
+		if reqErr != nil {
+			t.Fatalf("new request %s %s: %v", method, path, reqErr)
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		return req
+	}
+
+	meReq := authedReq(http.MethodGet, "/api/v1/me", nil)
+	meResp, err := client.Do(meReq)
+	if err != nil {
+		t.Fatalf("GET /me failed: %v", err)
+	}
+	if meResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(meResp.Body)
+		meResp.Body.Close()
+		t.Fatalf("GET /me status=%d want=%d body=%s", meResp.StatusCode, http.StatusOK, string(body))
+	}
+	var mePayload map[string]any
+	if err := json.NewDecoder(meResp.Body).Decode(&mePayload); err != nil {
+		meResp.Body.Close()
+		t.Fatalf("decode /me payload failed: %v", err)
+	}
+	meResp.Body.Close()
+	userID, _ := mePayload["user_id"].(string)
+	if userID == "" {
+		t.Fatal("missing user_id in /me payload")
+	}
+
+	var avatarBuf bytes.Buffer
+	writer := multipart.NewWriter(&avatarBuf)
+	part, err := writer.CreateFormFile("avatar", "avatar.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile failed: %v", err)
+	}
+	// 1x1 PNG
+	pngData := []byte{137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 8, 153, 99, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130}
+	if _, err := part.Write(pngData); err != nil {
+		t.Fatalf("write png data failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+
+	uploadReq := authedReq(http.MethodPost, "/api/v1/me/avatar", &avatarBuf)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadResp, err := client.Do(uploadReq)
+	if err != nil {
+		t.Fatalf("POST /me/avatar failed: %v", err)
+	}
+	if uploadResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(uploadResp.Body)
+		uploadResp.Body.Close()
+		t.Fatalf("POST /me/avatar status=%d want=%d body=%s", uploadResp.StatusCode, http.StatusOK, string(body))
+	}
+	uploadResp.Body.Close()
+
+	myAvatarResp, err := client.Do(authedReq(http.MethodGet, "/api/v1/me/avatar", nil))
+	if err != nil {
+		t.Fatalf("GET /me/avatar failed: %v", err)
+	}
+	if myAvatarResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(myAvatarResp.Body)
+		myAvatarResp.Body.Close()
+		t.Fatalf("GET /me/avatar status=%d want=%d body=%s", myAvatarResp.StatusCode, http.StatusOK, string(body))
+	}
+	myAvatarResp.Body.Close()
+
+	userAvatarResp, err := client.Do(authedReq(http.MethodGet, "/api/v1/users/"+userID+"/avatar", nil))
+	if err != nil {
+		t.Fatalf("GET /users/{id}/avatar failed: %v", err)
+	}
+	if userAvatarResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(userAvatarResp.Body)
+		userAvatarResp.Body.Close()
+		t.Fatalf("GET /users/{id}/avatar status=%d want=%d body=%s", userAvatarResp.StatusCode, http.StatusOK, string(body))
+	}
+	userAvatarResp.Body.Close()
+
+	deleteResp, err := client.Do(authedReq(http.MethodDelete, "/api/v1/me/avatar", nil))
+	if err != nil {
+		t.Fatalf("DELETE /me/avatar failed: %v", err)
+	}
+	if deleteResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(deleteResp.Body)
+		deleteResp.Body.Close()
+		t.Fatalf("DELETE /me/avatar status=%d want=%d body=%s", deleteResp.StatusCode, http.StatusOK, string(body))
+	}
+	deleteResp.Body.Close()
 
 	cancel()
 	select {

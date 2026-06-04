@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zerotrust/backend/internal/audit"
+	"github.com/zerotrust/backend/internal/passwdreset"
 	"github.com/zerotrust/backend/internal/user"
 )
 
@@ -50,6 +51,9 @@ type fakeAuthService struct {
 	mfaErr            error
 	refreshPair       *TokenPair
 	refreshErr        error
+	logoutRefresh     string
+	logoutAccess      string
+	logoutCalled      bool
 }
 
 func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
@@ -78,14 +82,21 @@ func (s *fakeAuthService) RefreshTokens(ctx context.Context, refreshToken, ip, u
 }
 
 func (s *fakeAuthService) Logout(ctx context.Context, refreshToken, accessToken string) error {
+	s.logoutCalled = true
+	s.logoutRefresh = refreshToken
+	s.logoutAccess = accessToken
 	return nil
 }
 
 type fakePasswordResetter struct {
-	resetErr error
+	resetErr      error
+	sendEmail     string
+	sendPublicURL string
 }
 
 func (p *fakePasswordResetter) SendReset(ctx context.Context, email, baseURL string) error {
+	p.sendEmail = email
+	p.sendPublicURL = baseURL
 	return nil
 }
 
@@ -546,7 +557,7 @@ func TestRegister_Success(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Errorf("expected 201 Created, got %d. body=%s", rr.Code, rr.Body.String())
 	}
-	
+
 	entry := logger.wait(t)
 	if entry.Action != "auth.register" {
 		t.Errorf("expected action auth.register, got %s", entry.Action)
@@ -607,5 +618,262 @@ func TestRegister_LoginSvcError(t *testing.T) {
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", rr.Code)
+	}
+}
+
+func TestLoginValidationAndMFAResponseBranches(t *testing.T) {
+	t.Run("invalid json", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{"))
+		rr := httptest.NewRecorder()
+		h.Login(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("missing fields", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"","password":""}`))
+		rr := httptest.NewRecorder()
+		h.Login(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("internal error", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{loginErr: errors.New("boom")}, nil, nil, false, false, nil, "", nil)
+		body := `{"email":"user@example.com","password":"Password1!"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		h.Login(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("mfa required response", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{loginResult: &LoginResult{MFARequired: true, MFAPendingToken: "pending-token"}}, nil, nil, false, false, nil, "", nil)
+		body := `{"email":"user@example.com","password":"Password1!"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		h.Login(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), `"mfa_required":true`) {
+			t.Fatalf("response body=%q missing mfa_required=true", rr.Body.String())
+		}
+	})
+}
+
+func TestTokenValidationErrors(t *testing.T) {
+	h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+
+	t.Run("invalid json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader("{"))
+		rr := httptest.NewRecorder()
+		h.Token(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("unsupported grant type", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(`{"grant_type":"password"}`))
+		rr := httptest.NewRecorder()
+		h.Token(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("missing fields", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(`{"grant_type":"client_credentials"}`))
+		rr := httptest.NewRecorder()
+		h.Token(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("invalid dpop proof", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(`{"grant_type":"client_credentials","client_id":"c","client_secret":"s"}`))
+		req.Header.Set("DPoP", "not-a-jwt")
+		rr := httptest.NewRecorder()
+		h.Token(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+}
+
+func TestMFAChallengeMissingFields(t *testing.T) {
+	h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mfa/challenge", strings.NewReader(`{"mfa_token":"","totp_code":""}`))
+	rr := httptest.NewRecorder()
+
+	h.MFAChallenge(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRefreshMissingCookie(t *testing.T) {
+	h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+
+	h.Refresh(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestForgotPasswordValidationAndConfig(t *testing.T) {
+	t.Run("not configured", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", strings.NewReader(`{"email":"u@example.com"}`))
+		rr := httptest.NewRecorder()
+		h.ForgotPassword(rr, req)
+		if rr.Code != http.StatusNotImplemented {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNotImplemented)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		pr := &fakePasswordResetter{}
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, pr, "https://app.example", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", strings.NewReader("{"))
+		rr := httptest.NewRecorder()
+		h.ForgotPassword(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+}
+
+func TestResetPasswordValidationAndPolicyError(t *testing.T) {
+	t.Run("not configured", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", strings.NewReader(`{"token":"x","password":"StrongPassword123!"}`))
+		rr := httptest.NewRecorder()
+		h.ResetPassword(rr, req)
+		if rr.Code != http.StatusNotImplemented {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNotImplemented)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, &fakePasswordResetter{}, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", strings.NewReader("{"))
+		rr := httptest.NewRecorder()
+		h.ResetPassword(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("missing token", func(t *testing.T) {
+		h := NewHandler(&fakeAuthService{}, nil, nil, false, false, &fakePasswordResetter{}, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", strings.NewReader(`{"token":"","password":"StrongPassword123!"}`))
+		rr := httptest.NewRecorder()
+		h.ResetPassword(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("reuse forbidden maps error code", func(t *testing.T) {
+		logger := &recordingAuthAuditLogger{done: make(chan struct{}, 1)}
+		h := NewHandler(&fakeAuthService{}, nil, logger, false, false, &fakePasswordResetter{resetErr: passwdreset.ErrPasswordReuseForbidden}, "", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", strings.NewReader(`{"token":"tok","password":"StrongPassword123!"}`))
+		rr := httptest.NewRecorder()
+		h.ResetPassword(rr, req)
+		entry := logger.wait(t)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+		if !strings.Contains(rr.Body.String(), "password_reuse_forbidden") {
+			t.Fatalf("body=%q want password_reuse_forbidden", rr.Body.String())
+		}
+		if entry.Metadata["reason"] != "password_reuse_forbidden" {
+			t.Fatalf("audit reason=%v want=password_reuse_forbidden", entry.Metadata["reason"])
+		}
+	})
+}
+
+func TestLogoutPassesTokensToService(t *testing.T) {
+	svc := &fakeAuthService{}
+	h := NewHandler(svc, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "rt"})
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "at"})
+	rr := httptest.NewRecorder()
+
+	h.Logout(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+	}
+	if !svc.logoutCalled {
+		t.Fatal("expected Logout to be called on auth service")
+	}
+	if svc.logoutRefresh != "rt" || svc.logoutAccess != "at" {
+		t.Fatalf("logout args refresh=%q access=%q want rt/at", svc.logoutRefresh, svc.logoutAccess)
+	}
+}
+
+func TestWriteCookiesRefreshReusesCSRFCookie(t *testing.T) {
+	h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "csrf-existing"})
+	rr := httptest.NewRecorder()
+
+	h.writeCookies(rr, req, &TokenPair{AccessToken: "at", RefreshToken: "rt"})
+
+	resp := rr.Result()
+	defer resp.Body.Close()
+	found := false
+	for _, c := range resp.Cookies() {
+		if c.Name == "csrf_token" {
+			found = true
+			if c.Value != "csrf-existing" {
+				t.Fatalf("csrf cookie=%q want=csrf-existing", c.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("csrf_token cookie not set")
+	}
+}
+
+func TestAuditMetadataFromHeaderParsing(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set("X-Client-Info", `{"os":"linux","browser":"firefox"}`)
+	metadata := auditMetadataFromHeader(req, http.StatusNoContent)
+
+	if metadata["outcome"] != "success" {
+		t.Fatalf("outcome=%v want=success", metadata["outcome"])
+	}
+	clientInfo, ok := metadata["client_info"].(map[string]string)
+	if !ok {
+		t.Fatalf("client_info type=%T want map[string]string", metadata["client_info"])
+	}
+	if clientInfo["os"] != "linux" {
+		t.Fatalf("client_info[os]=%q want=linux", clientInfo["os"])
+	}
+
+	reqBad := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	reqBad.Header.Set("X-Client-Info", `{"os":`)
+	badMetadata := auditMetadataFromHeader(reqBad, http.StatusUnauthorized)
+	if _, exists := badMetadata["client_info"]; exists {
+		t.Fatal("expected malformed client info to be ignored")
+	}
+	if badMetadata["outcome"] != "failure" {
+		t.Fatalf("outcome=%v want=failure", badMetadata["outcome"])
 	}
 }
