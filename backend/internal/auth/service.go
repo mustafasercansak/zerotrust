@@ -15,7 +15,24 @@ import (
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/geoip"
 	"github.com/zerotrust/backend/pkg/mailer"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// dummyPasswordHash is a valid bcrypt hash used to keep login response time
+// uniform when the account is missing or inactive. CheckPassword still runs a
+// full bcrypt comparison against it (a real hash, so the work actually happens),
+// closing the timing side-channel that would otherwise reveal which emails are
+// registered. See ISSUE_LIST #33.
+var dummyPasswordHash = mustDummyHash()
+
+func mustDummyHash() string {
+	h, err := bcrypt.GenerateFromPassword([]byte("constant-time-login-comparison-placeholder"), bcrypt.DefaultCost)
+	if err != nil {
+		// crypto failure at startup is unrecoverable; a panic surfaces it loudly.
+		panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
+	}
+	return string(h)
+}
 
 // UserReader abstracts the user-service methods that auth.Service needs.
 // *user.Service satisfies this interface; tests supply a lightweight fake.
@@ -90,6 +107,11 @@ const (
 	serviceTokenTTL = 5 * time.Minute
 	mfaPendingTTL   = 5 * time.Minute
 
+	// dpopReplayWindow bounds how long a DPoP proof's jti is remembered to
+	// reject replays. It must comfortably exceed the ±120s iat skew window so a
+	// captured proof cannot be reused while it would still validate. (#35)
+	dpopReplayWindow = 5 * time.Minute
+
 	defaultSessionIdleTimeout      = 5 * time.Minute
 	defaultAdminSessionIdleTimeout = 3 * time.Minute
 	defaultSessionAbsoluteTimeout  = 8 * time.Hour
@@ -102,6 +124,9 @@ const (
 var (
 	ErrInvalidCredentials = errors.New("invalid_credentials")
 	ErrInactiveUser       = errors.New("user_inactive")
+	// ErrDPoPReplay is returned when a DPoP proof's jti has already been used
+	// within the replay window. (ISSUE_LIST #35)
+	ErrDPoPReplay = errors.New("dpop_proof_replay")
 )
 
 type AccountLockedError struct {
@@ -167,16 +192,21 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	}
 
 	u, err := s.users.FindByEmail(ctx, email)
-	if err != nil {
-		if errors.Is(err, user.ErrNotFound) {
-			return nil, ErrInvalidCredentials
-		}
+	if err != nil && !errors.Is(err, user.ErrNotFound) {
 		return nil, err
 	}
-	if !u.IsActive {
-		return nil, ErrInvalidCredentials
+
+	// Always run a bcrypt comparison — even for unknown or inactive accounts —
+	// so the response time does not reveal whether the email is registered
+	// (user enumeration defense, ISSUE_LIST #33). For missing/inactive users we
+	// compare against a fixed dummy hash that can never match.
+	passwordHash := dummyPasswordHash
+	if u != nil && u.IsActive {
+		passwordHash = u.PasswordHash
 	}
-	if !s.users.CheckPassword(u.PasswordHash, password) {
+	passwordOK := s.users.CheckPassword(passwordHash, password)
+
+	if u == nil || !u.IsActive || !passwordOK {
 		s.recordFailedAttempt(ctx, email, ip)
 		return nil, ErrInvalidCredentials
 	}
@@ -555,6 +585,24 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken string) 
 	return nil
 }
 
+// ConsumeDPoPProof records a DPoP proof's jti and rejects it if the same jti
+// has already been seen within the replay window, returning ErrDPoPReplay.
+// A nil Redis client (or empty jti) disables the check. Redis errors fail open
+// to preserve availability, consistent with IsRevoked. (ISSUE_LIST #35)
+func (s *Service) ConsumeDPoPProof(ctx context.Context, jti string) error {
+	if s.rdb == nil || jti == "" {
+		return nil
+	}
+	ok, err := s.rdb.SetNX(ctx, dpopJTIKey(jti), "1", dpopReplayWindow).Result()
+	if err != nil {
+		return nil
+	}
+	if !ok {
+		return ErrDPoPReplay
+	}
+	return nil
+}
+
 func (s *Service) IsRevoked(ctx context.Context, jti string) bool {
 	if s.rdb == nil {
 		return false
@@ -638,6 +686,10 @@ func hashToken(token string) string {
 
 func jtiBlocklistKey(jti string) string {
 	return "jti:blocked:" + jti
+}
+
+func dpopJTIKey(jti string) string {
+	return "dpop:jti:" + jti
 }
 
 func mfaPendingKey(hash string) string {

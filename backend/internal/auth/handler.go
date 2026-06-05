@@ -33,6 +33,7 @@ type authService interface {
 	MFAChallenge(ctx context.Context, pendingToken, totpCode string) (*TokenPair, error)
 	RefreshTokens(ctx context.Context, refreshToken, ip, ua string, deviceInfo map[string]string) (*TokenPair, error)
 	Logout(ctx context.Context, refreshToken, accessToken string) error
+	ConsumeDPoPProof(ctx context.Context, jti string) error
 }
 
 type userService interface {
@@ -43,7 +44,7 @@ type Handler struct {
 	authSvc             authService
 	userSvc             userService
 	auditRepo           auditLogger
-	settings            SettingReader // nil falls back to defaults
+	settings            SettingReader    // nil falls back to defaults
 	passwordResetter    PasswordResetter // nil when not configured
 	cookiesSecure       bool
 	registrationEnabled bool
@@ -62,6 +63,7 @@ func NewHandler(authSvc authService, userSvc userService, auditRepo auditLogger,
 		publicAppURL:        publicAppURL,
 	}
 }
+
 // POST /api/v1/auth/token — client_credentials grant (M2M, returns tokens in JSON body)
 func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -85,12 +87,17 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 	dpopProof := r.Header.Get("DPoP")
 	var dpopJKT string
 	if dpopProof != "" {
-		var err error
-		dpopJKT, err = ValidateDPoPProof(dpopProof, r.Method, "/api/v1/auth/token")
+		jkt, jti, err := ValidateDPoPProofWithJTI(dpopProof, r.Method, "/api/v1/auth/token")
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_dpop_proof")
 			return
 		}
+		// Reject replayed proofs (same jti within the skew window). #35
+		if err := h.authSvc.ConsumeDPoPProof(r.Context(), jti); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_dpop_proof")
+			return
+		}
+		dpopJKT = jkt
 	}
 
 	resp, err := h.authSvc.ClientCredentials(r.Context(), req.ClientID, req.ClientSecret, dpopJKT)

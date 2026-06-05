@@ -43,8 +43,13 @@ func Authenticate(ks *auth.KeyStore, authSvc *auth.Service) func(http.Handler) h
 					writeError(w, http.StatusUnauthorized, "invalid_dpop_proof")
 					return
 				}
-				jkt, err := auth.ValidateDPoPProof(dpopHeader, r.Method, r.URL.Path)
+				jkt, jti, err := auth.ValidateDPoPProofWithJTI(dpopHeader, r.Method, r.URL.Path)
 				if err != nil || jkt != claims.Confirmation.JKT {
+					writeError(w, http.StatusUnauthorized, "invalid_dpop_proof")
+					return
+				}
+				// Reject replayed proofs (same jti within the skew window). #35
+				if err := authSvc.ConsumeDPoPProof(r.Context(), jti); err != nil {
 					writeError(w, http.StatusUnauthorized, "invalid_dpop_proof")
 					return
 				}

@@ -16,6 +16,44 @@ import (
 
 const defaultStepUpMFAWindow = 10 * time.Minute
 
+const (
+	// stepUpMaxFailedAttempts is how many wrong step-up codes a user may submit
+	// within stepUpAttemptWindow before further attempts are blocked. (#38)
+	stepUpMaxFailedAttempts = 5
+	stepUpAttemptWindow     = 10 * time.Minute
+)
+
+func stepUpAttemptsKey(userID string) string {
+	return "mfa:stepup:fails:" + userID
+}
+
+// stepUpAttemptsExceeded reports whether the user has exhausted their step-up
+// code attempts. Redis errors fail open to preserve availability.
+func stepUpAttemptsExceeded(ctx context.Context, rdb *redis.Client, userID string) bool {
+	n, err := rdb.Get(ctx, stepUpAttemptsKey(userID)).Int()
+	if err != nil {
+		return false
+	}
+	return n >= stepUpMaxFailedAttempts
+}
+
+// recordStepUpFailure increments the user's failed step-up counter, setting the
+// expiry window on the first failure.
+func recordStepUpFailure(ctx context.Context, rdb *redis.Client, userID string) {
+	key := stepUpAttemptsKey(userID)
+	n, err := rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return
+	}
+	if n == 1 {
+		rdb.Expire(ctx, key, stepUpAttemptWindow)
+	}
+}
+
+func clearStepUpFailures(ctx context.Context, rdb *redis.Client, userID string) {
+	rdb.Del(ctx, stepUpAttemptsKey(userID))
+}
+
 // RequireRecentMFA enforces a recent second-factor proof for sensitive actions.
 // If no recent proof exists for the current session, callers must send
 // X-MFA-Code with a valid live TOTP code.
@@ -53,10 +91,26 @@ func RequireRecentMFA(mfa auth.MFAChecker, rdb *redis.Client, window time.Durati
 			}
 
 			code := strings.TrimSpace(r.Header.Get("X-MFA-Code"))
-			if code == "" || !mfa.Validate(r.Context(), claims.UserID, code) {
+			if code == "" {
 				writeError(w, http.StatusForbidden, "mfa_required")
 				return
 			}
+
+			// Per-user brute-force guard on step-up codes (#38). TOTP rotation
+			// already makes blind guessing impractical; this is defense in depth.
+			if stepUpAttemptsExceeded(r.Context(), rdb, claims.UserID) {
+				writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+				return
+			}
+
+			if !mfa.Validate(r.Context(), claims.UserID, code) {
+				recordStepUpFailure(r.Context(), rdb, claims.UserID)
+				writeError(w, http.StatusForbidden, "mfa_required")
+				return
+			}
+
+			// Successful step-up clears the failure counter.
+			clearStepUpFailures(r.Context(), rdb, claims.UserID)
 
 			if err := markRecentMFA(r.Context(), rdb, claims.UserID, sessionHash, window); err != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error")

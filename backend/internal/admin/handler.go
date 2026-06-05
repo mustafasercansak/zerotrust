@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/pkg/middleware"
 	"github.com/zerotrust/backend/pkg/validation"
 )
 
@@ -174,17 +175,26 @@ type updateRolesRequest struct {
 // PATCH /api/v1/admin/users/{id}/roles
 func (h *Handler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
+	// Admins may not change their own roles — prevents self-demotion lockout and
+	// self-escalation. (ISSUE_LIST #34)
+	if claims := middleware.ClaimsFrom(r.Context()); claims != nil && claims.UserID == userID {
+		writeError(w, http.StatusForbidden, "self_modification_forbidden")
+		return
+	}
 	var req updateRolesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	if err := h.userSvc.SetRoles(r.Context(), userID, req.Roles); err != nil {
-		if errors.Is(err, user.ErrUnknownRole) {
+		switch {
+		case errors.Is(err, user.ErrUnknownRole):
 			writeError(w, http.StatusUnprocessableEntity, "unknown_role")
-			return
+		case errors.Is(err, user.ErrLastAdmin):
+			writeError(w, http.StatusConflict, "last_admin")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -198,17 +208,26 @@ type setStatusRequest struct {
 // Activates or deactivates a user. Deactivation also revokes all their sessions.
 func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
+	// Admins may not change their own active status — prevents self-lockout.
+	// (ISSUE_LIST #34)
+	if claims := middleware.ClaimsFrom(r.Context()); claims != nil && claims.UserID == userID {
+		writeError(w, http.StatusForbidden, "self_modification_forbidden")
+		return
+	}
 	var req setStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	if err := h.userSvc.SetActive(r.Context(), userID, req.IsActive); err != nil {
-		if errors.Is(err, user.ErrNotFound) {
+		switch {
+		case errors.Is(err, user.ErrNotFound):
 			writeError(w, http.StatusNotFound, "not_found")
-			return
+		case errors.Is(err, user.ErrLastAdmin):
+			writeError(w, http.StatusConflict, "last_admin")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	// Deactivating a user must immediately revoke all active sessions.

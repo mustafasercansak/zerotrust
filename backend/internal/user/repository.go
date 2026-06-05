@@ -18,6 +18,13 @@ var ErrNotFound = errors.New("user_not_found")
 var ErrEmailTaken = errors.New("email_taken")
 var ErrUnknownRole = errors.New("unknown_role")
 
+// ErrLastAdmin is returned when an operation would leave the system with no
+// active admin (demoting or deactivating the last one). See ISSUE_LIST #34.
+var ErrLastAdmin = errors.New("last_admin")
+
+// adminRoleName is the role that must always have at least one active holder.
+const adminRoleName = "admin"
+
 type Repository struct {
 	db        *pgxpool.Pool
 	secClient *secrets.Client
@@ -395,12 +402,42 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 			return fmt.Errorf("%w: %q", ErrUnknownRole, name)
 		}
 	}
+
+	// Enforce the last-admin invariant: if the target is currently the only
+	// active admin and the new role set drops admin, reject. (ISSUE_LIST #34)
+	newHasAdmin := false
+	for _, name := range roleNames {
+		if name == adminRoleName {
+			newHasAdmin = true
+			break
+		}
+	}
+	if !newHasAdmin {
+		if err := guardLastAdmin(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit(ctx)
 }
 
 // SetActive activates or deactivates a user account.
 func (r *Repository) SetActive(ctx context.Context, userID string, active bool) error {
-	tag, err := r.db.Exec(ctx,
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Deactivating the only active admin would lock the system out. Check
+	// before mutating; this rolls back trivially if it fails. (ISSUE_LIST #34)
+	if !active {
+		if err := guardLastAdmin(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+
+	tag, err := tx.Exec(ctx,
 		`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`,
 		active, userID,
 	)
@@ -409,6 +446,44 @@ func (r *Repository) SetActive(ctx context.Context, userID string, active bool) 
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+
+	return tx.Commit(ctx)
+}
+
+// guardLastAdmin returns ErrLastAdmin when the target user is currently the
+// sole active admin — i.e. removing their admin role or deactivating them would
+// leave the system with no active admin. It is a no-op when the target is not
+// an active admin, or when another active admin exists.
+func guardLastAdmin(ctx context.Context, tx pgx.Tx, targetUserID string) error {
+	var targetIsActiveAdmin bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM users u
+			JOIN user_roles ur ON u.id = ur.user_id
+			JOIN roles ro ON ur.role_id = ro.id
+			WHERE u.id = $1::uuid AND u.is_active = true AND ro.name = $2
+		)
+	`, targetUserID, adminRoleName).Scan(&targetIsActiveAdmin); err != nil {
+		return err
+	}
+	if !targetIsActiveAdmin {
+		return nil
+	}
+
+	var otherActiveAdmins int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT u.id)
+		FROM users u
+		JOIN user_roles ur ON u.id = ur.user_id
+		JOIN roles ro ON ur.role_id = ro.id
+		WHERE ro.name = $1 AND u.is_active = true AND u.id <> $2::uuid
+	`, adminRoleName, targetUserID).Scan(&otherActiveAdmins); err != nil {
+		return err
+	}
+	if otherActiveAdmins == 0 {
+		return ErrLastAdmin
 	}
 	return nil
 }
@@ -500,4 +575,3 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
-

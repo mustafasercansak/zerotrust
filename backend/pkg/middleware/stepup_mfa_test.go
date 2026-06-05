@@ -33,6 +33,80 @@ func (m *mockMFAChecker) VerifyAndEnable(ctx context.Context, userID, code strin
 	return nil
 }
 
+func TestRequireRecentMFA_BruteForceLimit(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	claims := &auth.Claims{UserID: "user1"}
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	// MFA enabled, but the supplied code is always wrong.
+	mfa := &mockMFAChecker{enabled: true, valid: false}
+	handler := RequireRecentMFA(mfa, rdb, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	send := func(code string) int {
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "token1"})
+		req.Header.Set("X-MFA-Code", code)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// First stepUpMaxFailedAttempts wrong codes return 403 (mfa_required).
+	for i := 0; i < stepUpMaxFailedAttempts; i++ {
+		if got := send("000000"); got != http.StatusForbidden {
+			t.Fatalf("attempt %d: expected 403, got %d", i+1, got)
+		}
+	}
+
+	// The next attempt is blocked with 429.
+	if got := send("000000"); got != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after exceeding attempts, got %d", got)
+	}
+}
+
+func TestRequireRecentMFA_SuccessResetsBruteForceCounter(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	claims := &auth.Claims{UserID: "user1"}
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	mfa := &mockMFAChecker{enabled: true, valid: false}
+	handler := RequireRecentMFA(mfa, rdb, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	send := func(code string) int {
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "token1"})
+		req.Header.Set("X-MFA-Code", code)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// Accrue a few failures (below the limit).
+	for i := 0; i < stepUpMaxFailedAttempts-1; i++ {
+		send("000000")
+	}
+
+	// A valid code succeeds and clears the counter.
+	mfa.valid = true
+	if got := send("123456"); got != http.StatusOK {
+		t.Fatalf("expected 200 for valid code, got %d", got)
+	}
+	if mr.Exists(stepUpAttemptsKey("user1")) {
+		t.Fatal("expected failure counter to be cleared after success")
+	}
+}
+
 func TestMarkRecentMFACookie(t *testing.T) {
 	mr, _ := miniredis.Run()
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,9 +27,33 @@ type DPoPClaims struct {
 	jwt.RegisteredClaims
 }
 
+// expectedDPoPOrigin, when set (e.g. "https://api.example.com"), requires a
+// DPoP proof's htu to carry exactly that scheme+host in addition to the
+// expected path. When empty (default), only the path is validated — preserving
+// local/dev behavior where the external origin is not known. (ISSUE_LIST #36)
+var expectedDPoPOrigin string
+
+// SetExpectedDPoPOrigin configures the required scheme+host for DPoP htu
+// validation. Pass an absolute origin with no trailing slash, or "" to disable
+// host binding. Intended to be called once at startup.
+func SetExpectedDPoPOrigin(origin string) {
+	expectedDPoPOrigin = strings.TrimRight(strings.TrimSpace(origin), "/")
+}
+
+// ValidateDPoPProof verifies a DPoP proof and returns the JWK thumbprint (jkt).
+// It is a thin wrapper over ValidateDPoPProofWithJTI for callers that do not
+// need replay protection.
 func ValidateDPoPProof(tokenStr string, expectedMethod string, expectedURI string) (string, error) {
+	jkt, _, err := ValidateDPoPProofWithJTI(tokenStr, expectedMethod, expectedURI)
+	return jkt, err
+}
+
+// ValidateDPoPProofWithJTI verifies a DPoP proof and returns both the JWK
+// thumbprint (jkt) and the proof's unique identifier (jti). The jti enables
+// replay protection at the call site (see Service.ConsumeDPoPProof, ISSUE_LIST #35).
+func ValidateDPoPProofWithJTI(tokenStr string, expectedMethod string, expectedURI string) (string, string, error) {
 	if tokenStr == "" {
-		return "", errors.New("empty DPoP token")
+		return "", "", errors.New("empty DPoP token")
 	}
 
 	var jwkHeader map[string]any
@@ -91,57 +116,76 @@ func ValidateDPoPProof(tokenStr string, expectedMethod string, expectedURI strin
 	})
 
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	typ, ok := token.Header["typ"].(string)
 	if !ok || !strings.EqualFold(typ, "dpop+jwt") {
-		return "", fmt.Errorf("invalid typ header: %s", typ)
+		return "", "", fmt.Errorf("invalid typ header: %s", typ)
 	}
 
 	claims, ok := token.Claims.(*DPoPClaims)
 	if !ok || !token.Valid {
-		return "", errors.New("invalid token claims")
+		return "", "", errors.New("invalid token claims")
 	}
 
 	now := time.Now().Unix()
 	// Allow 2-minute skew
 	if claims.Iat < now-120 || claims.Iat > now+120 {
-		return "", errors.New("DPoP proof expired or issued in the future")
+		return "", "", errors.New("DPoP proof expired or issued in the future")
 	}
 
 	if !strings.EqualFold(claims.Htm, expectedMethod) {
-		return "", fmt.Errorf("htm mismatch: got %q, expected %q", claims.Htm, expectedMethod)
+		return "", "", fmt.Errorf("htm mismatch: got %q, expected %q", claims.Htm, expectedMethod)
 	}
 
-	if !validateHTU(claims.Htu, expectedURI) {
-		return "", fmt.Errorf("htu mismatch: got %q, expected path suffix %q", claims.Htu, expectedURI)
+	if !validateHTU(claims.Htu, expectedURI, expectedDPoPOrigin) {
+		return "", "", fmt.Errorf("htu mismatch: got %q, expected path %q (origin %q)", claims.Htu, expectedURI, expectedDPoPOrigin)
 	}
 
 	jkt, err := CalculateJKT(jwkHeader)
 	if err != nil {
-		return "", fmt.Errorf("calculate JKT failed: %w", err)
+		return "", "", fmt.Errorf("calculate JKT failed: %w", err)
 	}
 
-	return jkt, nil
+	return jkt, claims.Jti, nil
 }
 
-func validateHTU(htu, expectedPath string) bool {
-	if strings.Contains(htu, "://") {
-		parts := strings.SplitN(htu, "://", 2)
-		if len(parts) == 2 {
-			slashIdx := strings.Index(parts[1], "/")
-			if slashIdx != -1 {
-				path := parts[1][slashIdx:]
-				// strip query/fragment if any
-				if qIdx := strings.IndexAny(path, "?#"); qIdx != -1 {
-					path = path[:qIdx]
-				}
-				return path == expectedPath
-			}
-		}
+// validateHTU checks a DPoP proof's htu claim against the expected request path
+// and, when expectedOrigin is non-empty, the expected scheme+host. The path
+// must match exactly (no suffix fallback). When expectedOrigin is set, the htu
+// must be an absolute URL whose origin matches exactly. (ISSUE_LIST #36)
+func validateHTU(htu, expectedPath, expectedOrigin string) bool {
+	gotOrigin, gotPath := splitHTU(htu)
+	if gotPath != expectedPath {
+		return false
 	}
-	return strings.HasSuffix(htu, expectedPath)
+	if expectedOrigin == "" {
+		return true
+	}
+	// Host binding is enabled: a bare-path htu (empty origin) is rejected.
+	return strings.EqualFold(gotOrigin, expectedOrigin)
+}
+
+// splitHTU separates an htu value into its origin (scheme://host) and path,
+// stripping any query string or fragment. A value without a scheme+host is
+// treated as a bare path with an empty origin.
+func splitHTU(htu string) (origin, path string) {
+	u, err := url.Parse(htu)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		// Not an absolute URL — treat the whole value as a path, minus any
+		// query/fragment.
+		path = htu
+		if i := strings.IndexAny(path, "?#"); i != -1 {
+			path = path[:i]
+		}
+		return "", path
+	}
+	path = u.Path
+	if path == "" {
+		path = "/"
+	}
+	return u.Scheme + "://" + u.Host, path
 }
 
 func CalculateJKT(jwk map[string]any) (string, error) {

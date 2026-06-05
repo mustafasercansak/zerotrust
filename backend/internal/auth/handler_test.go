@@ -54,6 +54,8 @@ type fakeAuthService struct {
 	logoutRefresh     string
 	logoutAccess      string
 	logoutCalled      bool
+	dpopErr           error
+	dpopJTIs          []string
 }
 
 func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
@@ -86,6 +88,11 @@ func (s *fakeAuthService) Logout(ctx context.Context, refreshToken, accessToken 
 	s.logoutRefresh = refreshToken
 	s.logoutAccess = accessToken
 	return nil
+}
+
+func (s *fakeAuthService) ConsumeDPoPProof(ctx context.Context, jti string) error {
+	s.dpopJTIs = append(s.dpopJTIs, jti)
+	return s.dpopErr
 }
 
 type fakePasswordResetter struct {

@@ -791,3 +791,154 @@ Acceptance criteria:
 - Fix the `go: no such tool "covdata"` issue if it prevents coverage metrics reporting.
 - Hit an overall backend coverage of at least 80%.
 - Ensure tests verify edge cases like avatar upload content sniffing and summary chart data structures.
+
+---
+
+## Security Audit (2026-06-05)
+
+Findings from a manual security review of the auth-critical surface (JWT, DPoP, auth middleware, CSRF, login/refresh/rotation, password reset, RBAC, step-up MFA, rate limiting, client-IP handling, SQL construction, CORS, headers). No critical auth-bypass, injection, or token-forgery path was found; the items below are hardening fixes ranked by impact.
+
+### 33. Eliminate login user-enumeration timing side-channel
+
+State: CLOSED
+
+Severity: Medium
+
+Status: `Service.Login` returns `ErrInvalidCredentials` for an unknown or inactive email *before* performing any bcrypt comparison, while a valid+active account pays the full bcrypt cost. The measurable timing difference lets an attacker enumerate which emails have accounts.
+
+Related files:
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go)
+
+Acceptance criteria:
+- Perform a constant-cost bcrypt comparison against a fixed dummy hash on the unknown-user and inactive-user paths so all outcomes take comparable time.
+- Preserve existing behavior: lockout still applies, response stays `ErrInvalidCredentials`.
+- Add a test asserting that the unknown-email and wrong-password paths both invoke a password comparison (no early return before the hash compare).
+
+Status update:
+- Added a package-level `dummyPasswordHash` (valid bcrypt hash generated at init) in `auth/service.go`.
+- `Login` now always runs `CheckPassword` — against the real hash for active users, against the dummy hash for missing/inactive users — so timing no longer reveals account existence.
+- Failed attempts are now recorded uniformly across all failure paths.
+- Tests in `service_enumeration_test.go` assert the unknown-email and inactive-user paths both invoke exactly one password comparison, plus a dummy-hash validity check.
+
+### 34. Add last-admin and self-modification guards to role/status changes
+
+State: CLOSED
+
+Severity: Medium
+
+Status: `UpdateRoles` and `SetStatus` let any caller holding `users:update` change their own roles or deactivate/demote the last remaining admin, risking admin lockout. If a custom (non-admin) role is ever granted `users:update`, the holder could self-assign the `admin` role (privilege escalation). Step-up MFA gates these routes but does not prevent the action.
+
+Related files:
+- [backend/internal/admin/handler.go](/home/m/projects/zerotrust/backend/internal/admin/handler.go)
+- [backend/internal/user/service.go](/home/m/projects/zerotrust/backend/internal/user/service.go)
+
+Acceptance criteria:
+- Forbid a caller from modifying their own roles or active status (return a clear error).
+- Forbid removing the `admin` role from, or deactivating, the last active admin.
+- Add tests: self role-change rejected, self-deactivation rejected, last-admin demotion rejected, normal admin-on-other-user change still succeeds.
+
+Status update:
+- `admin/handler.go` `UpdateRoles`/`SetStatus` now reject self-modification (caller `UserID` == target) with 403 `self_modification_forbidden`, using `middleware.ClaimsFrom`.
+- Added `user.ErrLastAdmin` and an atomic `guardLastAdmin` check in `user/repository.go` `SetRoles`/`SetActive`: the operation is rejected (and rolled back) only when the target is currently the sole active admin, avoiding false positives in admin-less setups. Mapped to HTTP 409 `last_admin`.
+- Tests: handler-level guards in `admin/lastadmin_test.go` (no DB); DB-gated invariant tests in `user/lastadmin_integration_test.go`.
+
+### 35. Add DPoP proof replay protection (jti tracking)
+
+State: CLOSED
+
+Severity: Low-Medium
+
+Status: `ValidateDPoPProof` validates signature, `typ`, `iat` (±120s skew), `htm`, and `htu`, but the `jti` is never recorded. A captured proof can be replayed within the 120-second skew window (RFC 9449 §11.1 recommends a server-side jti cache).
+
+Related files:
+- [backend/internal/auth/dpop.go](/home/m/projects/zerotrust/backend/internal/auth/dpop.go)
+- [backend/pkg/middleware/auth.go](/home/m/projects/zerotrust/backend/pkg/middleware/auth.go)
+
+Acceptance criteria:
+- Track each accepted DPoP `jti` in Redis with a TTL covering the skew window; reject a second use of the same `jti`.
+- Fail closed only on replay; first use must still succeed.
+- Add tests: first proof accepted, identical replay rejected, distinct `jti` accepted.
+
+Status update:
+- Added `ValidateDPoPProofWithJTI` (returns jkt + jti); `ValidateDPoPProof` is now a thin wrapper, so existing callers/tests are unchanged.
+- Added `Service.ConsumeDPoPProof` using Redis `SETNX` with a 5-minute TTL (`dpopReplayWindow`, comfortably exceeding the ±120s skew). Returns `ErrDPoPReplay` on reuse; nil Redis/empty jti is a no-op; Redis errors fail open (consistent with `IsRevoked`).
+- Wired into both DPoP sites: `middleware/auth.go` (DPoP-bound access tokens) and the `/auth/token` handler.
+- Tests in `dpop_replay_test.go` and `token_dpop_handler_test.go`: first use accepted, replay rejected, distinct jti accepted, handler returns 400 on replay.
+
+### 36. Bind DPoP htu to scheme+host, not just path
+
+State: CLOSED
+
+Severity: Low
+
+Status: `validateHTU` compares only the request path (or a suffix match) and ignores scheme/host, so a proof minted for `https://evil.example/api/v1/auth/token` validates against the same path on the real host. Impact is limited by `jkt` binding, but the check should match the full origin + path per RFC 9449.
+
+Related files:
+- [backend/internal/auth/dpop.go](/home/m/projects/zerotrust/backend/internal/auth/dpop.go)
+
+Acceptance criteria:
+- Validate `htu` against the expected scheme+host+path (configurable public base URL), not a suffix.
+- Add tests: correct origin accepted, mismatched host rejected, suffix-spoof rejected.
+
+Status update:
+- Rewrote `validateHTU` to require an exact path match (removed the loose `HasSuffix` fallback) via a new `splitHTU` URL parser.
+- Added opt-in host binding: `SetExpectedDPoPOrigin` / `DPOP_EXPECTED_ORIGIN` env (wired in `main.go`). When set, the htu's scheme+host must match exactly and bare-path htu is rejected; when empty (dev default) path-only validation is preserved.
+- Tests in `dpop_htu_test.go`: suffix-spoof rejected, matching origin accepted, wrong host rejected, bare-path rejected under binding, path-only accepted with binding off.
+
+### 37. Replace hand-built JSON in /me with json encoder
+
+State: CLOSED
+
+Severity: Low
+
+Status: The `/me` handler builds its JSON response via `fmt.Fprintf` with `%q` over user-controlled `first_name`/`last_name`. Go quoting is not guaranteed to equal JSON encoding in all edge cases; values are escaped today but the pattern is fragile.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Marshal the `/me` response with `encoding/json` (struct + `json.NewEncoder`).
+- Add a test that a name containing quotes/backslashes/control characters round-trips as valid JSON.
+
+Status update:
+- Extracted a typed `meResponse` struct and `buildMeResponse` helper in `main.go`; the `/me` handler now uses `json.NewEncoder`, so all user-controlled fields are correctly escaped and nil slices encode as `[]`.
+- Tests in `meresponse_test.go`: special-character round-trip stays valid JSON; nil roles/permissions encode as `[]`.
+
+### 38. Add per-user brute-force limit on step-up MFA codes
+
+State: CLOSED
+
+Severity: Low
+
+Status: `RequireRecentMFA` accepts `X-MFA-Code` guesses bounded only by the 100/min protected-route rate limit. TOTP rotation makes practical brute force infeasible, but a dedicated per-user attempt counter is cheap defense-in-depth.
+
+Related files:
+- [backend/pkg/middleware/stepup_mfa.go](/home/m/projects/zerotrust/backend/pkg/middleware/stepup_mfa.go)
+
+Acceptance criteria:
+- Track failed step-up attempts per user in Redis; temporarily reject further attempts after a threshold.
+- Reset the counter on a successful step-up.
+- Add tests: failures increment, threshold blocks, success resets.
+
+Status update:
+- `RequireRecentMFA` now tracks failed `X-MFA-Code` attempts per user in Redis (`mfa:stepup:fails:<uid>`), blocking with HTTP 429 `too_many_attempts` after 5 failures within a 10-minute window; a successful step-up clears the counter. Redis errors fail open.
+- Tests in `stepup_mfa_test.go`: brute-force limit triggers 429 after the threshold; a valid code resets the counter.
+
+### 39. Reject wildcard CORS origin when credentials are enabled
+
+State: CLOSED
+
+Severity: Info
+
+Status: CORS is configured with `AllowCredentials: true` and operator-supplied origins. The default (`http://localhost:3000`) is safe, but nothing prevents an operator from setting `CORS_ALLOWED_ORIGINS=*`, which combined with credentials is unsafe.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- At startup, fail fast (or drop credentials) if a configured origin is `*`.
+- Add a test asserting the wildcard-plus-credentials configuration is rejected.
+
+Status update:
+- Added `parseCORSOrigins` in `main.go`, called during config load: trims origins, rejects `*` (since `AllowCredentials` is on), and requires at least one origin — `loadConfig` now fails fast on a wildcard.
+- Tests in `cors_test.go`: wildcard alone and alongside others rejected, empty rejected, explicit origins trimmed and preserved.

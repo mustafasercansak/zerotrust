@@ -271,6 +271,8 @@ func run(ctx context.Context, cfg config) error {
 		}
 		return loc.Country, loc.City
 	})
+	// Enable DPoP htu host binding when an external API origin is configured. (#36)
+	auth.SetExpectedDPoPOrigin(cfg.DPoPExpectedOrigin)
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
@@ -346,19 +348,10 @@ func run(ctx context.Context, cfg config) error {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
 				}
-				roles := profile.Roles
-				if roles == nil {
-					roles = []string{}
-				}
-				perms := claims.Permissions
-				if perms == nil {
-					perms = []string{}
-				}
 				w.Header().Set("Content-Type", "application/json")
-				rolesJSON, _ := json.Marshal(roles)
-				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+				// Use the JSON encoder rather than hand-formatting so
+				// user-controlled fields are always correctly escaped. (#37)
+				_ = json.NewEncoder(w).Encode(buildMeResponse(profile, claims.Permissions))
 			})
 
 			r.Patch("/me/profile", func(w http.ResponseWriter, r *http.Request) {
@@ -665,6 +658,7 @@ type config struct {
 	SMTPUser                 string
 	SMTPPassword             string
 	PublicAppURL             string
+	DPoPExpectedOrigin       string
 	GeoIPDBPath              string
 }
 
@@ -676,7 +670,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	origins := strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"), ",")
+	origins, err := parseCORSOrigins(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"))
+	if err != nil {
+		return config{}, err
+	}
 
 	keyHex := getEnv("MFA_ENCRYPTION_KEY", "")
 	if !mfaEnabled {
@@ -742,8 +739,67 @@ func loadConfig() (config, error) {
 		SMTPUser:                 getEnv("SMTP_USER", ""),
 		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
 		PublicAppURL:             getEnv("PUBLIC_APP_URL", "http://localhost:3000"),
+		DPoPExpectedOrigin:       getEnv("DPOP_EXPECTED_ORIGIN", ""),
 		GeoIPDBPath:              getEnv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb"),
 	}, nil
+}
+
+// parseCORSOrigins splits and trims the configured origins, rejecting the "*"
+// wildcard. The server sends credentialed CORS responses (AllowCredentials),
+// and a wildcard origin with credentials is both invalid per the Fetch spec and
+// a security risk, so it is refused at startup rather than silently mishandled.
+// (ISSUE_LIST #39)
+func parseCORSOrigins(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		o := strings.TrimSpace(p)
+		if o == "" {
+			continue
+		}
+		if o == "*" {
+			return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS may not be \"*\" because credentials are enabled; list explicit origins")
+		}
+		origins = append(origins, o)
+	}
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at least one origin")
+	}
+	return origins, nil
+}
+
+// meResponse is the JSON shape returned by GET /api/v1/me.
+type meResponse struct {
+	UserID      string   `json:"user_id"`
+	Email       string   `json:"email"`
+	FirstName   string   `json:"first_name"`
+	LastName    string   `json:"last_name"`
+	HasAvatar   bool     `json:"has_avatar"`
+	Locale      string   `json:"locale"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions"`
+}
+
+// buildMeResponse assembles the /me payload, normalizing nil slices to empty
+// arrays so the JSON encoder emits [] rather than null. (#37)
+func buildMeResponse(profile *user.User, perms []string) meResponse {
+	roles := profile.Roles
+	if roles == nil {
+		roles = []string{}
+	}
+	if perms == nil {
+		perms = []string{}
+	}
+	return meResponse{
+		UserID:      profile.ID,
+		Email:       profile.Email,
+		FirstName:   profile.FirstName,
+		LastName:    profile.LastName,
+		HasAvatar:   profile.HasAvatar,
+		Locale:      profile.Locale,
+		Roles:       roles,
+		Permissions: perms,
+	}
 }
 
 func getEnv(key, fallback string) string {
