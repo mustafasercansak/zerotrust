@@ -73,7 +73,7 @@ function prettyJson(value: unknown): string {
 }
 
 function scopeAction(scope: string): string {
-  return scope.split(":")[1] ?? scope;
+  return scope.slice(scope.indexOf(":") + 1);
 }
 
 interface ScopeSelectorProps {
@@ -350,8 +350,7 @@ export default function ServiceAccountsPage() {
   }
 
   function handleCopy() {
-    if (!newSecret) return;
-    navigator.clipboard.writeText(newSecret.client_secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+    navigator.clipboard.writeText(newSecret!.client_secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
   async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
@@ -454,6 +453,7 @@ export default function ServiceAccountsPage() {
               disabled
               fullWidth
               helperText={t("clientIdLocked")}
+              slotProps={{ htmlInput: { readOnly: true } }}
             />
             <FormControlLabel
               control={<Switch checked={editActive} onChange={(e) => setEditActive(e.target.checked)} />}

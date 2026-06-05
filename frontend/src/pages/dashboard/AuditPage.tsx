@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type AuditEntry, type AuditTrendPoint, type PageParams } from "@/lib/api";
 import { formatDateTime } from "@/lib/dateUtils";
@@ -44,17 +44,31 @@ function osLabel(info?: AuditClientInfo, ua?: string | null): string {
   return "";
 }
 
-function AuditTrendsChart() {
+function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const { t } = useTranslation("audit");
   const [trends, setTrends] = useState<AuditTrendPoint[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasLoaded = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(!hasLoaded.current);
     api.listAuditLogTrends()
-      .then((data) => setTrends(data))
+      .then((data) => {
+        if (!cancelled) setTrends(data);
+      })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) {
+          hasLoaded.current = true;
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshSignal]);
 
   if (loading) {
     return (
@@ -172,8 +186,13 @@ export default function AuditPage() {
   const { i18n } = useTranslation();
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
+  const [trendRefresh, setTrendRefresh] = useState(0);
 
-  const fetcher = useCallback((p: PageParams) => api.listAuditLog(p), []);
+  const fetcher = useCallback(async (p: PageParams) => {
+    const result = await api.listAuditLog(p);
+    setTrendRefresh((n) => n + 1);
+    return result;
+  }, []);
 
   const tabs = useMemo(() => [
     { key: "all", label: t("tabAll") },
@@ -293,7 +312,7 @@ export default function AuditPage() {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {isAdmin && <AuditTrendsChart />}
+      {isAdmin && <AuditTrendsChart refreshSignal={trendRefresh} />}
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <ResourceTablePage
           columns={columns}

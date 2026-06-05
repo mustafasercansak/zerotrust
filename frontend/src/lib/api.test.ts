@@ -27,6 +27,17 @@ describe("api helper library", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/login", expect.any(Object));
   });
 
+  it("caches client info between requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64) Firefox/114.0" });
+
+    await api.me();
+    await api.me();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("handles mfaChallenge calls", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { ok: true }));
     vi.stubGlobal("fetch", fetchMock);
@@ -177,6 +188,21 @@ describe("api helper library", () => {
     expect(path).toContain("role=admin");
   });
 
+  it("skips empty filter values when building list queries", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { data: [], total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.listUsers({
+      page: 0,
+      pageSize: 25,
+      filters: { role: "", status: "active" },
+    });
+
+    const [path] = fetchMock.mock.calls[0];
+    expect(path).toContain("status=active");
+    expect(path).not.toContain("role=");
+  });
+
   it("handles admin.createServiceToken successfully", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { access_token: "service-token" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -193,6 +219,16 @@ describe("api helper library", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(api.admin.createServiceToken({ client_id: "cid", client_secret: "secret" })).rejects.toThrow(ApiError);
+  });
+
+  it("uses default invalid_client when service token errors have no JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("not-json", { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.admin.createServiceToken({ client_id: "cid", client_secret: "secret" })).rejects.toMatchObject({
+      name: "ApiError",
+      message: "invalid_client",
+    });
   });
 
   it("handles admin.probeWithServiceToken successfully", async () => {
@@ -219,6 +255,14 @@ describe("api helper library", () => {
     expect(res.body).toEqual({ status: "ok" });
   });
 
+  it("handles admin.probeWithServiceToken empty responses as null bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.probeWithServiceToken("/api/v1/probe", "token123");
+    expect(res.body).toBeNull();
+  });
+
   it("carries status codes and throws custom errors on API failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(429, { error: "too_many_requests", retry_after: 60 })));
 
@@ -228,6 +272,32 @@ describe("api helper library", () => {
       message: "too_many_requests",
       status: 429,
       retryAfter: 60,
+    });
+  });
+
+  it("uses internal_error when an API error response omits an error code", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(500, {})));
+
+    await expect(api.me()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "internal_error",
+      status: 500,
+    });
+  });
+
+  it("falls back to Retry-After header when retry_after is absent from response body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "too_many_requests" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "12" },
+      }),
+    ));
+
+    await expect(api.me()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "too_many_requests",
+      status: 429,
+      retryAfter: 12,
     });
   });
 
@@ -242,6 +312,29 @@ describe("api helper library", () => {
     const res = await api.me();
     expect(res).toEqual({ user_id: "retried_user" });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("shares an in-flight refresh request between concurrent token-expired responses", async () => {
+    let resolveRefresh: (value: Response) => void = () => {};
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(401, { error: "token_expired" }))
+      .mockResolvedValueOnce(jsonResponse(401, { error: "token_expired" }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { user_id: "one" }))
+      .mockResolvedValueOnce(jsonResponse(200, { user_id: "two" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = api.me();
+    const second = api.me();
+    await Promise.resolve();
+    resolveRefresh(jsonResponse(200, {}));
+
+    await expect(first).resolves.toEqual({ user_id: "one" });
+    await expect(second).resolves.toEqual({ user_id: "two" });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it("propagates generic error if refreshTokens rejects with non-ApiError", async () => {
@@ -268,6 +361,20 @@ describe("api helper library", () => {
     });
   });
 
+  it("uses invalid_token when a failed refresh response is not JSON", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(401, { error: "token_expired" }))
+      .mockResolvedValueOnce(new Response("not-json", { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.me()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "invalid_token",
+      status: 400,
+    });
+  });
+
   it("throws missing_token on auth status refresh failure during token_expired flow", async () => {
     const fetchMock = vi
       .fn()
@@ -287,6 +394,16 @@ describe("api helper library", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, {}));
     vi.stubGlobal("fetch", fetchMock);
     
+    await api.deleteAvatar();
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  it("omits CSRF header when the csrf cookie is absent", async () => {
+    vi.stubGlobal("document", { cookie: "other=value" });
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+
     await api.deleteAvatar();
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers["X-CSRF-Token"]).toBeUndefined();

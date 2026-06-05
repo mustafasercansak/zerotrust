@@ -119,6 +119,34 @@ describe("getClientInfo client info utility", () => {
     expect(info.browser_version).toBe("114.0.0.0");
   });
 
+  it("falls back when Brave detection rejects", async () => {
+    const ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
+    vi.stubGlobal("navigator", {
+      userAgent: ua,
+      brave: {
+        isBrave: vi.fn().mockRejectedValue(new Error("blocked")),
+      },
+    });
+
+    const info = await getClientInfo();
+    expect(info.browser).toBeUndefined();
+    expect(info.browser_version).toBeUndefined();
+  });
+
+  it("handles Brave detection without a Chrome version in the user agent", async () => {
+    const ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
+    vi.stubGlobal("navigator", {
+      userAgent: ua,
+      brave: {
+        isBrave: vi.fn().mockResolvedValue(true),
+      },
+    });
+
+    const info = await getClientInfo();
+    expect(info.browser).toBe("Brave");
+    expect(info.browser_version).toBeUndefined();
+  });
+
   it("returns undefined browser version for unknown browser or mismatched UA", async () => {
     const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
     vi.stubGlobal("navigator", { userAgent: ua });
@@ -137,5 +165,22 @@ describe("getClientInfo client info utility", () => {
     });
     const info = await getClientInfo();
     expect(info.os).toBe("Android");
+  });
+
+  it("covers legacy Windows, unknown browser version, and mobile fallback paths", async () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 MysteryBrowser/1.0",
+      userAgentData: {
+        mobile: true,
+      },
+    });
+
+    const info = await getClientInfo();
+
+    expect(info.os).toBe("Windows");
+    expect(info.os_version).toBe("6.1");
+    expect(info.mobile).toBe("true");
+    expect(info.browser).toBeUndefined();
+    expect(info.browser_version).toBeUndefined();
   });
 });

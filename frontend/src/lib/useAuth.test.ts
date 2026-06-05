@@ -87,6 +87,8 @@ describe("auth bootstrap helper error handling", () => {
 describe("useAuth React hook", () => {
   beforeEach(() => {
     callIdx = 0;
+    mockNavigate.mockClear();
+    mockChangeLanguage.mockClear();
     stateCalls = [
       [null, vi.fn()], // me
       [true, vi.fn()], // loading
@@ -117,6 +119,50 @@ describe("useAuth React hook", () => {
       expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.any(Object)); // setMe
       expect(stateCalls[1][1]).toHaveBeenCalledWith(false); // setLoading
     });
+  });
+
+  it("keeps the current language when the profile locale already matches", async () => {
+    const mockMe = vi.spyOn(api, "me").mockResolvedValue({
+      user_id: "u1",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      locale: "en",
+      roles: ["admin"],
+    });
+
+    useAuth();
+
+    await vi.waitFor(() => {
+      expect(mockMe).toHaveBeenCalled();
+      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
+      expect(stateCalls[1][1]).toHaveBeenCalledWith(false);
+    });
+    expect(mockChangeLanguage).not.toHaveBeenCalled();
+    expect(localStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("does not sync language when the profile locale is empty", async () => {
+    const mockMe = vi.spyOn(api, "me").mockResolvedValue({
+      user_id: "u1",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      locale: "",
+      roles: ["admin"],
+    });
+
+    useAuth();
+
+    await vi.waitFor(() => {
+      expect(mockMe).toHaveBeenCalled();
+      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.objectContaining({ locale: "" }));
+      expect(stateCalls[1][1]).toHaveBeenCalledWith(false);
+    });
+    expect(mockChangeLanguage).not.toHaveBeenCalled();
+    expect(localStorage.setItem).not.toHaveBeenCalled();
   });
 
   it("redirects to login on auth failure (401/403)", async () => {

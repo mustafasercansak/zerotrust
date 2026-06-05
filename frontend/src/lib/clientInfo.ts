@@ -7,6 +7,8 @@ export type ClientInfo = {
   mobile?: string;
 };
 
+type KnownBrowser = "Opera" | "Edge" | "Firefox" | "Safari" | "Brave" | "Chrome";
+
 function parseClientOS(ua: string): Pick<ClientInfo, "os" | "os_version"> {
   if (/iPhone|iPad|iPod/.test(ua)) {
     const version = ua.match(/OS ([\d_]+)/)?.[1]?.replaceAll("_", ".");
@@ -29,13 +31,12 @@ function parseClientOS(ua: string): Pick<ClientInfo, "os" | "os_version"> {
   return {};
 }
 
-function browserVersionFromUA(ua: string, browser?: string): string | undefined {
+function browserVersionFromUA(ua: string, browser: KnownBrowser): string | undefined {
   if (browser === "Opera") return ua.match(/OPR\/([\d.]+)/)?.[1];
   if (browser === "Edge") return ua.match(/Edg\/([\d.]+)/)?.[1];
   if (browser === "Firefox") return ua.match(/Firefox\/([\d.]+)/)?.[1];
   if (browser === "Safari") return ua.match(/Version\/([\d.]+)/)?.[1];
-  if (browser === "Brave" || browser === "Chrome") return ua.match(/Chrome\/([\d.]+)/)?.[1];
-  return undefined;
+  return ua.match(/Chrome\/([\d.]+)/)?.[1];
 }
 
 export async function getClientInfo(): Promise<ClientInfo> {
@@ -75,23 +76,25 @@ export async function getClientInfo(): Promise<ClientInfo> {
     info.browser_version =
       highEntropy?.fullVersionList?.find((item) => item.brand === "Chromium")?.version ||
       highEntropy?.fullVersionList?.find((item) => item.brand === "Google Chrome")?.version ||
-      browserVersionFromUA(ua, info.browser);
+      browserVersionFromUA(ua, "Brave");
     return info;
   }
 
-  if (/OPR\//.test(ua)) info.browser = "Opera";
-  else if (/Edg\//.test(ua)) info.browser = "Edge";
-  else if (/Firefox\//.test(ua)) info.browser = "Firefox";
-  else if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) info.browser = "Safari";
-  else if (/Chrome\//.test(ua) && !/Chromium\//.test(ua)) info.browser = "Chrome";
+  let detectedBrowser: KnownBrowser | undefined;
+  if (/OPR\//.test(ua)) detectedBrowser = "Opera";
+  else if (/Edg\//.test(ua)) detectedBrowser = "Edge";
+  else if (/Firefox\//.test(ua)) detectedBrowser = "Firefox";
+  else if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) detectedBrowser = "Safari";
+  else if (/Chrome\//.test(ua) && !/Chromium\//.test(ua)) detectedBrowser = "Chrome";
+  info.browser = detectedBrowser;
 
-  if (info.browser === "Chrome") {
+  if (detectedBrowser === "Chrome") {
     info.browser_version =
       highEntropy?.fullVersionList?.find((item) => item.brand === "Google Chrome")?.version ||
       highEntropy?.fullVersionList?.find((item) => item.brand === "Chromium")?.version ||
-      browserVersionFromUA(ua, info.browser);
-  } else if (info.browser) {
-    info.browser_version = browserVersionFromUA(ua, info.browser);
+      browserVersionFromUA(ua, detectedBrowser);
+  } else if (detectedBrowser) {
+    info.browser_version = browserVersionFromUA(ua, detectedBrowser);
   }
 
   return info;

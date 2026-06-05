@@ -38,6 +38,7 @@ vi.mock("qrcode.react", () => ({
 let stateStore: any = {};
 let stateSetters: any = {};
 let callIdx = 0;
+let effectCleanups: Array<() => void> = [];
 
 vi.mock("react", async (importOriginal) => {
   const original = await importOriginal<typeof import("react")>();
@@ -56,13 +57,14 @@ vi.mock("react", async (importOriginal) => {
           stateStore[idx] = newVal;
         }
       };
-      if (callIdx >= 12) {
+      if (callIdx >= 100) {
         callIdx = 0;
       }
       return [stateStore[idx], stateSetters[idx]];
     },
     useEffect: (fn: any) => {
-      fn();
+      const cleanup = fn();
+      if (typeof cleanup === "function") effectCleanups.push(cleanup);
     },
   };
 });
@@ -123,6 +125,7 @@ describe("LoginPage component", () => {
     stateStore = {};
     stateSetters = {};
     callIdx = 0;
+    effectCleanups = [];
     capturedOnSubmitCredentials = null;
     capturedOnSubmitMFA = null;
     capturedOnChangeEmail = null;
@@ -149,7 +152,7 @@ describe("LoginPage component", () => {
 
   const runRender = () => {
     callIdx = 0;
-    renderToString(React.createElement(LoginPage));
+    return renderToString(React.createElement(LoginPage));
   };
 
   it("handles standard input typing", () => {
@@ -177,6 +180,8 @@ describe("LoginPage component", () => {
 
     expect(loginSpy).toHaveBeenCalledWith("test@example.com", "pass");
     expect(scheduleRefresh).toHaveBeenCalled();
+    vi.mocked(scheduleRefresh).mock.calls[0][0]?.();
+    expect(mockNavigate).toHaveBeenCalledWith("/auth/login");
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -225,6 +230,9 @@ describe("LoginPage component", () => {
     await capturedOnSubmitMFA({ preventDefault: vi.fn() });
 
     expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "123456");
+    const lastScheduleRefreshCall = vi.mocked(scheduleRefresh).mock.calls[vi.mocked(scheduleRefresh).mock.calls.length - 1];
+    lastScheduleRefreshCall?.[0]?.();
+    expect(mockNavigate).toHaveBeenCalledWith("/auth/login");
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -247,6 +255,26 @@ describe("LoginPage component", () => {
     // Test countdown timer in useEffect
     runRender();
     expect(stateStore[11]).toBe(29);
+    expect(effectCleanups[0]).toBeDefined();
+    effectCleanups[0]();
+    expect(window.clearInterval).toHaveBeenCalledWith(123);
+  });
+
+  it("does not submit credentials or MFA while retry countdown is active", async () => {
+    const loginSpy = vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
+    stateStore[11] = 5;
+    runRender();
+
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(loginSpy).not.toHaveBeenCalled();
+
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-token";
+    runRender();
+    const mfaSpy = vi.spyOn(api, "mfaChallenge").mockResolvedValue({ ok: true } as any);
+
+    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
+    expect(mfaSpy).not.toHaveBeenCalled();
   });
 
   it("handles regular API and generic failures during credentials login", async () => {
@@ -289,11 +317,143 @@ describe("LoginPage component", () => {
     expect(capturedOnChangeCodesSaved).toBeDefined();
     capturedOnChangeCodesSaved({ target: { checked: true } });
     expect(stateStore[7]).toBe(true);
+    capturedOnChangeCodesSaved({ target: { checked: false } }); // Hit the false branch
+    expect(stateStore[7]).toBe(false);
 
     // Verify back button clicks resets state
     expect(capturedBackButtonClick).toBeDefined();
     capturedBackButtonClick();
     expect(stateStore[0]).toBe("credentials");
     expect(stateStore[9]).toBeNull();
+  });
+
+  it("handles recovery code (length 14) during MFA verification", async () => {
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-token-abc";
+    stateStore[8] = "xxxx-xxxx-xxxx"; // Hits the totpCode.length !== 14 branch
+    runRender();
+
+    const mfaSpy = vi.spyOn(api, "mfaChallenge").mockResolvedValue({ ok: true } as any);
+    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
+
+    expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "xxxx-xxxx-xxxx");
+  });
+
+  it("handles ApiErrors without retryAfter properties safely", async () => {
+    // Hits account_locked without retryAfter
+    vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("account_locked", undefined, 423));
+    runRender();
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(stateStore[9]).toContain("errors.account_locked");
+
+    // Hits rate_limit_exceeded without retryAfter on login
+    vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
+    runRender();
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(stateStore[9]).toContain("errors.rate_limit_exceeded");
+
+    // Hits rate_limit_exceeded without retryAfter on MFA verification
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-token-xyz";
+    runRender();
+    vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
+    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
+    expect(stateStore[9]).toContain("errors.invalid_credentials");
+  });
+
+  it("renders loading state for both credentials and MFA stages", async () => {
+    // This hits the `loading ? "..."` branches on lines 191 and 220
+    let resolveLogin: any;
+    vi.spyOn(api, "login").mockImplementation(() => new Promise((res) => { resolveLogin = res; }));
+    
+    stateStore[0] = "credentials";
+    runRender();
+    capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    
+    let html = runRender(); // render while loading is true
+    expect(html).toContain("...");
+    
+    resolveLogin({ ok: true, mfa_required: false });
+    await Promise.resolve(); await Promise.resolve();
+
+    let resolveMFA: any;
+    vi.spyOn(api, "mfaChallenge").mockImplementation(() => new Promise((res) => { resolveMFA = res; }));
+    
+    stateStore[0] = "mfa";
+    runRender();
+    capturedOnSubmitMFA({ preventDefault: vi.fn() });
+
+    html = runRender(); // render while loading is true
+    expect(html).toContain("...");
+
+    resolveMFA({ ok: true });
+    await Promise.resolve(); await Promise.resolve();
+  });
+
+  it("renders MFA stage errors and rate limit alerts", () => {
+    // Hits the MFA stage Alert branches (lines 174-176)
+    stateStore[0] = "mfa";
+    stateStore[9] = "some-error"; // error state
+    let html = runRender();
+    expect(html).toContain("some-error");
+
+    stateStore[9] = null;
+    stateStore[11] = 10; // retryAfter state
+    html = runRender();
+    expect(html).toContain("errors.rate_limit_exceeded_countdown");
+  });
+
+  it("handles logical edge cases for mfa setup conditions", async () => {
+    // Covers line 50/52 && false branches and line 55 ?? [] branch
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true, // true, but no token to fail line 50
+    });
+    stateStore[0] = "credentials";
+    runRender();
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "token",
+      mfa_setup_url: "url", // true, but no secret to fail line 52
+    });
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(stateStore[0]).toBe("mfa");
+    expect(stateStore[4]).toBe(""); // mfaSetupSecret is not set
+
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "token",
+      mfa_setup_url: "url",
+      mfa_setup_secret: "secret",
+      // missing mfa_recovery_codes to hit ?? []
+    });
+    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    expect(stateStore[6]).toEqual([]);
+  });
+
+  it("evaluates MFA button disabled branches fully", () => {
+    // Bypass the totpCode length short-circuit to evaluate the rest of the disabled conditions
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-token-xyz";
+    stateStore[8] = "123456"; // valid length bypasses length check
+
+    // Case 1: retryAfter > 0 evaluates to true
+    stateStore[11] = 5; 
+    runRender();
+
+    // Case 2: retryAfter = 0, isSetup = true, codesSaved = false evaluates to true
+    stateStore[11] = 0;
+    stateStore[5] = "otpauth://setup";
+    stateStore[7] = false;
+    runRender();
+
+    // Case 3: retryAfter = 0, isSetup = true, codesSaved = true evaluates to false
+    stateStore[7] = true;
+    runRender();
   });
 });

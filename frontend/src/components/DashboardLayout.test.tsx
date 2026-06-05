@@ -8,6 +8,7 @@ import { renderToString } from "react-dom/server";
 let stateStore: any = {};
 let stateSetters: any = {};
 let callIdx = 0;
+let effectCleanups: Array<() => void> = [];
 
 vi.mock("react", async (importOriginal) => {
   const original = await importOriginal<typeof import("react")>();
@@ -32,7 +33,8 @@ vi.mock("react", async (importOriginal) => {
       return [stateStore[idx], stateSetters[idx]];
     },
     useEffect: (fn: any) => {
-      fn();
+      const cleanup = fn();
+      if (typeof cleanup === "function") effectCleanups.push(cleanup);
     },
   };
 });
@@ -111,6 +113,7 @@ describe("DashboardLayout component", () => {
     stateStore = {};
     stateSetters = {};
     callIdx = 0;
+    effectCleanups = [];
     capturedMeUpdatedListener = null;
 
     global.localStorage = {
@@ -184,6 +187,21 @@ describe("DashboardLayout component", () => {
     expect(html).toContain("retry");
   });
 
+  it("renders auth bootstrap fallback when the user is missing", () => {
+    mockMeData = null;
+    const html = runRender();
+    expect(html).toContain("authBootstrap.network");
+  });
+
+  it("renders non-admin navigation without admin-only links", () => {
+    mockMeData.roles = ["user"];
+    mockPathname = "/dashboard/settings";
+    const html = runRender();
+
+    expect(html).toContain("settings");
+    expect(html).not.toContain("serviceAccounts");
+  });
+
   it("handles profile, locale, and logout buttons correctly", async () => {
     const updateLocaleSpy = vi.spyOn(api, "updateLocale").mockResolvedValue({} as any);
     const logoutSpy = vi.spyOn(api, "logout").mockResolvedValue({} as any);
@@ -204,6 +222,19 @@ describe("DashboardLayout component", () => {
     expect(updateLocaleSpy).toHaveBeenCalledWith("tr");
   });
 
+  it("skips same-locale changes and ignores locale update failures", async () => {
+    const updateLocaleSpy = vi.spyOn(api, "updateLocale").mockRejectedValue(new Error("locale failed"));
+
+    runRender();
+
+    await capturedClickLocales["EN"]();
+    expect(updateLocaleSpy).not.toHaveBeenCalled();
+
+    await capturedClickLocales["TR"]();
+    expect(updateLocaleSpy).toHaveBeenCalledWith("tr");
+    expect(localStorage.setItem).toHaveBeenCalledWith("locale", "tr");
+  });
+
   it("handles me:updated custom window event", () => {
     runRender();
     expect(capturedMeUpdatedListener).toBeDefined();
@@ -212,5 +243,14 @@ describe("DashboardLayout component", () => {
     capturedMeUpdatedListener({ detail: updatedData });
 
     expect(mockSetMe).toHaveBeenCalledWith(updatedData);
+  });
+
+  it("removes the me:updated listener on cleanup", () => {
+    runRender();
+    expect(effectCleanups[0]).toBeDefined();
+
+    effectCleanups[0]();
+
+    expect(window.removeEventListener).toHaveBeenCalledWith("me:updated", expect.any(Function));
   });
 });

@@ -71,8 +71,12 @@ describe("tokenManager utility", () => {
   });
 
   it("schedules timeout and triggers refresh at threshold of remaining TTL", async () => {
+    vi.useFakeTimers();
     const futureTimeSec = Math.floor(Date.now() / 1000) + 10; // 10s in future
     cookies["at_exp"] = futureTimeSec.toString();
+    cookies["csrf_token"] = "csrf123";
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
 
     const spySetTimeout = vi.spyOn(global, "setTimeout");
 
@@ -82,6 +86,10 @@ describe("tokenManager utility", () => {
     const delay = spySetTimeout.mock.calls[0][1];
     expect(delay).toBeGreaterThan(7000);
     expect(delay).toBeLessThan(9000);
+
+    await vi.advanceTimersByTimeAsync(Number(delay));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/refresh", expect.any(Object));
+    vi.useRealTimers();
   });
 
   it("calls onExpired and cancels further refreshes if refresh request fails", async () => {

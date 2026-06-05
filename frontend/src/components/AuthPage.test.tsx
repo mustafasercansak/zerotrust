@@ -12,8 +12,7 @@ describe("AuthPage component", () => {
     const html = renderToString(
       React.createElement(
         AuthPage,
-        { title, subtitle },
-        children
+        { title, subtitle, children }
       )
     );
 
@@ -26,8 +25,7 @@ describe("AuthPage component", () => {
     const html = renderToString(
       React.createElement(
         AuthPage,
-        { title: "Only Title" },
-        React.createElement("div", null, "Child")
+        { title: "Only Title", children: React.createElement("div", null, "Child") }
       )
     );
     expect(html).toContain("Only Title");

@@ -244,6 +244,27 @@ describe("SettingsPage page component", () => {
     expect(deleteSpy).toHaveBeenCalled();
   });
 
+  it("ignores avatar input changes when no file is selected", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const uploadSpy = vi.spyOn(api, "uploadAvatar").mockResolvedValue({} as any);
+
+    runRender();
+    expect(capturedInputs[0]).toBeDefined();
+    await capturedInputs[0]({ target: { files: [] } });
+
+    expect(uploadSpy).not.toHaveBeenCalled();
+  });
+
   it("handles system settings save including step up mfa", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u123",
@@ -292,6 +313,63 @@ describe("SettingsPage page component", () => {
     expect(stepUpSpy).toHaveBeenCalledWith("123456");
   });
 
+  it("handles system settings load and save failure branches", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+
+    vi.spyOn(api.admin, "getSettings").mockRejectedValue(new Error("settings unavailable"));
+    stateStore[0] = 2;
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    runRender();
+    expect(stateStore[15]).toBe("internal_error");
+
+    stateStore[8] = "5";
+    stateStore[11] = "99";
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    expect(stateStore[15]).toBe("invalid_value");
+
+    stateStore[11] = "5";
+    vi.spyOn(api.admin, "updateSettings").mockRejectedValueOnce(new Error("save failed"));
+    runRender();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    expect(stateStore[15]).toBe("internal_error");
+  });
+
+  it("does not complete system save when step-up MFA prompt is empty", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const updateSpy = vi.spyOn(api.admin, "updateSettings").mockRejectedValue(new ApiError("mfa_required", undefined, 403));
+    const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
+    vi.stubGlobal("window", { prompt: vi.fn().mockReturnValue("") });
+    stateStore[0] = 2;
+    stateStore[8] = "5";
+    stateStore[11] = "5";
+    runRender();
+
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(stepUpSpy).not.toHaveBeenCalled();
+  });
+
   it("triggers interactive form and tab controls", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u123",
@@ -336,5 +414,149 @@ describe("SettingsPage page component", () => {
     expect(capturedSwitchChanges[0]).toBeDefined();
     capturedSwitchChanges[0]({ target: { checked: true } });
     capturedSwitchChanges[0]({ target: { checked: false } });
+  });
+
+  it("renders email initials, no-avatar profile, and the security tab", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "fallback@example.com",
+      first_name: undefined,
+      last_name: undefined,
+      has_avatar: false,
+      roles: ["user"],
+      locale: "en",
+    } as any);
+    const getSettingsSpy = vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+
+    let html = runRender();
+    expect(html).toContain("FA");
+    expect(html).not.toContain("/api/v1/users/u123/avatar");
+    expect(getSettingsSpy).not.toHaveBeenCalled();
+
+    stateStore[0] = 1;
+    html = runRender();
+    expect(html).toContain("SessionsPageMock");
+  });
+
+  it("runs success timeout callbacks and renders saving labels", async () => {
+    vi.stubGlobal("setTimeout", vi.fn((fn: () => void) => {
+      fn();
+      return 1;
+    }));
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api, "updateProfile").mockResolvedValue({} as any);
+    vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
+
+    stateStore[5] = true;
+    expect(runRender()).toContain("saving");
+    await capturedSubmits[0]({ preventDefault: vi.fn() });
+
+    stateStore[0] = 2;
+    stateStore[8] = "5";
+    stateStore[11] = "5";
+    stateStore[12] = false;
+    stateStore[13] = true;
+    expect(runRender()).toContain("saving");
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+
+    expect(setTimeout).toHaveBeenCalled();
+  });
+
+  it("handles avatar ApiError failures", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api, "uploadAvatar").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
+    vi.spyOn(api, "deleteAvatar").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
+
+    runRender();
+    await capturedInputs[0]({ target: { files: [{ size: 1024 }] } });
+    expect(stateStore[3]).toBe("errors.invalid_value");
+
+    await capturedButtonClicks[0]();
+    expect(stateStore[3]).toBe("errors.invalid_value");
+  });
+
+  it("handles nonnumeric login attempts and undefined MFA prompt returns", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const updateSpy = vi.spyOn(api.admin, "updateSettings").mockRejectedValue(new ApiError("mfa_required", undefined, 403));
+    const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
+    vi.stubGlobal("window", { prompt: vi.fn().mockReturnValue(undefined) });
+
+    stateStore[0] = 2;
+    stateStore[8] = "5";
+    stateStore[11] = "nope";
+    stateStore[12] = false;
+    runRender();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    expect(stateStore[15]).toBe("invalid_value");
+
+    stateStore[11] = "5";
+    runRender();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(stepUpSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders profile alerts and clears profile success after its timer", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: true,
+      roles: ["admin"],
+      locale: "en",
+    });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const updateProfileSpy = vi.spyOn(api, "updateProfile").mockResolvedValue({} as any);
+    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
+    vi.stubGlobal("CustomEvent", class {
+      type: string;
+      detail: unknown;
+
+      constructor(type: string, init?: { detail?: unknown }) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    });
+
+    runRender();
+    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    expect(updateProfileSpy).toHaveBeenCalled();
+    expect(stateStore[4]).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 3100));
+    expect(stateStore[4]).toBe(false);
+
+    stateStore[3] = "profile-error";
+    stateStore[4] = true;
+    const html = runRender();
+    expect(html).toContain("profile-error");
+    expect(html).toContain("saved");
   });
 });

@@ -279,4 +279,22 @@ describe("MfaPage page component", () => {
     html = runRender();
     expect(html).toContain("errors.invalid_code");
   });
+
+  it("renders pending setup submitting and error states", () => {
+    vi.spyOn(api, "mfaStatus").mockResolvedValue({ enabled: false, supported: true });
+    stateStore[0] = "pending";
+    stateStore[1] = {
+      otp_auth_url: "otpauth://totp/Test",
+      secret: "SECRET123",
+      recovery_codes: ["code1", "code2"],
+    };
+    stateStore[3] = "errors.invalid_code";
+    stateStore[4] = true;
+    stateStore[5] = true;
+
+    const html = runRender();
+
+    expect(html).toContain("...");
+    expect(html).toContain("errors.invalid_code");
+  });
 });

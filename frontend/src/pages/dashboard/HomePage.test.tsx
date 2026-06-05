@@ -34,11 +34,9 @@ describe("HomePage component", () => {
       email: "testuser@example.com",
       first_name: "Test",
       last_name: "User",
-      is_active: true,
+      has_avatar: false,
       locale: "en",
       roles: ["admin", "operator"],
-      created_at: "2026-06-04T12:00:00Z",
-      updated_at: "2026-06-04T12:00:00Z",
     });
 
     const html = renderToString(React.createElement(HomePage));

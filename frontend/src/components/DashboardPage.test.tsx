@@ -10,8 +10,8 @@ describe("DashboardPage component", () => {
         DashboardPage,
         {
           action: React.createElement("button", null, "Page Action"),
-        },
-        React.createElement("div", null, "Dashboard Content")
+          children: React.createElement("div", null, "Dashboard Content"),
+        }
       )
     );
 
@@ -27,8 +27,8 @@ describe("DashboardPage component", () => {
         {
           accessDenied: true,
           accessDeniedMessage: "You do not have permission to view this page",
-        },
-        React.createElement("div", null, "Secret Dashboard Content")
+          children: React.createElement("div", null, "Secret Dashboard Content"),
+        }
       )
     );
 

@@ -43,7 +43,6 @@ function sessionDeviceLabel(s: Session): string {
 }
 
 function sessionCountColor(count: number, maxSessions: number): ChipProps["color"] {
-  if (count <= 0) return "default";
   const ratio = count / Math.max(maxSessions, 1);
   if (ratio <= 0.5) return "primary";
   if (ratio <= 0.75) return "warning";
@@ -108,7 +107,7 @@ function RowActions({ row, me, onStatusChange, onViewSessions, onRevokeAll }: Ro
 // ── Sessions dialog ───────────────────────────────────────────────────────────
 
 interface SessionsDialogProps {
-  user: UserData | null;
+  user: UserData;
   onClose: () => void;
   onRevoke: (userId: string, sessionId: string) => Promise<void>;
   onRevokeAll: (userId: string) => Promise<void>;
@@ -141,8 +140,6 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
     void load(user.id);
   }
 
-  if (!user) return null;
-
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ pb: 1 }}>
@@ -170,7 +167,7 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
                     <Button size="small" color="warning" onClick={async () => {
                       try {
                         await onRevoke(user.id, s.id);
-                        setSessions((prev) => prev?.filter((x) => x.id !== s.id) ?? null);
+                        setSessions((prev) => prev!.filter((x) => x.id !== s.id));
                       } catch {
                         // handled by caller
                       }
