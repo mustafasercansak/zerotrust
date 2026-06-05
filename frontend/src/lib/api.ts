@@ -1,5 +1,14 @@
 import { scheduleRefresh } from "./tokenManager";
 import { getClientInfo } from "./clientInfo";
+import type { CredentialCreationOptionsJSON, CredentialRequestOptionsJSON } from "./webauthn";
+
+export interface WebAuthnCredential {
+  id: string;
+  name: string;
+  sign_count: number;
+  created_at: string;
+  last_used_at: string | null;
+}
 
 export interface MeData {
   user_id: string;
@@ -240,7 +249,7 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
 
 export const api = {
   login: async (email: string, password: string) =>
-    request<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string; mfa_setup_secret?: string; mfa_setup_url?: string; mfa_recovery_codes?: string[] }>("/api/v1/auth/login", {
+    request<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string; totp_enabled?: boolean; webauthn_enabled?: boolean; mfa_setup_secret?: string; mfa_setup_url?: string; mfa_recovery_codes?: string[] }>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password, client_info: await getClientInfo() }),
     }),
@@ -248,6 +257,19 @@ export const api = {
     request<{ ok: boolean }>("/api/v1/auth/mfa/challenge", {
       method: "POST",
       body: JSON.stringify({ mfa_token: mfaToken, totp_code: totpCode }),
+    }),
+
+  // WebAuthn passkey login (second factor). Begin returns the assertion options
+  // ({ publicKey: ... }); finish submits the signed assertion.
+  webauthnLoginBegin: (mfaToken: string) =>
+    request<CredentialRequestOptionsJSON>("/api/v1/auth/webauthn/login/begin", {
+      method: "POST",
+      body: JSON.stringify({ mfa_token: mfaToken }),
+    }),
+  webauthnLoginFinish: (mfaToken: string, credential: unknown) =>
+    request<{ ok: boolean }>("/api/v1/auth/webauthn/login/finish", {
+      method: "POST",
+      body: JSON.stringify({ mfa_token: mfaToken, credential }),
     }),
 
   logout: () =>
@@ -334,6 +356,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code }),
     }),
+
+  // WebAuthn passkey management (authenticated user).
+  webauthnList: () =>
+    request<{ credentials: WebAuthnCredential[] }>("/api/v1/webauthn/credentials"),
+
+  webauthnRegisterBegin: () =>
+    request<CredentialCreationOptionsJSON>("/api/v1/webauthn/register/begin", { method: "POST" }),
+
+  webauthnRegisterFinish: (name: string, credential: unknown) =>
+    request<{ ok: boolean }>("/api/v1/webauthn/register/finish", {
+      method: "POST",
+      body: JSON.stringify({ name, credential }),
+    }),
+
+  webauthnDeleteCredential: (id: string) =>
+    request<void>(`/api/v1/webauthn/credentials/${id}`, { method: "DELETE" }),
 
   admin: {
     listUsers: (p: PageParams) =>

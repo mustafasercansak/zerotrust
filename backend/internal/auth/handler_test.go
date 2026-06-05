@@ -56,6 +56,10 @@ type fakeAuthService struct {
 	logoutCalled      bool
 	dpopErr           error
 	dpopJTIs          []string
+	waBeginOpts       json.RawMessage
+	waBeginErr        error
+	waFinishPair      *TokenPair
+	waFinishErr       error
 }
 
 func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
@@ -93,6 +97,20 @@ func (s *fakeAuthService) Logout(ctx context.Context, refreshToken, accessToken 
 func (s *fakeAuthService) ConsumeDPoPProof(ctx context.Context, jti string) error {
 	s.dpopJTIs = append(s.dpopJTIs, jti)
 	return s.dpopErr
+}
+
+func (s *fakeAuthService) WebAuthnLoginBegin(ctx context.Context, pendingToken string) (json.RawMessage, error) {
+	if s.waBeginErr != nil {
+		return nil, s.waBeginErr
+	}
+	return s.waBeginOpts, nil
+}
+
+func (s *fakeAuthService) WebAuthnLoginFinish(ctx context.Context, pendingToken string, credential []byte) (*TokenPair, error) {
+	if s.waFinishErr != nil {
+		return nil, s.waFinishErr
+	}
+	return s.waFinishPair, nil
 }
 
 type fakePasswordResetter struct {

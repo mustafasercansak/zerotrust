@@ -32,6 +32,7 @@ import (
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/settings"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/internal/webauthn"
 	"github.com/zerotrust/backend/pkg/database"
 	"github.com/zerotrust/backend/pkg/geoip"
 	"github.com/zerotrust/backend/pkg/mailer"
@@ -273,6 +274,21 @@ func run(ctx context.Context, cfg config) error {
 	})
 	// Enable DPoP htu host binding when an external API origin is configured. (#36)
 	auth.SetExpectedDPoPOrigin(cfg.DPoPExpectedOrigin)
+
+	// WebAuthn / passkeys — phishing-resistant second factor. The browser origin
+	// is the frontend, so the RP origins are the configured CORS origins.
+	webauthnRepo := webauthn.NewRepository(db)
+	webauthnSvc, err := webauthn.NewService(webauthnRepo, rdb, webauthn.Config{
+		RPID:          cfg.WebAuthnRPID,
+		RPDisplayName: cfg.WebAuthnRPDisplayName,
+		RPOrigins:     cfg.CORSOrigins,
+	})
+	if err != nil {
+		return fmt.Errorf("webauthn init: %w", err)
+	}
+	authSvc.ConfigureWebAuthn(webauthnSvc)
+	webauthnHandler := webauthn.NewHandler(webauthnSvc)
+
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
@@ -324,6 +340,8 @@ func run(ctx context.Context, cfg config) error {
 		publicAudit := authmw.AuditLog(auditRepo)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/login", authHandler.Login)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/mfa/challenge", authHandler.MFAChallenge)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/login/begin", authHandler.WebAuthnLoginBegin)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/login/finish", authHandler.WebAuthnLoginFinish)
 		r.With(publicAudit, tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
 		r.With(publicAudit).Post("/auth/refresh", authHandler.Refresh)
 		r.With(publicAudit).Post("/auth/logout", authHandler.Logout)
@@ -550,6 +568,12 @@ func run(ctx context.Context, cfg config) error {
 				})
 			}
 
+			// WebAuthn / passkey management — any authenticated user
+			r.Post("/webauthn/register/begin", webauthnHandler.RegisterBegin)
+			r.Post("/webauthn/register/finish", webauthnHandler.RegisterFinish)
+			r.Get("/webauthn/credentials", webauthnHandler.List)
+			r.Delete("/webauthn/credentials/{id}", webauthnHandler.Delete)
+
 			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
@@ -659,6 +683,8 @@ type config struct {
 	SMTPPassword             string
 	PublicAppURL             string
 	DPoPExpectedOrigin       string
+	WebAuthnRPID             string
+	WebAuthnRPDisplayName    string
 	GeoIPDBPath              string
 }
 
@@ -740,6 +766,8 @@ func loadConfig() (config, error) {
 		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
 		PublicAppURL:             getEnv("PUBLIC_APP_URL", "http://localhost:3000"),
 		DPoPExpectedOrigin:       getEnv("DPOP_EXPECTED_ORIGIN", ""),
+		WebAuthnRPID:             getEnv("WEBAUTHN_RP_ID", "localhost"),
+		WebAuthnRPDisplayName:    getEnv("WEBAUTHN_RP_DISPLAY_NAME", "ZeroTrust"),
 		GeoIPDBPath:              getEnv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb"),
 	}, nil
 }

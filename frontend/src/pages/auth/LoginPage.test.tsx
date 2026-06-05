@@ -211,6 +211,7 @@ describe("LoginPage component", () => {
       ok: true,
       mfa_required: true,
       mfa_token: "mfa-token-abc",
+      totp_enabled: true,
     });
 
     runRender();
@@ -378,8 +379,9 @@ describe("LoginPage component", () => {
 
     let resolveMFA: any;
     vi.spyOn(api, "mfaChallenge").mockImplementation(() => new Promise((res) => { resolveMFA = res; }));
-    
+
     stateStore[0] = "mfa";
+    stateStore[12] = true; // totpEnabled → render the TOTP submit button
     runRender();
     capturedOnSubmitMFA({ preventDefault: vi.fn() });
 

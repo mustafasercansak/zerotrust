@@ -840,7 +840,8 @@ Acceptance criteria:
 Status update:
 - `admin/handler.go` `UpdateRoles`/`SetStatus` now reject self-modification (caller `UserID` == target) with 403 `self_modification_forbidden`, using `middleware.ClaimsFrom`.
 - Added `user.ErrLastAdmin` and an atomic `guardLastAdmin` check in `user/repository.go` `SetRoles`/`SetActive`: the operation is rejected (and rolled back) only when the target is currently the sole active admin, avoiding false positives in admin-less setups. Mapped to HTTP 409 `last_admin`.
-- Tests: handler-level guards in `admin/lastadmin_test.go` (no DB); DB-gated invariant tests in `user/lastadmin_integration_test.go`.
+- The guard runs against pre-change state and after unknown-role validation, so `ErrUnknownRole` (input validation) still takes precedence over `ErrLastAdmin`.
+- Tests: handler-level guards in `admin/lastadmin_test.go` (no DB); DB-gated invariant tests in `user/lastadmin_integration_test.go`. Verified against the live test Postgres (`go test -p 1 ./...` with `TEST_DATABASE_URL`).
 
 ### 35. Add DPoP proof replay protection (jti tracking)
 
@@ -942,3 +943,34 @@ Acceptance criteria:
 Status update:
 - Added `parseCORSOrigins` in `main.go`, called during config load: trims origins, rejects `*` (since `AllowCredentials` is on), and requires at least one origin — `loadConfig` now fails fast on a wildcard.
 - Tests in `cors_test.go`: wildcard alone and alongside others rejected, empty rejected, explicit origins trimmed and preserved.
+
+---
+
+## Features
+
+### 40. WebAuthn / passkeys as a phishing-resistant second factor
+
+State: CLOSED
+
+Status: The platform offered only TOTP (+ recovery codes) as a second factor. Added FIDO2/WebAuthn passkeys (security keys, platform authenticators) alongside TOTP, reusing the existing MFA/step-up architecture and pending-token login flow.
+
+Related files:
+- [backend/migrations/000018_webauthn_credentials.up.sql](/home/m/projects/zerotrust/backend/migrations/000018_webauthn_credentials.up.sql)
+- [backend/internal/webauthn/](/home/m/projects/zerotrust/backend/internal/webauthn/) (repository, service, handler)
+- [backend/internal/auth/service.go](/home/m/projects/zerotrust/backend/internal/auth/service.go) · [backend/internal/auth/handler.go](/home/m/projects/zerotrust/backend/internal/auth/handler.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/lib/webauthn.ts](/home/m/projects/zerotrust/frontend/src/lib/webauthn.ts) · [frontend/src/pages/dashboard/PasskeysSection.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/PasskeysSection.tsx) · [frontend/src/pages/auth/LoginPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/auth/LoginPage.tsx)
+
+Acceptance criteria:
+- Register, list, and remove passkeys for an authenticated user.
+- Use a passkey as a second factor at login (alongside or instead of TOTP).
+- Phishing-resistant ceremony with origin/RP-ID binding, signature-counter persistence, and single-use challenge sessions.
+- Tests at every layer, including a real end-to-end register+login ceremony.
+
+Status update:
+- New `webauthn` package wrapping `github.com/go-webauthn/webauthn`: `Repository` (credential CRUD, JSONB blob + metadata), `Service` (begin/finish registration & login, Redis-backed single-use ceremony sessions, credential-exclusion on register, sign-count update on login), and `Handler` (register begin/finish, list, delete).
+- DB migration `000018` adds `user_webauthn_credentials` (credential_id unique, full credential JSONB, sign_count, name, timestamps).
+- Auth integration: `auth.Service` gained a `WebAuthnVerifier` (`ConfigureWebAuthn`); `Login` now flags `TOTPEnabled`/`WebAuthnEnabled` and requires the second factor when a passkey exists; new `/auth/webauthn/login/begin|finish` endpoints peek/consume the pending token and issue tokens via `completeLogin`. Global-MFA bootstrap no longer forces TOTP setup when a passkey is already registered.
+- Config: `WEBAUTHN_RP_ID` (default `localhost`) and `WEBAUTHN_RP_DISPLAY_NAME`; RP origins reuse `CORS_ALLOWED_ORIGINS`.
+- Frontend: `webauthn.ts` (base64url ↔ ArrayBuffer + ceremony serialization), api methods, a `PasskeysSection` for the MFA page, and a "Use a passkey" path in the login MFA stage.
+- Tests: backend service end-to-end ceremony via `descope/virtualwebauthn` (real crypto register→login), handler/auth-integration with fakes, DB-gated repository lifecycle; frontend webauthn helpers (8), api methods (6), and a `PasskeysSection` render smoke test. Verified against the live test Postgres (`go test -p 1 ./...`).

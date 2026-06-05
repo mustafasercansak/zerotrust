@@ -34,6 +34,8 @@ type authService interface {
 	RefreshTokens(ctx context.Context, refreshToken, ip, ua string, deviceInfo map[string]string) (*TokenPair, error)
 	Logout(ctx context.Context, refreshToken, accessToken string) error
 	ConsumeDPoPProof(ctx context.Context, jti string) error
+	WebAuthnLoginBegin(ctx context.Context, pendingToken string) (json.RawMessage, error)
+	WebAuthnLoginFinish(ctx context.Context, pendingToken string, credential []byte) (*TokenPair, error)
 }
 
 type userService interface {
@@ -203,8 +205,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if result.MFARequired {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
-			"mfa_required": true,
-			"mfa_token":    result.MFAPendingToken,
+			"mfa_required":     true,
+			"mfa_token":        result.MFAPendingToken,
+			"totp_enabled":     result.TOTPEnabled,
+			"webauthn_enabled": result.WebAuthnEnabled,
 		}
 		if result.MFASetupSecret != "" {
 			resp["mfa_setup_secret"] = result.MFASetupSecret
@@ -285,6 +289,63 @@ func (h *Handler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 	h.logAudit(r.Context(), audit.Entry{
 		Action:    "auth.mfa_challenge_success",
 		Resource:  "/api/v1/auth/mfa/challenge",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  statusMetadata("", http.StatusOK),
+	}, true)
+
+	h.writeCookies(w, r, pair)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/v1/auth/webauthn/login/begin — passkey assertion options for the
+// second factor. Body: {"mfa_token":"..."}
+func (h *Handler) WebAuthnLoginBegin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MFAToken string `json:"mfa_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MFAToken == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	opts, err := h.authSvc.WebAuthnLoginBegin(r.Context(), req.MFAToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(opts)
+}
+
+// POST /api/v1/auth/webauthn/login/finish — verify the passkey assertion and
+// complete login. Body: {"mfa_token":"...","credential":{...assertion...}}
+func (h *Handler) WebAuthnLoginFinish(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MFAToken   string          `json:"mfa_token"`
+		Credential json.RawMessage `json:"credential"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MFAToken == "" || len(req.Credential) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	pair, err := h.authSvc.WebAuthnLoginFinish(r.Context(), req.MFAToken, req.Credential)
+	if err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.webauthn_login_failed",
+			Resource:  "/api/v1/auth/webauthn/login/finish",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  statusMetadata("invalid_credentials", http.StatusUnauthorized),
+		}, true)
+		writeError(w, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.webauthn_login_success",
+		Resource:  "/api/v1/auth/webauthn/login/finish",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
 		Metadata:  statusMetadata("", http.StatusOK),

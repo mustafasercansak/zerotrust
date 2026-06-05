@@ -3,15 +3,18 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
+import { performAssertion, isWebAuthnSupported } from "@/lib/webauthn";
 import { AuthPage } from "@/components/AuthPage";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Divider from "@mui/material/Divider";
 import MuiLink from "@mui/material/Link";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import Fingerprint from "@mui/icons-material/Fingerprint";
 import { QRCodeSVG } from "qrcode.react";
 
 type Stage = "credentials" | "mfa";
@@ -32,6 +35,9 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [retryAfter, setRetryAfter] = useState(0);
+  // Which second factors the account can use (set from the login response).
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [webauthnEnabled, setWebauthnEnabled] = useState(false);
 
   useEffect(() => {
     if (retryAfter <= 0) return;
@@ -48,6 +54,8 @@ export default function LoginPage() {
       const result = await api.login(email, password);
       if (result.mfa_required && result.mfa_token) {
         setMfaToken(result.mfa_token);
+        setTotpEnabled(!!result.totp_enabled);
+        setWebauthnEnabled(!!result.webauthn_enabled);
         if (result.mfa_setup_url && result.mfa_setup_secret) {
           setMfaSetupURL(result.mfa_setup_url);
           setMfaSetupSecret(result.mfa_setup_secret);
@@ -99,8 +107,31 @@ export default function LoginPage() {
     }
   }
 
+  async function handlePasskeyLogin() {
+    setError(null);
+    if (retryAfter > 0) return;
+    setLoading(true);
+    try {
+      const options = await api.webauthnLoginBegin(mfaToken);
+      const assertion = await performAssertion(options);
+      await api.webauthnLoginFinish(mfaToken, assertion);
+      scheduleRefresh(() => navigate("/auth/login"));
+      navigate("/dashboard");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
+        setRetryAfter(err.retryAfter);
+        setError(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+      } else {
+        setError(t("errors.webauthn_failed"));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   if (stage === "mfa") {
     const isSetup = !!mfaSetupURL;
+    const showTotp = isSetup || totpEnabled;
     return (
       <AuthPage title={t("mfaTitle")} subtitle={t("mfaSubtitle")}>
         <Box component="form" onSubmit={handleMFA} sx={{ display: "grid", gap: 2 }}>
@@ -153,28 +184,46 @@ export default function LoginPage() {
               )}
             </Box>
           )}
-          <TextField
-            label={isSetup ? t("mfaCode") : "MFA Code / Recovery Code"}
-            type="text"
-            autoFocus
-            required
-            value={totpCode}
-            onChange={(e) => setTotpCode(e.target.value)}
-            placeholder={isSetup ? "000000" : "000000 or xxxx-xxxx-xxxx"}
-            slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" } } }}
-          />
+          {webauthnEnabled && isWebAuthnSupported() && (
+            <>
+              <Button
+                type="button"
+                variant="contained"
+                startIcon={<Fingerprint />}
+                onClick={handlePasskeyLogin}
+                disabled={loading || retryAfter > 0}
+              >
+                {t("usePasskey")}
+              </Button>
+              {showTotp && <Divider sx={{ fontSize: "0.8rem" }}>{t("or")}</Divider>}
+            </>
+          )}
+          {showTotp && (
+            <TextField
+              label={isSetup ? t("mfaCode") : "MFA Code / Recovery Code"}
+              type="text"
+              autoFocus
+              required
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value)}
+              placeholder={isSetup ? "000000" : "000000 or xxxx-xxxx-xxxx"}
+              slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" } } }}
+            />
+          )}
           {(error || retryAfter > 0) && (
             <Alert severity="error">
               {retryAfter > 0 ? t("errors.rate_limit_exceeded_countdown", { seconds: retryAfter }) : error}
             </Alert>
           )}
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={loading || (totpCode.length !== 6 && totpCode.length !== 14) || retryAfter > 0 || (isSetup && !codesSaved)}
-          >
-            {loading ? "..." : retryAfter > 0 ? t("retryButton", { seconds: retryAfter }) : t("mfaButton")}
-          </Button>
+          {showTotp && (
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={loading || (totpCode.length !== 6 && totpCode.length !== 14) || retryAfter > 0 || (isSetup && !codesSaved)}
+            >
+              {loading ? "..." : retryAfter > 0 ? t("retryButton", { seconds: retryAfter }) : t("mfaButton")}
+            </Button>
+          )}
           <Button
             type="button"
             onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); setMfaRecoveryCodes([]); setCodesSaved(false); }}

@@ -1,0 +1,256 @@
+// Package webauthn implements FIDO2/WebAuthn passkeys as a phishing-resistant
+// second factor alongside TOTP. It wraps github.com/go-webauthn/webauthn,
+// persists credentials via a Repository, and keeps in-flight ceremony state in
+// Redis (single-use, short-lived).
+package webauthn
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/go-webauthn/webauthn/protocol"
+	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+)
+
+var (
+	ErrNoCredentials   = errors.New("no_webauthn_credentials")
+	ErrSessionNotFound = errors.New("webauthn_session_not_found")
+	ErrCredentialInUse = errors.New("webauthn_credential_already_registered")
+)
+
+// ceremonySessionTTL bounds how long a begun registration/login ceremony can be
+// finished. Ceremonies are single-use (consumed on finish).
+const ceremonySessionTTL = 5 * time.Minute
+
+// store is the persistence surface consumed by Service (*Repository satisfies it).
+type store interface {
+	Insert(ctx context.Context, userID, credentialID string, data []byte, signCount int64, name string) error
+	ListData(ctx context.Context, userID string) ([][]byte, error)
+	ListMeta(ctx context.Context, userID string) ([]CredentialMeta, error)
+	Count(ctx context.Context, userID string) (int, error)
+	UpdateOnLogin(ctx context.Context, credentialID string, data []byte, signCount int64) error
+	Delete(ctx context.Context, id, userID string) error
+	CredentialExists(ctx context.Context, credentialID string) (bool, error)
+}
+
+// Config holds the WebAuthn Relying Party settings.
+type Config struct {
+	RPID          string   // effective domain, e.g. "localhost" or "auth.example.com"
+	RPDisplayName string   // human-facing RP name
+	RPOrigins     []string // allowed origins, e.g. "http://localhost:3000"
+}
+
+type Service struct {
+	repo store
+	rdb  *redis.Client
+	wa   *gowebauthn.WebAuthn
+}
+
+func NewService(repo store, rdb *redis.Client, cfg Config) (*Service, error) {
+	wa, err := gowebauthn.New(&gowebauthn.Config{
+		RPID:          cfg.RPID,
+		RPDisplayName: cfg.RPDisplayName,
+		RPOrigins:     cfg.RPOrigins,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Service{repo: repo, rdb: rdb, wa: wa}, nil
+}
+
+// waUser adapts our user data to the go-webauthn User interface.
+type waUser struct {
+	id          []byte
+	name        string
+	displayName string
+	creds       []gowebauthn.Credential
+}
+
+func (u *waUser) WebAuthnID() []byte                           { return u.id }
+func (u *waUser) WebAuthnName() string                         { return u.name }
+func (u *waUser) WebAuthnDisplayName() string                  { return u.displayName }
+func (u *waUser) WebAuthnCredentials() []gowebauthn.Credential { return u.creds }
+
+func (s *Service) buildUser(ctx context.Context, userID, name, displayName string) (*waUser, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+	blobs, err := s.repo.ListData(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	creds := make([]gowebauthn.Credential, 0, len(blobs))
+	for _, b := range blobs {
+		var c gowebauthn.Credential
+		if err := json.Unmarshal(b, &c); err != nil {
+			return nil, err
+		}
+		creds = append(creds, c)
+	}
+	handle := make([]byte, 16)
+	copy(handle, uid[:])
+	if displayName == "" {
+		displayName = name
+	}
+	return &waUser{id: handle, name: name, displayName: displayName, creds: creds}, nil
+}
+
+// HasCredentials reports whether the user has at least one passkey registered.
+func (s *Service) HasCredentials(ctx context.Context, userID string) bool {
+	n, err := s.repo.Count(ctx, userID)
+	return err == nil && n > 0
+}
+
+// ListCredentials returns the user's passkeys for display/management.
+func (s *Service) ListCredentials(ctx context.Context, userID string) ([]CredentialMeta, error) {
+	return s.repo.ListMeta(ctx, userID)
+}
+
+// DeleteCredential removes one of the user's passkeys by row id.
+func (s *Service) DeleteCredential(ctx context.Context, id, userID string) error {
+	return s.repo.Delete(ctx, id, userID)
+}
+
+// BeginRegistration starts a passkey registration ceremony and returns the
+// CredentialCreation options (JSON) for navigator.credentials.create().
+func (s *Service) BeginRegistration(ctx context.Context, userID, name, displayName string) (json.RawMessage, error) {
+	user, err := s.buildUser(ctx, userID, name, displayName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Exclude already-registered authenticators so the same device cannot be
+	// enrolled twice.
+	exclusions := make([]protocol.CredentialDescriptor, 0, len(user.creds))
+	for _, c := range user.creds {
+		exclusions = append(exclusions, protocol.CredentialDescriptor{
+			Type:         protocol.PublicKeyCredentialType,
+			CredentialID: c.ID,
+			Transport:    c.Transport,
+		})
+	}
+
+	creation, session, err := s.wa.BeginRegistration(user, gowebauthn.WithExclusions(exclusions))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.saveSession(ctx, regSessionKey(userID), session); err != nil {
+		return nil, err
+	}
+	return json.Marshal(creation)
+}
+
+// FinishRegistration verifies the attestation response and stores the new
+// credential under the given friendly name.
+func (s *Service) FinishRegistration(ctx context.Context, userID, name, displayName, credName string, responseBody []byte) error {
+	session, err := s.loadSession(ctx, regSessionKey(userID))
+	if err != nil {
+		return err
+	}
+	user, err := s.buildUser(ctx, userID, name, displayName)
+	if err != nil {
+		return err
+	}
+	parsed, err := protocol.ParseCredentialCreationResponseBody(bytes.NewReader(responseBody))
+	if err != nil {
+		return err
+	}
+	cred, err := s.wa.CreateCredential(user, session, parsed)
+	if err != nil {
+		return err
+	}
+
+	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	exists, err := s.repo.CredentialExists(ctx, credID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrCredentialInUse
+	}
+
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return err
+	}
+	return s.repo.Insert(ctx, userID, credID, data, int64(cred.Authenticator.SignCount), credName)
+}
+
+// BeginLogin starts an assertion ceremony for the second factor and returns the
+// CredentialAssertion options (JSON) for navigator.credentials.get().
+func (s *Service) BeginLogin(ctx context.Context, userID, name, displayName string) (json.RawMessage, error) {
+	user, err := s.buildUser(ctx, userID, name, displayName)
+	if err != nil {
+		return nil, err
+	}
+	if len(user.creds) == 0 {
+		return nil, ErrNoCredentials
+	}
+	assertion, session, err := s.wa.BeginLogin(user)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.saveSession(ctx, loginSessionKey(userID), session); err != nil {
+		return nil, err
+	}
+	return json.Marshal(assertion)
+}
+
+// FinishLogin verifies the assertion response, updates the signature counter,
+// and returns nil on success. The caller is responsible for issuing tokens.
+func (s *Service) FinishLogin(ctx context.Context, userID, name, displayName string, responseBody []byte) error {
+	session, err := s.loadSession(ctx, loginSessionKey(userID))
+	if err != nil {
+		return err
+	}
+	user, err := s.buildUser(ctx, userID, name, displayName)
+	if err != nil {
+		return err
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(responseBody))
+	if err != nil {
+		return err
+	}
+	cred, err := s.wa.ValidateLogin(user, session, parsed)
+	if err != nil {
+		return err
+	}
+
+	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdateOnLogin(ctx, credID, data, int64(cred.Authenticator.SignCount))
+}
+
+func (s *Service) saveSession(ctx context.Context, key string, sd *gowebauthn.SessionData) error {
+	b, err := json.Marshal(sd)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, key, b, ceremonySessionTTL).Err()
+}
+
+// loadSession reads and deletes (single-use) the stored ceremony session.
+func (s *Service) loadSession(ctx context.Context, key string) (gowebauthn.SessionData, error) {
+	var sd gowebauthn.SessionData
+	b, err := s.rdb.GetDel(ctx, key).Bytes()
+	if err != nil {
+		return sd, ErrSessionNotFound
+	}
+	if err := json.Unmarshal(b, &sd); err != nil {
+		return sd, err
+	}
+	return sd, nil
+}
+
+func regSessionKey(userID string) string   { return "webauthn:reg:" + userID }
+func loginSessionKey(userID string) string { return "webauthn:login:" + userID }

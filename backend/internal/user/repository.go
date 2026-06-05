@@ -387,33 +387,40 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 	}
 	defer tx.Rollback(ctx)
 
+	// Validate every requested role exists first, so an unknown role is reported
+	// (ErrUnknownRole) regardless of the last-admin guard below — input
+	// validation takes precedence over the invariant check.
+	newHasAdmin := false
+	for _, name := range roleNames {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM roles WHERE name = $1)`, name).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("%w: %q", ErrUnknownRole, name)
+		}
+		if name == adminRoleName {
+			newHasAdmin = true
+		}
+	}
+
+	// Enforce the last-admin invariant before mutating: if the new role set
+	// drops admin and the target is currently the only active admin, reject.
+	// The check must run against pre-change state. (ISSUE_LIST #34)
+	if !newHasAdmin {
+		if err := guardLastAdmin(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+
 	if _, err := tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID); err != nil {
 		return err
 	}
 	for _, name := range roleNames {
-		tag, err := tx.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 			INSERT INTO user_roles (user_id, role_id)
 			SELECT $1, id FROM roles WHERE name = $2
-		`, userID, name)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("%w: %q", ErrUnknownRole, name)
-		}
-	}
-
-	// Enforce the last-admin invariant: if the target is currently the only
-	// active admin and the new role set drops admin, reject. (ISSUE_LIST #34)
-	newHasAdmin := false
-	for _, name := range roleNames {
-		if name == adminRoleName {
-			newHasAdmin = true
-			break
-		}
-	}
-	if !newHasAdmin {
-		if err := guardLastAdmin(ctx, tx, userID); err != nil {
+		`, userID, name); err != nil {
 			return err
 		}
 	}

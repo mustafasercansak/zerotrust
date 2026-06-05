@@ -52,6 +52,15 @@ type MFAChecker interface {
 	VerifyAndEnable(ctx context.Context, userID, code string) error
 }
 
+// WebAuthnVerifier is implemented by webauthn.Service and injected into
+// auth.Service. When nil, WebAuthn (passkeys) is unavailable. It drives the
+// passkey second-factor during login.
+type WebAuthnVerifier interface {
+	HasCredentials(ctx context.Context, userID string) bool
+	BeginLogin(ctx context.Context, userID, name, displayName string) (json.RawMessage, error)
+	FinishLogin(ctx context.Context, userID, name, displayName string, responseBody []byte) error
+}
+
 // SessionStore persists refresh-token sessions.
 // Defined here to keep auth self-contained; implemented by session.Repository.
 type SessionStore interface {
@@ -158,6 +167,8 @@ type LoginResult struct {
 	MFASetupSecret   string
 	MFASetupURL      string
 	MFARecoveryCodes []string
+	TOTPEnabled      bool // user can satisfy MFA with a TOTP code
+	WebAuthnEnabled  bool // user can satisfy MFA with a passkey
 	AnomalyType      string
 	AnomalyDetails   string
 }
@@ -172,6 +183,7 @@ type Service struct {
 	ks       *KeyStore
 	geoip    *geoip.Service
 	mailer   mailer.Mailer
+	webauthn WebAuthnVerifier // nil when passkeys are unavailable
 }
 
 func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountStore, rdb *redis.Client, ks *KeyStore, mfa MFAChecker, settings SettingReader) *Service {
@@ -181,6 +193,12 @@ func NewService(users UserReader, sessions SessionStore, saSvc ServiceAccountSto
 func (s *Service) ConfigureSecurityAnomalies(g *geoip.Service, m mailer.Mailer) {
 	s.geoip = g
 	s.mailer = m
+}
+
+// ConfigureWebAuthn wires the passkey verifier. When unset, passkey login is
+// unavailable and only TOTP (if enabled) acts as the second factor.
+func (s *Service) ConfigureWebAuthn(v WebAuthnVerifier) {
+	s.webauthn = v
 }
 
 // Login authenticates a user. If MFA is enabled for the account it returns a
@@ -242,7 +260,13 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		globalMFARequired = s.settings.GetBool(ctx, "global_mfa_required", false)
 	}
 
-	if s.mfa != nil && (s.mfa.IsEnabled(ctx, u.ID) || globalMFARequired) {
+	totpEnabled := s.mfa != nil && s.mfa.IsEnabled(ctx, u.ID)
+	webauthnEnabled := s.webauthn != nil && s.webauthn.HasCredentials(ctx, u.ID)
+	// Global MFA enforcement only bootstraps TOTP when the user has no second
+	// factor at all (a registered passkey already satisfies the requirement).
+	forceTOTPSetup := s.mfa != nil && globalMFARequired && !totpEnabled && !webauthnEnabled
+
+	if totpEnabled || webauthnEnabled || forceTOTPSetup {
 		token, err := generateOpaqueToken()
 		if err != nil {
 			return nil, err
@@ -250,7 +274,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 
 		var setupSecret, setupURL string
 		var recoveryCodes []string
-		if globalMFARequired && !s.mfa.IsEnabled(ctx, u.ID) {
+		if forceTOTPSetup {
 			url, secret, recCodes, err := s.mfa.Setup(ctx, u.ID, u.Email, "")
 			if err != nil {
 				return nil, err
@@ -258,6 +282,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			setupSecret = secret
 			setupURL = url
 			recoveryCodes = recCodes
+			totpEnabled = true // the pending setup is the factor to verify
 		}
 
 		data, _ := json.Marshal(map[string]any{
@@ -278,6 +303,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			MFASetupSecret:   setupSecret,
 			MFASetupURL:      setupURL,
 			MFARecoveryCodes: recoveryCodes,
+			TOTPEnabled:      totpEnabled,
+			WebAuthnEnabled:  webauthnEnabled,
 			AnomalyType:      anomalyType,
 			AnomalyDetails:   anomalyDetails,
 		}, nil
@@ -465,6 +492,74 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 	}
 
 	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
+}
+
+// WebAuthnLoginBegin returns passkey assertion options for the second factor.
+// pendingToken is the opaque token from LoginResult.MFAPendingToken; it is read
+// but not consumed, so the matching WebAuthnLoginFinish can complete the login.
+func (s *Service) WebAuthnLoginBegin(ctx context.Context, pendingToken string) (json.RawMessage, error) {
+	if s.webauthn == nil {
+		return nil, ErrInvalidCredentials
+	}
+	uid, err := s.peekPendingUID(ctx, pendingToken)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := s.webauthn.BeginLogin(ctx, uid, "", "")
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	return opts, nil
+}
+
+// WebAuthnLoginFinish verifies a passkey assertion and, on success, consumes the
+// pending login and issues a token pair. The single-use ceremony session inside
+// the verifier makes concurrent finishes safe (only one assertion validates).
+func (s *Service) WebAuthnLoginFinish(ctx context.Context, pendingToken string, credential []byte) (*TokenPair, error) {
+	if s.webauthn == nil {
+		return nil, ErrInvalidCredentials
+	}
+	key := mfaPendingKey(hashToken(pendingToken))
+	raw, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	var m struct {
+		UID        string            `json:"uid"`
+		IP         string            `json:"ip"`
+		UA         string            `json:"ua"`
+		DeviceInfo map[string]string `json:"device_info"`
+	}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if err := s.webauthn.FinishLogin(ctx, m.UID, "", "", credential); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	// Verified — consume the pending login (single-use) and issue tokens.
+	s.rdb.Del(ctx, key)
+	u, err := s.users.FindByID(ctx, m.UID)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
+}
+
+// peekPendingUID reads the userID from a pending-login record without consuming it.
+func (s *Service) peekPendingUID(ctx context.Context, pendingToken string) (string, error) {
+	raw, err := s.rdb.Get(ctx, mfaPendingKey(hashToken(pendingToken))).Result()
+	if err != nil {
+		return "", ErrInvalidCredentials
+	}
+	var m struct {
+		UID string `json:"uid"`
+	}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", ErrInvalidCredentials
+	}
+	return m.UID, nil
 }
 
 // completeLogin generates tokens and creates a session row. Called after all

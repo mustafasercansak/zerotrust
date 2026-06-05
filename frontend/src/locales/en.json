@@ -63,8 +63,11 @@
       "forbidden": "You do not have permission to perform this action.",
       "registration_disabled": "Registration is currently disabled.",
       "passwords_mismatch": "Passwords do not match.",
-      "password_reuse_forbidden": "New password cannot be the same as your old password."
-    }
+      "password_reuse_forbidden": "New password cannot be the same as your old password.",
+      "webauthn_failed": "Passkey sign-in was cancelled or failed."
+    },
+    "usePasskey": "Use a passkey",
+    "or": "or"
   },
   "nav": {
     "dashboard": "Home",
@@ -215,6 +218,23 @@
     "errors": {
       "invalid_code": "Invalid code. Please try again.",
       "internal_error": "Server error. Please try again."
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Phishing-resistant sign-in with a security key, fingerprint, or device PIN.",
+      "add": "Add a passkey",
+      "unsupported": "This browser does not support passkeys.",
+      "empty": "No passkeys registered yet.",
+      "namePrompt": "Name this passkey (e.g. YubiKey, iPhone):",
+      "defaultName": "Passkey",
+      "added": "Added {{date}}",
+      "lastUsed": "Last used {{date}}",
+      "neverUsed": "Never used",
+      "remove": "Remove",
+      "loadError": "Failed to load passkeys",
+      "removeError": "Failed to remove passkey",
+      "duplicateError": "That authenticator is already registered.",
+      "registerError": "Passkey registration was cancelled or failed."
     }
   },
   "settings": {

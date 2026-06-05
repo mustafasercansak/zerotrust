@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import PasskeysSection from "./PasskeysSection";
 import { api } from "@/lib/api";
 import { DashboardPage } from "@/components/DashboardPage";
 import { QRCodeSVG } from "qrcode.react";
@@ -319,6 +320,12 @@ export default function MfaPage() {
             </Paper>
           </Box>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </Box>
+      )}
+
+      {status !== "loading" && (
+        <Box sx={{ mt: 3, width: "100%" }}>
+          <PasskeysSection />
         </Box>
       )}
     </DashboardPage>

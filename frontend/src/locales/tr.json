@@ -63,8 +63,11 @@
       "forbidden": "Bu işlem için yetkiniz yok.",
       "registration_disabled": "Kayıt şu anda devre dışıdır.",
       "passwords_mismatch": "Şifreler eşleşmiyor.",
-      "password_reuse_forbidden": "Yeni şifre eski şifrenizle aynı olamaz."
-    }
+      "password_reuse_forbidden": "Yeni şifre eski şifrenizle aynı olamaz.",
+      "webauthn_failed": "Geçiş anahtarıyla oturum açma iptal edildi veya başarısız oldu."
+    },
+    "usePasskey": "Geçiş anahtarı kullan",
+    "or": "veya"
   },
   "nav": {
     "dashboard": "Ana Sayfa",
@@ -215,6 +218,23 @@
     "errors": {
       "invalid_code": "Geçersiz kod. Lütfen tekrar deneyin.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
+    },
+    "passkeys": {
+      "title": "Geçiş Anahtarları",
+      "description": "Güvenlik anahtarı, parmak izi veya cihaz PIN’i ile kimlik avına dayanıklı oturum açma.",
+      "add": "Geçiş anahtarı ekle",
+      "unsupported": "Bu tarayıcı geçiş anahtarlarını desteklemiyor.",
+      "empty": "Henüz kayıtlı geçiş anahtarı yok.",
+      "namePrompt": "Bu geçiş anahtarına bir ad verin (örn. YubiKey, iPhone):",
+      "defaultName": "Geçiş Anahtarı",
+      "added": "Eklendi {{date}}",
+      "lastUsed": "Son kullanım {{date}}",
+      "neverUsed": "Hiç kullanılmadı",
+      "remove": "Kaldır",
+      "loadError": "Geçiş anahtarları yüklenemedi",
+      "removeError": "Geçiş anahtarı kaldırılamadı",
+      "duplicateError": "Bu kimlik doğrulayıcı zaten kayıtlı.",
+      "registerError": "Geçiş anahtarı kaydı iptal edildi veya başarısız oldu."
     }
   },
   "settings": {
@@ -263,8 +283,8 @@
     "getToken": "Token Al",
     "probeTarget": "Denecek endpoint",
     "runProbe": "İsteği Dene",
-      "mfaPrompt": "Hassas işlemi sürdürmek için 6 haneli MFA kodunuzu girin.",
-      "tokenReady": "Token hazır",
+    "mfaPrompt": "Hassas işlemi sürdürmek için 6 haneli MFA kodunuzu girin.",
+    "tokenReady": "Token hazır",
     "tokenMeta": "subject: {{subject}} · expires: {{expires}}",
     "probePassed": "İstek başarılı",
     "probeBlocked": "İstek engellendi",
