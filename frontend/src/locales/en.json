@@ -64,7 +64,8 @@
       "registration_disabled": "Registration is currently disabled.",
       "passwords_mismatch": "Passwords do not match.",
       "password_reuse_forbidden": "New password cannot be the same as your old password.",
-      "webauthn_failed": "Passkey sign-in was cancelled or failed."
+      "webauthn_failed": "Passkey sign-in was cancelled or failed.",
+      "passkey_unavailable": "No passkey was found on this device, or the request was cancelled."
     },
     "usePasskey": "Use a passkey",
     "signInWithPasskey": "Sign in with a passkey",

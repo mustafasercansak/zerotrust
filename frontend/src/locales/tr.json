@@ -64,7 +64,8 @@
       "registration_disabled": "Kayıt şu anda devre dışıdır.",
       "passwords_mismatch": "Şifreler eşleşmiyor.",
       "password_reuse_forbidden": "Yeni şifre eski şifrenizle aynı olamaz.",
-      "webauthn_failed": "Geçiş anahtarıyla oturum açma iptal edildi veya başarısız oldu."
+      "webauthn_failed": "Geçiş anahtarıyla oturum açma iptal edildi veya başarısız oldu.",
+      "passkey_unavailable": "Bu cihazda geçiş anahtarı bulunamadı veya istek iptal edildi."
     },
     "usePasskey": "Geçiş anahtarı kullan",
     "signInWithPasskey": "Geçiş anahtarıyla giriş yap",

@@ -4,7 +4,7 @@ import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { DashboardPage } from "@/components/DashboardPage";
 import SessionsPage from "./SessionsPage";
-import Alert from "@mui/material/Alert";
+import { toast } from "sonner";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -35,8 +35,6 @@ export default function SettingsPage() {
   // Profile Settings State
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [profileSuccess, setProfileSuccess] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
@@ -49,8 +47,6 @@ export default function SettingsPage() {
   const [maxLoginAttempts, setMaxLoginAttempts] = useState("5");
   const [systemLoading, setSystemLoading] = useState(true);
   const [savingSystem, setSavingSystem] = useState(false);
-  const [systemSuccess, setSystemSuccess] = useState(false);
-  const [systemError, setSystemError] = useState<string | null>(null);
 
   // Initialize Profile Settings Form
   useEffect(() => {
@@ -70,23 +66,20 @@ export default function SettingsPage() {
         setGlobalMfaRequired(s["global_mfa_required"] ?? "false");
         setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
       })
-      .catch(() => setSystemError("internal_error"))
+      .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
   }, [isAdmin]);
 
   async function handleProfileSave(e: React.FormEvent) {
     e.preventDefault();
     setSavingProfile(true);
-    setProfileError(null);
-    setProfileSuccess(false);
     try {
       const updated = await api.updateProfile({ first_name: firstName, last_name: lastName });
       window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
-      setProfileSuccess(true);
-      setTimeout(() => setProfileSuccess(false), 3000);
+      toast.success(t("saved"));
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+      toast.error(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
     } finally {
       setSavingProfile(false);
     }
@@ -96,18 +89,17 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      setProfileError(tProfile("errors.file_too_large"));
+      toast.error(tProfile("errors.file_too_large"));
       return;
     }
     setUploadingAvatar(true);
-    setProfileError(null);
     try {
       const updated = await api.uploadAvatar(file);
       window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
       setAvatarTimestamp(Date.now());
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+      toast.error(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
     } finally {
       setUploadingAvatar(false);
     }
@@ -115,14 +107,13 @@ export default function SettingsPage() {
 
   async function handleAvatarDelete() {
     setUploadingAvatar(true);
-    setProfileError(null);
     try {
       const updated = await api.deleteAvatar();
       window.dispatchEvent(new CustomEvent("me:updated", { detail: updated }));
       setAvatarTimestamp(Date.now());
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
-      setProfileError(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
+      toast.error(tProfile(`errors.${code}`, { defaultValue: tProfile("errors.internal_error") }));
     } finally {
       setUploadingAvatar(false);
     }
@@ -146,12 +137,10 @@ export default function SettingsPage() {
 
   async function handleSystemSave(e: React.FormEvent) {
     e.preventDefault();
-    setSystemError(null);
-    setSystemSuccess(false);
     const n = parseInt(maxSessions, 10);
-    if (isNaN(n) || n < 1 || n > 20) { setSystemError("invalid_value"); return; }
+    if (isNaN(n) || n < 1 || n > 20) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     const m = parseInt(maxLoginAttempts, 10);
-    if (isNaN(m) || m < 1 || m > 20) { setSystemError("invalid_value"); return; }
+    if (isNaN(m) || m < 1 || m > 20) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     setSavingSystem(true);
     try {
       await runWithStepUp(() => api.admin.updateSettings({
@@ -160,10 +149,10 @@ export default function SettingsPage() {
         global_mfa_required: globalMfaRequired,
         max_login_attempts: String(m),
       }));
-      setSystemSuccess(true);
-      setTimeout(() => setSystemSuccess(false), 3000);
+      toast.success(t("saved"));
     } catch (err) {
-      setSystemError(err instanceof ApiError ? err.message : "internal_error");
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
     } finally {
       setSavingSystem(false);
     }
@@ -212,8 +201,6 @@ export default function SettingsPage() {
             </Box>
             <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
             <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-            {profileError && <Alert severity="error">{profileError}</Alert>}
-            {profileSuccess && <Alert severity="success">{t("saved")}</Alert>}
             <Box>
               <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
                 {savingProfile ? tProfile("saving") : t("save")}
@@ -307,8 +294,6 @@ export default function SettingsPage() {
                 </Box>
               </Box>
             )}
-            {systemError && <Alert severity="error">{t(`errors.${systemError}`, { defaultValue: t("errors.internal_error") })}</Alert>}
-            {systemSuccess && <Alert severity="success">{t("saved")}</Alert>}
           </Paper>
         )}
       </Box>

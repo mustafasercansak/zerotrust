@@ -137,7 +137,14 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, name, displayNa
 		})
 	}
 
-	creation, session, err := s.wa.BeginRegistration(user, gowebauthn.WithExclusions(exclusions))
+	// Require a client-side discoverable (resident) credential so the passkey can
+	// later be used for passwordless/usernameless login, where the authenticator
+	// must surface the credential by userHandle with no allowCredentials list.
+	creation, session, err := s.wa.BeginRegistration(
+		user,
+		gowebauthn.WithExclusions(exclusions),
+		gowebauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +245,12 @@ func (s *Service) FinishLogin(ctx context.Context, userID, name, displayName str
 // navigator.credentials.get() with an opaque ceremony_id the caller echoes back
 // to FinishDiscoverableLogin (the ceremony is not bound to a known user yet).
 func (s *Service) BeginDiscoverableLogin(ctx context.Context) (json.RawMessage, error) {
-	assertion, session, err := s.wa.BeginDiscoverableLogin()
+	// Require user verification: with no password step, the authenticator's UV
+	// (biometric/PIN) is the second factor that makes a passkey stand in for both
+	// possession and inherence.
+	assertion, session, err := s.wa.BeginDiscoverableLogin(
+		gowebauthn.WithUserVerification(protocol.VerificationRequired),
+	)
 	if err != nil {
 		return nil, err
 	}

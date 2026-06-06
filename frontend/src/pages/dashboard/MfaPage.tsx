@@ -4,7 +4,7 @@ import PasskeysSection from "./PasskeysSection";
 import { api } from "@/lib/api";
 import { DashboardPage } from "@/components/DashboardPage";
 import { QRCodeSVG } from "qrcode.react";
-import Alert from "@mui/material/Alert";
+import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -24,7 +24,6 @@ export default function MfaPage() {
   const [status, setStatus] = useState<Status>("loading");
   const [setupData, setSetupData] = useState<{ otp_auth_url: string; secret: string; recovery_codes: string[] } | null>(null);
   const [code, setCode] = useState("");
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [codesSaved, setCodesSaved] = useState(false);
 
@@ -41,23 +40,23 @@ export default function MfaPage() {
   }, []);
 
   async function handleSetup() {
-    setError(""); setSubmitting(true); setCodesSaved(false);
+    setSubmitting(true); setCodesSaved(false);
     try { const d = await api.mfaSetup(); setSetupData(d); setStatus("pending"); }
-    catch { setError(t("errors.internal_error")); }
+    catch { toast.error(t("errors.internal_error")); }
     finally { setSubmitting(false); }
   }
 
   async function handleVerify(e: React.FormEvent) {
-    e.preventDefault(); setError(""); setSubmitting(true);
+    e.preventDefault(); setSubmitting(true);
     try { await api.mfaVerify(code); setStatus("enabled"); setSetupData(null); setCode(""); }
-    catch { setError(t("errors.invalid_code")); }
+    catch { toast.error(t("errors.invalid_code")); }
     finally { setSubmitting(false); }
   }
 
   async function handleDisable(e: React.FormEvent) {
-    e.preventDefault(); setError(""); setSubmitting(true);
+    e.preventDefault(); setSubmitting(true);
     try { await api.mfaDisable(code); setStatus("disabled"); setCode(""); }
-    catch { setError(t("errors.invalid_code")); }
+    catch { toast.error(t("errors.invalid_code")); }
     finally { setSubmitting(false); }
   }
 
@@ -121,7 +120,6 @@ export default function MfaPage() {
               {t("disableButton")}
             </Button>
           </Box>
-          {error && <Alert severity="error">{error}</Alert>}
         </Paper>
       )}
 
@@ -133,7 +131,6 @@ export default function MfaPage() {
               <Chip size="small" variant="outlined" label={t("statusDisabled")} />
             </Box>
             <Typography variant="body2" color="text.secondary">{t("disabledDesc")}</Typography>
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
           </Box>
           <Button onClick={handleSetup} variant="contained" disabled={submitting} sx={{ justifySelf: { md: "end" }, minWidth: 160 }}>
             {t("setupButton")}
@@ -319,7 +316,6 @@ export default function MfaPage() {
               </Box>
             </Paper>
           </Box>
-          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </Box>
       )}
 

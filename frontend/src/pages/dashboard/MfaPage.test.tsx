@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import MfaPage from "./MfaPage";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 // State Mocking System
 let stateStore: any = {};
@@ -235,8 +240,8 @@ describe("MfaPage page component", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    let html = runRender();
-    expect(html).toContain("errors.internal_error");
+    runRender();
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     // Verification failure
     vi.spyOn(api, "mfaSetup").mockResolvedValue({
@@ -258,8 +263,8 @@ describe("MfaPage page component", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    html = runRender();
-    expect(html).toContain("errors.invalid_code");
+    runRender();
+    expect(toast.error).toHaveBeenCalledWith("errors.invalid_code");
 
     // Disable failure
     vi.spyOn(api, "mfaStatus").mockResolvedValue({ enabled: true, supported: true });
@@ -276,11 +281,11 @@ describe("MfaPage page component", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    html = runRender();
-    expect(html).toContain("errors.invalid_code");
+    runRender();
+    expect(toast.error).toHaveBeenCalledWith("errors.invalid_code");
   });
 
-  it("renders pending setup submitting and error states", () => {
+  it("renders pending setup submitting state", () => {
     vi.spyOn(api, "mfaStatus").mockResolvedValue({ enabled: false, supported: true });
     stateStore[0] = "pending";
     stateStore[1] = {
@@ -288,13 +293,11 @@ describe("MfaPage page component", () => {
       secret: "SECRET123",
       recovery_codes: ["code1", "code2"],
     };
-    stateStore[3] = "errors.invalid_code";
-    stateStore[4] = true;
-    stateStore[5] = true;
+    stateStore[3] = true; // submitting → renders the "..." button label
+    stateStore[4] = true; // codesSaved
 
     const html = runRender();
 
     expect(html).toContain("...");
-    expect(html).toContain("errors.invalid_code");
   });
 });

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, type WebAuthnCredential } from "@/lib/api";
 import { performRegistration, isWebAuthnSupported } from "@/lib/webauthn";
+import { toast } from "sonner";
 import Paper from "@mui/material/Paper";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -22,7 +23,6 @@ export default function PasskeysSection() {
   const [credentials, setCredentials] = useState<WebAuthnCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const supported = isWebAuthnSupported();
 
   async function refresh() {
@@ -30,7 +30,7 @@ export default function PasskeysSection() {
       const res = await api.webauthnList();
       setCredentials(res.credentials ?? []);
     } catch {
-      setError(t("passkeys.loadError"));
+      toast.error(t("passkeys.loadError"));
     } finally {
       setLoading(false);
     }
@@ -46,7 +46,6 @@ export default function PasskeysSection() {
   }, []);
 
   async function handleAdd() {
-    setError(null);
     const defaultName = t("passkeys.defaultName");
     const name = window.prompt(t("passkeys.namePrompt"), defaultName);
     if (name === null) return; // cancelled
@@ -58,9 +57,9 @@ export default function PasskeysSection() {
       await refresh();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "credential_already_registered") {
-        setError(t("passkeys.duplicateError"));
+        toast.error(t("passkeys.duplicateError"));
       } else {
-        setError(t("passkeys.registerError"));
+        toast.error(t("passkeys.registerError"));
       }
     } finally {
       setBusy(false);
@@ -68,13 +67,12 @@ export default function PasskeysSection() {
   }
 
   async function handleDelete(id: string) {
-    setError(null);
     setBusy(true);
     try {
       await api.webauthnDeleteCredential(id);
       await refresh();
     } catch {
-      setError(t("passkeys.removeError"));
+      toast.error(t("passkeys.removeError"));
     } finally {
       setBusy(false);
     }
@@ -98,7 +96,6 @@ export default function PasskeysSection() {
       </Typography>
 
       {!supported && <Alert severity="info">{t("passkeys.unsupported")}</Alert>}
-      {error && <Alert severity="error">{error}</Alert>}
 
       {supported && !loading && (
         <>

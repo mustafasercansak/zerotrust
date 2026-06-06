@@ -3,7 +3,12 @@ import React from "react";
 import ServiceAccountsPage from "./ServiceAccountsPage";
 import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
+import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 // State Mocking System
 let stateStore: any = {};
@@ -147,6 +152,8 @@ describe("ServiceAccountsPage page component", () => {
     capturedInputs.length = 0;
     capturedSwitches.length = 0;
     capturedDialogCloses.length = 0;
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
     confirmMock = vi.fn().mockReturnValue(true);
     promptMock = vi.fn().mockReturnValue("123456");
     alertMock = vi.fn();
@@ -548,7 +555,7 @@ describe("ServiceAccountsPage page component", () => {
     expect(statusSpy).toHaveBeenCalledTimes(1);
     expect(promptMock).toHaveBeenCalled();
     expect(stepUpSpy).not.toHaveBeenCalled();
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("covers token test guard and token issuance failure paths", async () => {
@@ -615,7 +622,7 @@ describe("ServiceAccountsPage page component", () => {
     await capturedIconButtonClicks[2](); // rotate
     await capturedIconButtonClicks[3](); // revoke
 
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     capturedButtonClicks[0](); // open create
     runRender();
@@ -646,7 +653,7 @@ describe("ServiceAccountsPage page component", () => {
     await capturedIconButtonClicks[2]();
     await capturedIconButtonClicks[3]();
 
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("renders invalid and minimal service token payload states plus blocked probe output", async () => {
@@ -714,12 +721,12 @@ describe("ServiceAccountsPage page component", () => {
 
     expect(capturedInputs[1]).toBeDefined();
     capturedInputs[1]({ target: { value: "users" } });
-    expect(stateStore[17]).toBe("users");
+    expect(stateStore[15]).toBe("users");
 
     const done = capturedButtonClicks[capturedButtonClicks.length - 1];
     expect(done).toBeDefined();
     done();
-    expect(stateStore[15]).toBeNull();
+    expect(stateStore[13]).toBeNull();
   });
 
   it("toggles edit scopes and skips update when the edit name is blank", async () => {
@@ -763,15 +770,15 @@ describe("ServiceAccountsPage page component", () => {
 
     expect(capturedInputs[1]).toBeDefined();
     capturedInputs[1]({ target: { value: "2026-12-24" } });
-    expect(stateStore[11]).toBe("2026-12-24");
+    expect(stateStore[10]).toBe("2026-12-24");
 
     await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(stateStore[14]).toBe("errors.internal_error");
+    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
 
     runRender();
     expect(capturedButtonClicks[1]).toBeDefined();
     capturedButtonClicks[1](); // cancel edit dialog
-    expect(stateStore[8]).toBeNull();
+    expect(stateStore[7]).toBeNull();
   });
 
   it("clears probe result and shows an internal error when probing fails", async () => {
@@ -802,8 +809,8 @@ describe("ServiceAccountsPage page component", () => {
 
     await capturedButtonClicks[2]();
 
-    expect(stateStore[20]).toBeNull();
-    expect(stateStore[21]).toBe("errors.internal_error");
+    expect(stateStore[18]).toBeNull();
+    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
   });
 
   it("handles copy without a secret and dialog close callbacks", async () => {
@@ -835,14 +842,14 @@ describe("ServiceAccountsPage page component", () => {
     runRender();
     expect(capturedDialogCloses[0]).toBeDefined();
     capturedDialogCloses[0]();
-    expect(stateStore[8]).toBeNull();
+    expect(stateStore[7]).toBeNull();
     runRender();
 
     capturedIconButtonClicks[0](); // open test
     runRender();
     expect(capturedDialogCloses[0]).toBeDefined();
     capturedDialogCloses[0]();
-    expect(stateStore[15]).toBeNull();
+    expect(stateStore[13]).toBeNull();
     runRender();
 
     await capturedIconButtonClicks[2](); // rotate to open secret dialog
@@ -903,23 +910,23 @@ describe("ServiceAccountsPage page component", () => {
     expect(runRender()).toContain("creating");
 
     stateStore[0] = false;
-    stateStore[8] = getMockAccounts().data[0];
-    stateStore[9] = "Service 1";
-    stateStore[10] = ["users:read"];
-    stateStore[11] = "2020-01-01";
-    stateStore[12] = false;
-    stateStore[13] = true;
+    stateStore[7] = getMockAccounts().data[0];
+    stateStore[8] = "Service 1";
+    stateStore[9] = ["users:read"];
+    stateStore[10] = "2020-01-01";
+    stateStore[11] = false;
+    stateStore[12] = true;
     expect(runRender()).toContain("saving");
 
-    stateStore[8] = null;
-    stateStore[13] = false;
-    stateStore[15] = getMockAccounts().data[1];
-    stateStore[16] = "secret";
-    stateStore[18] = { access_token: "token", token_type: "Bearer", expires_in: 60 };
-    stateStore[19] = { sub: "service", scopes: ["users:read"], exp: 1780000000 };
-    stateStore[20] = { ok: true, status: 200, statusText: "OK", body: { ok: true } };
-    stateStore[22] = true;
-    stateStore[23] = true;
+    stateStore[7] = null;
+    stateStore[12] = false;
+    stateStore[13] = getMockAccounts().data[1];
+    stateStore[14] = "secret";
+    stateStore[16] = { access_token: "token", token_type: "Bearer", expires_in: 60 };
+    stateStore[17] = { sub: "service", scopes: ["users:read"], exp: 1780000000 };
+    stateStore[18] = { ok: true, status: 200, statusText: "OK", body: { ok: true } };
+    stateStore[19] = true;
+    stateStore[20] = true;
     let html = runRender();
     expect(html).toContain("inactive");
     expect(html).toContain("users:read");
@@ -986,9 +993,8 @@ describe("ServiceAccountsPage page component", () => {
     runRender();
 
     capturedIconButtonClicks[5](); // row 2 edit
-    expect(stateStore[11]).toBe("");
-    stateStore[17] = "unknown";
-    stateStore[21] = "";
+    expect(stateStore[10]).toBe("");
+    stateStore[15] = "unknown";
     html = runRender();
     expect(html).toContain("client-2");
     expect(html).not.toContain("errors.internal_error");
@@ -1012,26 +1018,26 @@ describe("ServiceAccountsPage page component", () => {
     capturedInputs[0]({ target: { value: "Plain Failure" } });
     runRender();
     await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(stateStore[7]).toBe("errors.internal_error");
+    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
 
     stateStore[0] = false;
     runRender();
     capturedIconButtonClicks[1](); // open edit
     runRender();
     capturedInputs[0]({ target: { value: "Edit Failure" } });
-    stateStore[11] = "";
+    stateStore[10] = "";
     runRender();
     await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(stateStore[14]).toBe("errors.edit_error");
+    expect(toast.error).toHaveBeenLastCalledWith("errors.edit_error");
 
-    stateStore[8] = null;
+    stateStore[7] = null;
     runRender();
     capturedIconButtonClicks[0](); // open test
     runRender();
     capturedInputs[0]({ target: { value: "secret" } });
     runRender();
     await capturedButtonClicks[1]();
-    expect(stateStore[21]).toBe("errors.invalid_client");
+    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_client");
   });
 
   it("covers undefined MFA prompt returns", async () => {
@@ -1051,7 +1057,7 @@ describe("ServiceAccountsPage page component", () => {
 
     expect(statusSpy).toHaveBeenCalledTimes(1);
     expect(stepUpSpy).not.toHaveBeenCalled();
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("uses fallback probe target when probing with an unknown key and no test error", async () => {
@@ -1070,19 +1076,15 @@ describe("ServiceAccountsPage page component", () => {
     await Promise.resolve();
     runRender();
 
-    stateStore[15] = getMockAccounts().data[0];
-    stateStore[17] = "missing";
-    stateStore[18] = { access_token: "fallback-token", token_type: "Bearer", expires_in: 60 };
-    stateStore[19] = { scopes: [] };
-    stateStore[21] = "";
+    stateStore[13] = getMockAccounts().data[0];
+    stateStore[15] = "missing";
+    stateStore[16] = { access_token: "fallback-token", token_type: "Bearer", expires_in: 60 };
+    stateStore[17] = { scopes: [] };
     const html = runRender();
     expect(html).not.toContain("errors.internal_error");
 
     await capturedButtonClicks[2]();
 
     expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "fallback-token");
-
-    stateStore[21] = "errors.internal_error";
-    expect(runRender()).toContain("errors.internal_error");
   });
   });

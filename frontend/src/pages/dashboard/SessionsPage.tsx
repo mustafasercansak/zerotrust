@@ -183,7 +183,7 @@ export default function SessionsPage() {
       }
       await api.revokeSession(session.id);
       setRefresh((n) => n + 1);
-    } catch { alert(t("errors.internal_error")); }
+    } catch { toast.error(t("errors.internal_error")); }
     finally { setRevoking(null); }
   }
 
@@ -194,7 +194,7 @@ export default function SessionsPage() {
       await api.revokeOtherSessions();
       toast.success(t("signedOutOthers"), { duration: 5000 });
       setRefresh((n) => n + 1);
-    } catch { alert(t("errors.internal_error")); }
+    } catch { toast.error(t("errors.internal_error")); }
     finally { setRevokingAll(false); }
   }
 

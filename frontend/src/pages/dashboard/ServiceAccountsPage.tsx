@@ -4,7 +4,7 @@ import { api, ApiError, type PageParams, type ServiceAccount, type ServiceAccoun
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
-import Alert from "@mui/material/Alert";
+import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -135,21 +135,18 @@ export default function ServiceAccountsPage() {
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [expiresAt, setExpiresAt] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState("");
   const [editing, setEditing] = useState<ServiceAccount | null>(null);
   const [editName, setEditName] = useState("");
   const [editScopes, setEditScopes] = useState<string[]>([]);
   const [editExpiresAt, setEditExpiresAt] = useState("");
   const [editActive, setEditActive] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [editError, setEditError] = useState("");
   const [testing, setTesting] = useState<ServiceAccount | null>(null);
   const [testSecret, setTestSecret] = useState("");
   const [probeKey, setProbeKey] = useState<ProbeKey>("serviceAccounts");
   const [tokenResult, setTokenResult] = useState<ServiceTokenResponse | null>(null);
   const [tokenPayload, setTokenPayload] = useState<ServiceJwtPayload | null>(null);
   const [probeResult, setProbeResult] = useState<ServiceProbeResult | null>(null);
-  const [testError, setTestError] = useState("");
   const [tokenLoading, setTokenLoading] = useState(false);
   const [probeLoading, setProbeLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -247,7 +244,7 @@ export default function ServiceAccountsPage() {
       if (err instanceof ApiError && err.message === "mfa_required") {
         return;
       }
-      alert(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     }
   }
 
@@ -260,7 +257,7 @@ export default function ServiceAccountsPage() {
       if (err instanceof ApiError && err.message === "mfa_required") {
         return;
       }
-      alert(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     }
   }
 
@@ -274,10 +271,10 @@ export default function ServiceAccountsPage() {
       if (err instanceof ApiError && err.message === "mfa_required") {
         return;
       }
-      alert(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     }
   }
-  function reset() { setName(""); setSelectedScopes([]); setExpiresAt(""); setCreateError(""); }
+  function reset() { setName(""); setSelectedScopes([]); setExpiresAt(""); }
 
   function toggleScope(scope: string) {
     setSelectedScopes((prev) => prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]);
@@ -293,7 +290,6 @@ export default function ServiceAccountsPage() {
     setEditScopes(sa.scopes);
     setEditExpiresAt(sa.expires_at ? sa.expires_at.slice(0, 10) : "");
     setEditActive(sa.is_active);
-    setEditError("");
   }
 
   function openTest(sa: ServiceAccount) {
@@ -303,12 +299,10 @@ export default function ServiceAccountsPage() {
     setTokenResult(null);
     setTokenPayload(null);
     setProbeResult(null);
-    setTestError("");
   }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    setCreateError("");
     if (!name.trim()) return;
     setCreating(true);
     try {
@@ -320,7 +314,7 @@ export default function ServiceAccountsPage() {
       setRefresh((n) => n + 1);
     } catch (err) {
       const code = err instanceof Error ? err.message : "internal_error";
-      setCreateError(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
     } finally {
       setCreating(false);
     }
@@ -329,7 +323,6 @@ export default function ServiceAccountsPage() {
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editing || !editName.trim()) return;
-    setEditError("");
     setUpdating(true);
     try {
       const run = () => api.admin.updateServiceAccount(editing.id, {
@@ -343,7 +336,7 @@ export default function ServiceAccountsPage() {
       setRefresh((n) => n + 1);
     } catch (err) {
       const code = err instanceof Error ? err.message : "internal_error";
-      setEditError(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
     } finally {
       setUpdating(false);
     }
@@ -374,7 +367,6 @@ export default function ServiceAccountsPage() {
   async function handleTokenTest() {
     if (!testing || !testSecret) return;
     setTokenLoading(true);
-    setTestError("");
     setProbeResult(null);
     try {
       const result = await api.admin.createServiceToken({ client_id: testing.client_id, client_secret: testSecret });
@@ -384,7 +376,7 @@ export default function ServiceAccountsPage() {
       const code = err instanceof Error ? err.message : "invalid_client";
       setTokenResult(null);
       setTokenPayload(null);
-      setTestError(t(`errors.${code}`, { defaultValue: t("errors.invalid_client") }));
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.invalid_client") }));
     } finally {
       setTokenLoading(false);
     }
@@ -394,13 +386,12 @@ export default function ServiceAccountsPage() {
     if (!tokenResult) return;
     const target = PROBE_TARGETS.find((item) => item.key === probeKey) ?? PROBE_TARGETS[0];
     setProbeLoading(true);
-    setTestError("");
     try {
       const result = await api.admin.probeWithServiceToken(target.path, tokenResult.access_token);
       setProbeResult(result);
     } catch {
       setProbeResult(null);
-      setTestError(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     } finally {
       setProbeLoading(false);
     }
@@ -433,7 +424,6 @@ export default function ServiceAccountsPage() {
             <TextField label={`${t("expiresAt")} (${t("noExpiry")})`} type="date" value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: minDate } }} />
-            {createError && <Alert severity="error">{createError}</Alert>}
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setShowCreate(false)}>{tCommon("cancel")}</Button>
@@ -463,7 +453,6 @@ export default function ServiceAccountsPage() {
             <TextField label={`${t("expiresAt")} (${t("noExpiry")})`} type="date" value={editExpiresAt}
               onChange={(e) => setEditExpiresAt(e.target.value)}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: editMinDate } }} />
-            {editError && <Alert severity="error">{editError}</Alert>}
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setEditing(null)}>{tCommon("cancel")}</Button>
@@ -544,8 +533,6 @@ export default function ServiceAccountsPage() {
               </Button>
             </Box>
           </Box>
-
-          {testError && <Alert severity="error">{testError}</Alert>}
 
           {tokenResult && tokenPayload && (
             <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>

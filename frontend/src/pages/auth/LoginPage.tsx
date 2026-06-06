@@ -91,6 +91,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const options = await api.webauthnPasswordlessBegin();
+      // Cap the ceremony timeout so a missing or declined passkey surfaces
+      // quickly instead of sitting on the browser's multi-minute default.
+      options.publicKey.timeout = Math.min(options.publicKey.timeout ?? 60000, 60000);
       const assertion = await performAssertion(options);
       await api.webauthnPasswordlessFinish(options.ceremony_id, assertion);
       scheduleRefresh(() => navigate("/auth/login"));
@@ -99,6 +102,10 @@ export default function LoginPage() {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);
         toast.error(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+      } else if (err && typeof err === "object" && (err as { name?: string }).name === "NotAllowedError") {
+        // The browser rejects with NotAllowedError when no passkey is available
+        // on the device or the user dismisses the prompt (incl. on timeout).
+        toast.error(t("errors.passkey_unavailable"));
       } else {
         toast.error(t("errors.webauthn_failed"));
       }

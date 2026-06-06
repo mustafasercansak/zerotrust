@@ -3,7 +3,12 @@ import React from "react";
 import UsersPage from "./UsersPage";
 import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
+import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 // State Mocking System
 let stateStore: any = {};
@@ -159,6 +164,8 @@ describe("UsersPage page component", () => {
     confirmMock = vi.fn().mockReturnValue(true);
     promptMock = vi.fn().mockReturnValue("123456");
     alertMock = vi.fn();
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
 
     vi.stubGlobal("document", {
       visibilityState: "visible",
@@ -470,8 +477,7 @@ describe("UsersPage page component", () => {
     capturedInputs[3]({ target: { value: "password" } });
     await capturedSubmits[0]({ preventDefault: vi.fn() });
 
-    const html = runRender();
-    expect(html).toContain("errors.already_exists");
+    expect(toast.error).toHaveBeenCalledWith("errors.already_exists");
   });
 
   it("handles cancel/empty MFA prompt on step-up", async () => {
@@ -547,13 +553,13 @@ describe("UsersPage page component", () => {
     try {
       await capturedButtonClicks[1]();
     } catch (e) {}
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     // Revoke all
     try {
       await capturedButtonClicks[2]();
     } catch (e) {}
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("does not load admin data when the viewer is not an admin", async () => {
@@ -635,7 +641,7 @@ describe("UsersPage page component", () => {
     runRender();
     await capturedMenuItemClicks[2]();
     expect(statusSpy).toHaveBeenCalledWith("u3", false);
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("handles revoke-all cancellation, MFA retry cancellation, and generic errors", async () => {
@@ -667,7 +673,7 @@ describe("UsersPage page component", () => {
     capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
     runRender();
     await capturedMenuItemClicks[1]();
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("handles create dialog cancel, close, role removal, and non-ApiError create failures", async () => {
@@ -702,7 +708,7 @@ describe("UsersPage page component", () => {
     await capturedSubmits[0]({ preventDefault: vi.fn() });
 
     expect(createSpy).toHaveBeenCalled();
-    expect(runRender()).toContain("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("renders empty sessions dialogs", async () => {
@@ -804,7 +810,7 @@ describe("UsersPage page component", () => {
 
     expect(revokeSessionSpy).toHaveBeenCalledWith("u1", "s1");
     expect(revokeAllSpy).toHaveBeenCalledWith("u1");
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("evaluates loading states, edge case fallback branches, and non-MFA ApiErrors", async () => {
@@ -851,13 +857,13 @@ describe("UsersPage page component", () => {
     capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
     runRender();
     await capturedMenuItemClicks[2](); // toggle status
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     // Trigger revokeAll from row menu to hit ApiError("forbidden") in handleRevokeAll
     capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
     runRender();
     await capturedMenuItemClicks[1](); // revokeAllSessions (index 1)
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     // Open sessions dialog and trigger revocations to hit ApiError("forbidden") branches in SessionsDialog
     capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
@@ -868,10 +874,10 @@ describe("UsersPage page component", () => {
     runRender();
 
     try { await capturedButtonClicks[1](); } catch (e) {} // Revoke single
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
 
     try { await capturedButtonClicks[2](); } catch (e) {} // Revoke all
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("handles getSettings catch block when cancelled is true", async () => {
@@ -964,7 +970,7 @@ describe("UsersPage page component", () => {
     
     // Find deactivate item (last item in the menu) and trigger
     await capturedMenuItemClicks[capturedMenuItemClicks.length - 1]();
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("covers remaining session dialog and step-up fallbacks", async () => {
@@ -1024,8 +1030,8 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue({ data: [user], total: 1 });
     vi.spyOn(api.admin, "listUserSessions").mockReturnValue(new Promise(() => {}));
 
-    stateStore[10] = user;
-    stateStore[21] = true;
+    stateStore[9] = user;
+    stateStore[20] = true;
 
     const html = runRender();
 

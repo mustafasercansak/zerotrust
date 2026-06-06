@@ -452,7 +452,7 @@ describe("SessionsPage page component", () => {
     runRender();
 
     await capturedButtonClicks[2]();
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("handles revoking all other sessions", async () => {
@@ -482,7 +482,7 @@ describe("SessionsPage page component", () => {
     runRender();
 
     await capturedButtonClicks[0]();
-    expect(alertMock).toHaveBeenCalledWith("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
   });
 
   it("handles API authentication error by redirecting to login page", async () => {

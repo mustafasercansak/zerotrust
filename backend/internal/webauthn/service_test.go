@@ -171,6 +171,39 @@ func TestBeginLogin_NoCredentials(t *testing.T) {
 	}
 }
 
+// TestBeginRegistration_RequestsDiscoverableCredential guards the passwordless
+// login feature: discoverable (usernameless) login can only surface a credential
+// that was stored as a resident key, so registration must request one. Without
+// residentKey=required the authenticator stores a non-discoverable credential and
+// passwordless login silently finds nothing.
+func TestBeginRegistration_RequestsDiscoverableCredential(t *testing.T) {
+	svc, _ := newTestService(t)
+	optsJSON, err := svc.BeginRegistration(context.Background(), uuid.NewString(), "user@example.com", "User")
+	if err != nil {
+		t.Fatalf("BeginRegistration: %v", err)
+	}
+
+	var opts struct {
+		PublicKey struct {
+			AuthenticatorSelection struct {
+				ResidentKey        string `json:"residentKey"`
+				RequireResidentKey *bool  `json:"requireResidentKey"`
+			} `json:"authenticatorSelection"`
+		} `json:"publicKey"`
+	}
+	if err := json.Unmarshal(optsJSON, &opts); err != nil {
+		t.Fatalf("unmarshal options: %v", err)
+	}
+
+	as := opts.PublicKey.AuthenticatorSelection
+	if as.ResidentKey != "required" {
+		t.Fatalf("expected residentKey=required for passwordless support, got %q", as.ResidentKey)
+	}
+	if as.RequireResidentKey == nil || !*as.RequireResidentKey {
+		t.Fatalf("expected requireResidentKey=true, got %v", as.RequireResidentKey)
+	}
+}
+
 func TestBeginDiscoverableLogin_ReturnsCeremonyAndOptions(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()

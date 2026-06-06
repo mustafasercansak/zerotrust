@@ -4,6 +4,7 @@ import { api, ApiError, type PageParams, type Session, type UserData } from "@/l
 import { formatDate, formatDateTime } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
+import { toast } from "sonner";
 import Alert from "@mui/material/Alert";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
@@ -236,7 +237,6 @@ export default function UsersPage() {
   const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["user"]);
-  const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [maxSessions, setMaxSessions] = useState(DEFAULT_MAX_SESSIONS);
@@ -302,7 +302,7 @@ export default function UsersPage() {
       if (err instanceof ApiError && err.message === "mfa_required") {
         return;
       }
-      alert(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     }
   }
 
@@ -315,7 +315,7 @@ export default function UsersPage() {
       if (err instanceof ApiError && err.message === "mfa_required") {
         return;
       }
-      alert(t("errors.internal_error"));
+      toast.error(t("errors.internal_error"));
     }
   }
   const columns = useMemo<GridColDef<UserData>[]>(() => [
@@ -407,12 +407,11 @@ export default function UsersPage() {
   }
 
   function openCreate() {
-    setEmail(""); setFirstName(""); setLastName(""); setPassword(""); setSelectedRoles(["user"]); setFormError(null); setShowCreate(true);
+    setEmail(""); setFirstName(""); setLastName(""); setPassword(""); setSelectedRoles(["user"]); setShowCreate(true);
   }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    setFormError(null);
     setCreating(true);
     try {
       await api.admin.createUser({ email, first_name: firstName, last_name: lastName, password, locale: me?.locale ?? "tr", roles: selectedRoles });
@@ -420,7 +419,7 @@ export default function UsersPage() {
       setRefresh((n) => n + 1);
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
-      setFormError(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
     } finally {
       setCreating(false);
     }
@@ -463,7 +462,6 @@ export default function UsersPage() {
                   onClick={() => toggleRole(role)} />
               ))}
             </Stack>
-            {formError && <Alert severity="error">{formError}</Alert>}
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setShowCreate(false)}>{tCommon("cancel")}</Button>
@@ -486,7 +484,7 @@ export default function UsersPage() {
               if (err instanceof ApiError && err.message === "mfa_required") {
                 throw err;
               }
-              alert(t("errors.internal_error"));
+              toast.error(t("errors.internal_error"));
               throw err;
             }
           }}
@@ -498,7 +496,7 @@ export default function UsersPage() {
               if (err instanceof ApiError && err.message === "mfa_required") {
                 throw err;
               }
-              alert(t("errors.internal_error"));
+              toast.error(t("errors.internal_error"));
               throw err;
             }
           }}
