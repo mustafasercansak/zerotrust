@@ -1,4 +1,4 @@
-.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean
+.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean
 
 TEST_DB_DOCKER_IMAGE ?= postgres:16-alpine
 TEST_DB_CONTAINER ?= zerotrust-test-db
@@ -6,6 +6,9 @@ TEST_DB_PORT ?= 55432
 TEST_DB_NAME ?= zerotrust_test
 TEST_DB_USER ?= postgres
 TEST_DB_PASSWORD ?= postgres
+TEST_REDIS_DOCKER_IMAGE ?= redis:7-alpine
+TEST_REDIS_CONTAINER ?= zerotrust-test-redis
+TEST_REDIS_PORT ?= 56379
 BACKEND_COVERAGE_MIN ?= 90.0
 
 help: ## Show this help
@@ -38,9 +41,71 @@ dev: ## Start in development mode with hot reload
 build: ## Build images only
 	cd infra && sudo docker compose build
 
-test: ## Run backend tests (set TEST_DATABASE_URL to include DB integration tests)
-	@if [ -z "$$TEST_DATABASE_URL" ]; then echo "Note: TEST_DATABASE_URL is not set; DB-backed integration tests may be skipped."; fi
-	cd backend && go test -p 1 ./...
+test: ## Run backend tests; starts disposable test services when no test URL is set
+	@if [ -n "$$TEST_DATABASE_URL" ]; then \
+		echo "Using TEST_DATABASE_URL from environment."; \
+		cd backend && go test -count=1 -p 1 ./...; \
+	else \
+		$(MAKE) test-local; \
+	fi
+
+test-local: ## Run all backend tests with disposable PostgreSQL and Redis containers
+	@set -e; \
+	command -v docker >/dev/null 2>&1 || { echo "Docker is required for make test-local."; exit 1; }; \
+	docker rm -f $(TEST_DB_CONTAINER) $(TEST_REDIS_CONTAINER) >/dev/null 2>&1 || true; \
+	trap 'docker rm -f $(TEST_DB_CONTAINER) $(TEST_REDIS_CONTAINER) >/dev/null 2>&1 || true' EXIT; \
+	db_port=$(TEST_DB_PORT); \
+	db_started=0; \
+	while [ $$db_port -lt $$(( $(TEST_DB_PORT) + 20 )) ]; do \
+		if docker run -d --name $(TEST_DB_CONTAINER) \
+			-e POSTGRES_USER=$(TEST_DB_USER) \
+			-e POSTGRES_PASSWORD=$(TEST_DB_PASSWORD) \
+			-e POSTGRES_DB=$(TEST_DB_NAME) \
+			-p $$db_port:5432 \
+			$(TEST_DB_DOCKER_IMAGE) >/dev/null 2>&1; then \
+			db_started=1; \
+			break; \
+		fi; \
+		db_port=$$((db_port + 1)); \
+	done; \
+	if [ $$db_started -ne 1 ]; then \
+		echo "Could not start temporary PostgreSQL on ports $(TEST_DB_PORT)-$$(( $(TEST_DB_PORT) + 19 ))."; \
+		exit 1; \
+	fi; \
+	redis_port=$(TEST_REDIS_PORT); \
+	redis_started=0; \
+	while [ $$redis_port -lt $$(( $(TEST_REDIS_PORT) + 20 )) ]; do \
+		if docker run -d --name $(TEST_REDIS_CONTAINER) \
+			-p $$redis_port:6379 \
+			$(TEST_REDIS_DOCKER_IMAGE) >/dev/null 2>&1; then \
+			redis_started=1; \
+			break; \
+		fi; \
+		redis_port=$$((redis_port + 1)); \
+	done; \
+	if [ $$redis_started -ne 1 ]; then \
+		echo "Could not start temporary Redis on ports $(TEST_REDIS_PORT)-$$(( $(TEST_REDIS_PORT) + 19 ))."; \
+		exit 1; \
+	fi; \
+	echo "Waiting for disposable test services..."; \
+	i=0; \
+	until docker exec $(TEST_DB_CONTAINER) pg_isready -U $(TEST_DB_USER) -d $(TEST_DB_NAME) >/dev/null 2>&1; do \
+		i=$$((i + 1)); \
+		if [ $$i -ge 40 ]; then echo "Temporary PostgreSQL did not become ready."; exit 1; fi; \
+		sleep 1; \
+	done; \
+	i=0; \
+	until docker exec $(TEST_REDIS_CONTAINER) redis-cli ping >/dev/null 2>&1; do \
+		i=$$((i + 1)); \
+		if [ $$i -ge 40 ]; then echo "Temporary Redis did not become ready."; exit 1; fi; \
+		sleep 1; \
+	done; \
+	echo "Running backend tests with PostgreSQL on $$db_port and Redis on $$redis_port."; \
+	cd backend && \
+		TEST_DATABASE_URL="postgres://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@127.0.0.1:$$db_port/$(TEST_DB_NAME)?sslmode=disable" \
+		TEST_REDIS_ADDR="127.0.0.1:$$redis_port" \
+		TEST_REDIS_PASSWORD="" \
+		go test -count=1 -p 1 ./...
 
 test-cover: ## Run backend tests and display coverage (set TEST_DATABASE_URL to include DB integration tests)
 	@set -e; \

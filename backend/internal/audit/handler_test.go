@@ -5,21 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 )
 
 func mockHandlerDeps(t *testing.T) (*Handler, *Repository, *user.Repository, *pgxpool.Pool, context.Context) {
 	t.Helper()
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		return nil, nil, nil, nil, nil
-	}
+	dbURL := testdb.URL(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {

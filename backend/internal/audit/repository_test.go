@@ -3,10 +3,10 @@ package audit
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 )
@@ -14,10 +14,7 @@ import (
 func setupTestDB(t *testing.T) (*pgxpool.Pool, context.Context, *Repository, *user.Repository) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dsn := testdb.URL(t)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

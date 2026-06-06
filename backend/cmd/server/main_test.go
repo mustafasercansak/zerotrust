@@ -20,6 +20,7 @@ import (
 
 	"github.com/zerotrust/backend/internal/audit"
 	"github.com/zerotrust/backend/internal/serviceaccount"
+	"github.com/zerotrust/backend/internal/testdb"
 )
 
 func setIntegrationRedisEnv(t *testing.T) {
@@ -605,10 +606,7 @@ func TestRun_BadDatabaseURL(t *testing.T) {
 }
 
 func TestRun_BadRedisAddr(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
@@ -629,10 +627,7 @@ func TestRun_BadRedisAddr(t *testing.T) {
 }
 
 func TestRun_WithMFAAndSMTPAndAdminSeed(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	addr := "127.0.0.1:18766"
 
@@ -691,10 +686,7 @@ func TestRun_WithMFAAndSMTPAndAdminSeed(t *testing.T) {
 }
 
 func TestRun_ServerStartsAndResponds(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	// Pick an ephemeral port so multiple test runs don't collide
 	addr := "127.0.0.1:18765"
@@ -806,10 +798,7 @@ func TestMain_ExitsWhenRunFails(t *testing.T) {
 }
 
 func TestRun_AuthenticatedMeRoutes(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	addr := "127.0.0.1:18767"
 
@@ -1097,10 +1086,7 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 }
 
 func TestRun_ServerListenFailureReturnsError(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:18769")
 	if err != nil {
@@ -1133,10 +1119,7 @@ func TestRun_ServerListenFailureReturnsError(t *testing.T) {
 }
 
 func TestRun_InvalidBaoAddrFailsSecretsClientInit(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
@@ -1170,10 +1153,7 @@ func TestRun_InvalidBaoAddrFailsSecretsClientInit(t *testing.T) {
 }
 
 func TestRun_RefreshAndAvatarSuccessPaths(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	addr := "127.0.0.1:18771"
 	t.Setenv("DATABASE_URL", dbURL)

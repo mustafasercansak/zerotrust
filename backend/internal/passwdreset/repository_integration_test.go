@@ -3,11 +3,11 @@ package passwdreset
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 	"golang.org/x/crypto/bcrypt"
@@ -15,10 +15,7 @@ import (
 
 func setupResetRepo(t *testing.T) (*Repository, *user.Repository, *pgxpool.Pool, context.Context) {
 	t.Helper()
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)

@@ -1122,7 +1122,7 @@ Status update:
 
 ### 47. Isolate integration tests from development databases
 
-State: OPEN
+State: CLOSED
 
 Severity: High
 
@@ -1136,3 +1136,11 @@ Acceptance criteria:
 - Give each integration run an isolated database or schema.
 - Remove assumptions that a shared persistent database can be globally truncated.
 - Verify that running the complete backend suite cannot mutate the development database.
+
+Status update:
+- Added a centralized `internal/testdb` guard that validates PostgreSQL URL and keyword DSN formats through pgx.
+- Integration tests now accept only explicit test database names such as `zerotrust_test`, `test_zerotrust`, or `zerotrust_test_ci`.
+- Rejected names include `zerotrust_db`, `postgres`, and production-style database names.
+- Applied the guard before every backend test migration and destructive fixture cleanup.
+- Removed the session integration test fallback from `TEST_DATABASE_URL` to `DATABASE_URL`.
+- CI continues to use its ephemeral `zerotrust_test` PostgreSQL service, while unsafe local URLs fail before connecting.

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/session"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 )
 
@@ -56,14 +56,7 @@ func integrationDatabaseURL(t *testing.T) string {
 	if testing.Short() {
 		t.Skip("skipping database integration test in short mode")
 	}
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = os.Getenv("DATABASE_URL")
-	}
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL or DATABASE_URL is required for database integration tests")
-	}
-	return dsn
+	return testdb.URL(t)
 }
 
 func setupAuthIntegrationDB(t *testing.T) *pgxpool.Pool {

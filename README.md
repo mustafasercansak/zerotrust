@@ -132,6 +132,27 @@ make up-prod
 | Health   | http://localhost:8080/health |
 | JWKS     | http://localhost:8080/.well-known/jwks.json |
 
+### Backend Integration Tests
+
+The easiest option starts disposable PostgreSQL and Redis containers, runs the
+complete backend suite, and removes the containers afterward:
+
+```bash
+make test
+```
+
+`make test-local` performs the same disposable-service workflow explicitly.
+
+When supplying your own database, `TEST_DATABASE_URL` must reference a dedicated
+database whose name is explicitly test-only, such as `zerotrust_test`. Test
+startup rejects development and production-style names before running migrations
+or fixture cleanup.
+
+```bash
+TEST_DATABASE_URL='postgres://zerotrust:password@localhost:5432/zerotrust_test?sslmode=disable' \
+go test -count=1 -p 1 ./...
+```
+
 ## Project Structure
 
 ```

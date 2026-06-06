@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -13,16 +12,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/session"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 	"github.com/zerotrust/backend/pkg/middleware"
 )
 
 func TestAuthenticate(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)

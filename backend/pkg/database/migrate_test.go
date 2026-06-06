@@ -3,6 +3,8 @@ package database
 import (
 	"os"
 	"testing"
+
+	"github.com/zerotrust/backend/internal/testdb"
 )
 
 func TestRunMigrationsInvalidDB(t *testing.T) {
@@ -14,10 +16,7 @@ func TestRunMigrationsInvalidDB(t *testing.T) {
 
 func TestRunMigrationsInvalidPath(t *testing.T) {
 	// A valid postgres URL but invalid migration path
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 	err := RunMigrations(dbURL, "/non/existent/path/for/migrations")
 	if err == nil {
 		t.Fatal("Expected error with invalid migration path")
@@ -25,10 +24,7 @@ func TestRunMigrationsInvalidPath(t *testing.T) {
 }
 
 func TestRunMigrationsSuccess(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 
 	// Create a temporary mock migrations directory
 	tmpDir, err := os.MkdirTemp("", "migrations")

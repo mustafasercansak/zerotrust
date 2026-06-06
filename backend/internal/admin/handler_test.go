@@ -7,13 +7,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/internal/session"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 )
@@ -51,10 +51,7 @@ func (m *mockSessionManager) RevokeByID(ctx context.Context, sessionID, userID s
 
 func mockHandlerDeps(t *testing.T) (*Handler, *user.Service, *pgxpool.Pool, context.Context, *mockSessionManager) {
 	t.Helper()
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		return nil, nil, nil, nil, nil
-	}
+	dbURL := testdb.URL(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {

@@ -5,20 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/pkg/database"
 )
 
 func setupSessionIntegrationRepo(t *testing.T) (*Repository, string, *pgxpool.Pool, context.Context) {
 	t.Helper()
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {

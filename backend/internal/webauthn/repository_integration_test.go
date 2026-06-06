@@ -4,19 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/pkg/database"
 )
 
 func setupRepo(t *testing.T) (*Repository, *pgxpool.Pool, context.Context, string) {
 	t.Helper()
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dbURL := testdb.URL(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
