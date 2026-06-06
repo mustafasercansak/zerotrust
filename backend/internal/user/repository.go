@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/zerotrust/backend/pkg/secrets"
 )
 
 var ErrNotFound = errors.New("user_not_found")
@@ -27,14 +26,19 @@ const adminRoleName = "admin"
 
 type Repository struct {
 	db        *pgxpool.Pool
-	secClient *secrets.Client
+	secClient encrypter
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) SetSecretsClient(c *secrets.Client) {
+type encrypter interface {
+	EncryptData(ctx context.Context, plaintext string) (string, error)
+	DecryptData(ctx context.Context, ciphertext string) (string, error)
+}
+
+func (r *Repository) SetSecretsClient(c encrypter) {
 	r.secClient = c
 }
 

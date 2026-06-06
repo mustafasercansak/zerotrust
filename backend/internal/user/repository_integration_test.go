@@ -4,11 +4,28 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/pkg/database"
 )
+
+type expandingEncrypter struct{}
+
+func (expandingEncrypter) EncryptData(_ context.Context, plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	return "vault:v1:" + strings.Repeat("x", 300) + plaintext, nil
+}
+
+func (expandingEncrypter) DecryptData(_ context.Context, ciphertext string) (string, error) {
+	if ciphertext == "" || !strings.HasPrefix(ciphertext, "vault:v1:") {
+		return ciphertext, nil
+	}
+	return strings.TrimPrefix(ciphertext, "vault:v1:"+strings.Repeat("x", 300)), nil
+}
 
 func setupUserRepository(t *testing.T) (*Repository, *pgxpool.Pool, context.Context) {
 	t.Helper()
@@ -254,6 +271,45 @@ func TestRepositoryMutationsAndListFilters(t *testing.T) {
 	}
 	if err := repo.SetActive(ctx, "00000000-0000-0000-0000-000000000000", true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("set active missing err=%v want=%v", err, ErrNotFound)
+	}
+}
+
+func TestRepositoryEncryptedFieldsAllowExpandedCiphertext(t *testing.T) {
+	repo, pool, ctx := setupUserRepository(t)
+	defer pool.Close()
+	repo.SetSecretsClient(expandingEncrypter{})
+
+	u, err := repo.Create(ctx, "encrypted@example.com", "hash", "en")
+	if err != nil {
+		t.Fatalf("create encrypted user failed: %v", err)
+	}
+	if u.Email != "encrypted@example.com" {
+		t.Fatalf("email=%q want=encrypted@example.com", u.Email)
+	}
+
+	firstName := strings.Repeat("A", 80)
+	lastName := strings.Repeat("B", 80)
+	updated, err := repo.UpdateProfile(ctx, u.ID, firstName, lastName)
+	if err != nil {
+		t.Fatalf("update encrypted profile failed: %v", err)
+	}
+	if updated.FirstName != firstName || updated.LastName != lastName {
+		t.Fatalf("profile mismatch: first=%q last=%q", updated.FirstName, updated.LastName)
+	}
+
+	var storedEmail, storedFirstName, storedLastName string
+	if err := pool.QueryRow(ctx, `
+		SELECT email, first_name, last_name
+		FROM users
+		WHERE id = $1::uuid
+	`, u.ID).Scan(&storedEmail, &storedFirstName, &storedLastName); err != nil {
+		t.Fatalf("read encrypted fields failed: %v", err)
+	}
+	if len(storedEmail) <= 255 {
+		t.Fatalf("stored email ciphertext length=%d want >255", len(storedEmail))
+	}
+	if len(storedFirstName) <= 80 || len(storedLastName) <= 80 {
+		t.Fatalf("stored profile ciphertext lengths=(%d,%d) want >80", len(storedFirstName), len(storedLastName))
 	}
 }
 

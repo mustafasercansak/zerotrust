@@ -34,11 +34,14 @@ func setupResetRepo(t *testing.T) (*Repository, *user.Repository, *pgxpool.Pool,
 		t.Fatalf("migrations failed: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, "TRUNCATE TABLE password_reset_tokens, sessions, user_roles, users, roles CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE TABLE password_reset_tokens, sessions, user_roles, users CASCADE"); err != nil {
 		pool.Close()
 		t.Fatalf("cleanup failed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO roles (name, description) VALUES ('admin', 'Admin Role'), ('viewer', 'Viewer')"); err != nil {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO roles (name, description) VALUES ('viewer', 'Viewer')
+		ON CONFLICT (name) DO NOTHING
+	`); err != nil {
 		pool.Close()
 		t.Fatalf("seed roles failed: %v", err)
 	}
@@ -211,4 +214,3 @@ func TestRepositoryConsumeAndResetReuseForbidden(t *testing.T) {
 		t.Fatalf("expected ErrPasswordReuseForbidden, got %v", err)
 	}
 }
-

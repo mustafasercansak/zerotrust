@@ -161,7 +161,6 @@ export default function SessionsPage() {
     },
     {
       field: "actions", headerName: "", sortable: false, filterable: false, width: 150, align: "right",
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       renderCell: ({ row }) => (
         <Button color="error" variant="contained" size="small" onClick={() => handleRevoke(row)} disabled={revoking === row.id}>
           {row.is_current ? t("signOutThisDevice") : t("signOut")}

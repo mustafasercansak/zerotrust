@@ -236,19 +236,34 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 		if err := rows.Scan(&e.ID, &e.UserID, &e.UserEmail, &e.Action, &e.Resource, &e.IPAddress, &e.UserAgent, &metadata, &e.CreatedAt); err != nil {
 			return ListResult{}, err
 		}
-		if err := json.Unmarshal(metadata, &e.Metadata); err != nil {
-			e.Metadata = map[string]any{}
+		if r.secClient != nil && e.UserEmail != nil {
+			decryptedEmail, err := r.secClient.DecryptData(ctx, *e.UserEmail)
+			if err != nil {
+				return ListResult{}, fmt.Errorf("decrypt audit user email: %w", err)
+			}
+			e.UserEmail = &decryptedEmail
 		}
-		if r.secClient != nil && e.Metadata["payload"] != nil {
-			if payloadStr, ok := e.Metadata["payload"].(string); ok && payloadStr != "" {
+		if err := json.Unmarshal(metadata, &e.Metadata); err != nil {
+			return ListResult{}, fmt.Errorf("decode audit metadata: %w", err)
+		}
+		if r.secClient != nil {
+			if payload, exists := e.Metadata["payload"]; exists {
+				payloadStr, ok := payload.(string)
+				if !ok || payloadStr == "" {
+					return ListResult{}, fmt.Errorf("decode encrypted audit metadata: payload must be a non-empty string")
+				}
 				decryptedStr, err := r.secClient.DecryptData(ctx, payloadStr)
-				if err == nil {
-					var decryptedMeta map[string]any
-					if err := json.Unmarshal([]byte(decryptedStr), &decryptedMeta); err == nil {
-						delete(e.Metadata, "payload")
-						for k, v := range decryptedMeta {
-							e.Metadata[k] = v
-						}
+				if err != nil {
+					return ListResult{}, fmt.Errorf("decrypt audit metadata: %w", err)
+				}
+				var decryptedMeta map[string]any
+				if err := json.Unmarshal([]byte(decryptedStr), &decryptedMeta); err != nil {
+					return ListResult{}, fmt.Errorf("decode decrypted audit metadata: %w", err)
+				}
+				delete(e.Metadata, "payload")
+				for k, v := range decryptedMeta {
+					if _, trustedField := e.Metadata[k]; !trustedField {
+						e.Metadata[k] = v
 					}
 				}
 			}

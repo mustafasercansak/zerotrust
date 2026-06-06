@@ -1148,6 +1148,9 @@ func TestRun_InvalidBaoAddrFailsSecretsClientInit(t *testing.T) {
 	t.Setenv("TLS_ENABLED", "false")
 	t.Setenv("GEOIP_DB_PATH", "")
 	t.Setenv("BAO_ADDR", "://bad-url")
+	t.Setenv("BAO_TOKEN", "test-token")
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
 
 	cfg, err := loadConfig()
 	if err != nil {

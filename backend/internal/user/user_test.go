@@ -36,10 +36,12 @@ func TestUserServiceIntegration(t *testing.T) {
 	// Clean up user table
 	pool.Exec(ctx, "DELETE FROM user_roles")
 	pool.Exec(ctx, "DELETE FROM users")
-	pool.Exec(ctx, "DELETE FROM roles")
 
-	// Pre-insert some roles
-	pool.Exec(ctx, "INSERT INTO roles (name, description) VALUES ('admin', 'Admin Role'), ('viewer', 'Viewer')")
+	// Add the test-only role without replacing canonical roles or permissions.
+	pool.Exec(ctx, `
+		INSERT INTO roles (name, description) VALUES ('viewer', 'Viewer')
+		ON CONFLICT (name) DO NOTHING
+	`)
 
 	// Test Register
 	u, err := svc.Register(ctx, "test1@example.com", "password", "en")

@@ -33,6 +33,16 @@ func TestNewClientConfiguration(t *testing.T) {
 	}
 }
 
+func TestNewClientRequiresTokenForConfiguredAddress(t *testing.T) {
+	t.Setenv("BAO_ADDR", "http://bao-test.local:8200")
+	t.Setenv("BAO_TOKEN", "")
+	t.Setenv("VAULT_TOKEN", "")
+
+	if _, err := NewClient("test-key"); err == nil {
+		t.Fatal("expected missing token error")
+	}
+}
+
 func TestEncryptData(t *testing.T) {
 	// 1. Test empty plaintext returns empty ciphertext immediately without calling server
 	client, _ := NewClient("test-key")
@@ -116,6 +126,22 @@ func TestDecryptData(t *testing.T) {
 		t.Fatalf("expected empty plaintext, got %q", pt)
 	}
 
+	// Legacy plaintext remains readable when transit encryption is enabled later.
+	pt, err = client.DecryptData(context.Background(), "legacy@example.com")
+	if err != nil {
+		t.Fatalf("unexpected error for legacy plaintext: %v", err)
+	}
+	if pt != "legacy@example.com" {
+		t.Fatalf("legacy plaintext=%q want=legacy@example.com", pt)
+	}
+	pt, err = client.DecryptData(context.Background(), "vault:victor")
+	if err != nil {
+		t.Fatalf("unexpected error for vault-prefixed plaintext: %v", err)
+	}
+	if pt != "vault:victor" {
+		t.Fatalf("vault-prefixed plaintext=%q want=vault:victor", pt)
+	}
+
 	// Setup mock server
 	var responseStatus int
 	var responseBody []byte
@@ -187,5 +213,34 @@ func TestDecryptData(t *testing.T) {
 	_, err = client.DecryptData(context.Background(), "vault:v1:encrypteddata")
 	if err == nil {
 		t.Error("expected error for invalid base64 encoding, got nil")
+	}
+}
+
+func TestCheckVerifiesEncryptAndDecrypt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/transit/encrypt/test-key":
+			_, _ = w.Write([]byte(`{"data":{"ciphertext":"vault:v1:check"}}`))
+		case "/v1/transit/decrypt/test-key":
+			plaintext := base64.StdEncoding.EncodeToString([]byte(connectivityCheckPlaintext))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{"plaintext": plaintext},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("BAO_ADDR", server.URL)
+	t.Setenv("BAO_TOKEN", "test-token")
+
+	client, err := NewClient("test-key")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if err := client.Check(context.Background()); err != nil {
+		t.Fatalf("Check: %v", err)
 	}
 }

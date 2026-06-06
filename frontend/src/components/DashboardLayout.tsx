@@ -1,9 +1,9 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState, Suspense, useRef, useEffect } from "react";
+import { useState, Suspense, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/useAuth";
 import { cancelRefresh } from "@/lib/tokenManager";
-import { api, ApiError, type MeData } from "@/lib/api";
+import { api, type MeData } from "@/lib/api";
 import { MeContext } from "@/contexts/MeContext";
 import Alert from "@mui/material/Alert";
 import Avatar from "@mui/material/Avatar";
@@ -12,13 +12,8 @@ import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
-import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 function displayName(me: Pick<MeData, "email" | "first_name" | "last_name">): string {
@@ -35,7 +30,6 @@ function initials(me: Pick<MeData, "email" | "first_name" | "last_name">): strin
 export default function DashboardLayout() {
   const { t } = useTranslation("nav");
   const { t: tCommon } = useTranslation("common");
-  const { t: tProfile } = useTranslation("profile");
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { i18n } = useTranslation();

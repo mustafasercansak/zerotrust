@@ -208,7 +208,6 @@ export default function ServiceAccountsPage() {
     },
     {
       field: "actions", headerName: "", sortable: false, filterable: false, align: "right", width: 168,
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       renderCell: ({ row }) => (
         <Box sx={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
           <Tooltip title={t("test")}>

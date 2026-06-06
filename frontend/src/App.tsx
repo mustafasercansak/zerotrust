@@ -4,12 +4,12 @@ import CssBaseline from "@mui/material/CssBaseline";
 import { Toaster } from "sonner";
 import theme from "./theme";
 import TokenRefreshProvider from "./components/TokenRefreshProvider";
-import DashboardLayout from "./components/DashboardLayout";
-import LoginPage from "./pages/auth/LoginPage";
-import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 
+const DashboardLayout = lazy(() => import("./components/DashboardLayout"));
+const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/auth/ResetPasswordPage"));
 const HomePage = lazy(() => import("./pages/dashboard/HomePage"));
 const SessionsPage = lazy(() => import("./pages/dashboard/SessionsPage"));
 const UsersPage = lazy(() => import("./pages/dashboard/UsersPage"));
@@ -32,27 +32,29 @@ export default function App() {
       <BrowserRouter>
         {/* TokenRefreshProvider must be inside BrowserRouter (uses useNavigate). */}
         <TokenRefreshProvider>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Suspense fallback={<div role="status" aria-label="Loading" />}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-            {/* ── Auth ──────────────────────────────────────────────────────── */}
-            <Route path="/auth/login" element={<LoginPage />} />
-            <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+              {/* ── Auth ──────────────────────────────────────────────────────── */}
+              <Route path="/auth/login" element={<LoginPage />} />
+              <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
-            {/* ── Dashboard (protected, nested) ─────────────────────────────── */}
-            <Route path="/dashboard" element={<DashboardLayout />}>
-              <Route index element={<HomePage />} />
-              <Route path="sessions" element={<SessionsPage />} />
-              <Route path="mfa" element={<MfaPage />} />
-              <Route path="users" element={<UsersPage />} />
-              <Route path="audit" element={<AuditPage />} />
-              <Route path="service-accounts" element={<ServiceAccountsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-            </Route>
+              {/* ── Dashboard (protected, nested) ─────────────────────────────── */}
+              <Route path="/dashboard" element={<DashboardLayout />}>
+                <Route index element={<HomePage />} />
+                <Route path="sessions" element={<SessionsPage />} />
+                <Route path="mfa" element={<MfaPage />} />
+                <Route path="users" element={<UsersPage />} />
+                <Route path="audit" element={<AuditPage />} />
+                <Route path="service-accounts" element={<ServiceAccountsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </Suspense>
         </TokenRefreshProvider>
       </BrowserRouter>
     </ThemeProvider>

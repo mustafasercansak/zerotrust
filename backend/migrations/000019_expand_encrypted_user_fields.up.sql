@@ -1,0 +1,4 @@
+ALTER TABLE users
+    ALTER COLUMN email TYPE TEXT,
+    ALTER COLUMN first_name TYPE TEXT,
+    ALTER COLUMN last_name TYPE TEXT;

@@ -32,13 +32,20 @@ func setupSessionIntegrationRepo(t *testing.T) (*Repository, string, *pgxpool.Po
 		pool.Close()
 		t.Fatalf("migrations failed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE TABLE sessions, users, roles CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE TABLE sessions, users CASCADE"); err != nil {
 		pool.Close()
 		t.Fatalf("cleanup failed: %v", err)
 	}
 	var userID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, locale) VALUES ('sess-repo@example.com', 'hash', 'en') RETURNING id::text
+		INSERT INTO users (email, email_hash, password_hash, locale)
+		VALUES (
+			'sess-repo@example.com',
+			encode(digest('sess-repo@example.com', 'sha256'), 'hex'),
+			'hash',
+			'en'
+		)
+		RETURNING id::text
 	`).Scan(&userID); err != nil {
 		pool.Close()
 		t.Fatalf("create user: %v", err)

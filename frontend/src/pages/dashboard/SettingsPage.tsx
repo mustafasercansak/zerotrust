@@ -68,7 +68,7 @@ export default function SettingsPage() {
       })
       .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
-  }, [isAdmin]);
+  }, [isAdmin, t]);
 
   async function handleProfileSave(e: React.FormEvent) {
     e.preventDefault();

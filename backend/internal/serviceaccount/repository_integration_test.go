@@ -29,7 +29,7 @@ func setupSARepo(t *testing.T) (*Repository, *pgxpool.Pool, context.Context) {
 		pool.Close()
 		t.Fatalf("migrations failed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE TABLE service_account_scopes, service_accounts, users, roles CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE TABLE service_account_scopes, service_accounts, users CASCADE"); err != nil {
 		pool.Close()
 		t.Fatalf("cleanup failed: %v", err)
 	}

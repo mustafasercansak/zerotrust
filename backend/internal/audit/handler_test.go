@@ -39,7 +39,6 @@ func mockHandlerDeps(t *testing.T) (*Handler, *Repository, *user.Repository, *pg
 	pool.Exec(ctx, "DELETE FROM audit_logs")
 	pool.Exec(ctx, "DELETE FROM user_roles")
 	pool.Exec(ctx, "DELETE FROM users")
-	pool.Exec(ctx, "DELETE FROM roles")
 
 	h := NewHandler(repo)
 

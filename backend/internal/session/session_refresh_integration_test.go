@@ -120,6 +120,7 @@ func createAuthIntegrationSchema(t *testing.T, db *pgxpool.Pool) {
 		CREATE TABLE users (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			email VARCHAR(255) UNIQUE NOT NULL,
+			email_hash VARCHAR(64) UNIQUE NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			locale VARCHAR(10) NOT NULL DEFAULT 'en',
 			is_active BOOLEAN NOT NULL DEFAULT true
@@ -153,10 +154,10 @@ func createIntegrationUser(t *testing.T, db *pgxpool.Pool, email string) *user.U
 		IsActive: true,
 	}
 	err := db.QueryRow(context.Background(), `
-		INSERT INTO users (email, password_hash, locale, is_active)
-		VALUES ($1, 'hash', 'en', true)
+		INSERT INTO users (email, email_hash, password_hash, locale, is_active)
+		VALUES ($1, $2, 'hash', 'en', true)
 		RETURNING id
-	`, email).Scan(&u.ID)
+	`, email, hashRefreshToken(email)).Scan(&u.ID)
 	if err != nil {
 		t.Fatalf("create integration user: %v", err)
 	}

@@ -71,11 +71,14 @@ func mockHandlerDeps(t *testing.T) (*Handler, *user.Service, *pgxpool.Pool, cont
 	repo := user.NewRepository(pool)
 	svc := user.NewService(repo)
 
-	if _, err := pool.Exec(ctx, "TRUNCATE TABLE users, roles CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE TABLE users CASCADE"); err != nil {
 		pool.Close()
-		t.Fatalf("cleanup users/roles failed: %v", err)
+		t.Fatalf("cleanup users failed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO roles (name, description) VALUES ('admin', 'Admin Role'), ('viewer', 'Viewer')"); err != nil {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO roles (name, description) VALUES ('viewer', 'Viewer')
+		ON CONFLICT (name) DO NOTHING
+	`); err != nil {
 		pool.Close()
 		t.Fatalf("seed roles failed: %v", err)
 	}

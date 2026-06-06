@@ -53,6 +53,12 @@ services:
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       PUBLIC_APP_URL: "http://localhost:3000"
+      # Optional field encryption. Use a separately managed, persistent
+      # OpenBao/Vault transit server with a "db-encryption-key" key.
+      BAO_ADDR: "${BAO_ADDR:-}"
+      BAO_TOKEN: "${BAO_TOKEN:-}"
+      VAULT_ADDR: "${VAULT_ADDR:-}"
+      VAULT_TOKEN: "${VAULT_TOKEN:-}"
     depends_on:
       postgres:
         condition: service_healthy

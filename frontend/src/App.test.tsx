@@ -81,12 +81,12 @@ describe("App main component", () => {
     expect(html).toContain("Toaster");
   });
 
-  it("registers and resolves all lazy dashboard routes", async () => {
-    expect(lazyLoaders).toHaveLength(7);
+  it("registers and resolves all lazy routes", async () => {
+    expect(lazyLoaders).toHaveLength(11);
 
     const modules = await Promise.all(lazyLoaders.map((load) => load()));
 
-    expect(modules).toHaveLength(7);
+    expect(modules).toHaveLength(11);
     for (const mod of modules) {
       expect(mod).toHaveProperty("default");
     }

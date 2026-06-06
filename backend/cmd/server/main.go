@@ -135,6 +135,12 @@ func run(ctx context.Context, cfg config) error {
 		if sErr != nil {
 			return fmt.Errorf("failed to initialize secrets client: %w", sErr)
 		}
+		checkCtx, cancelCheck := context.WithTimeout(rootCtx, 5*time.Second)
+		sErr = secClient.Check(checkCtx)
+		cancelCheck()
+		if sErr != nil {
+			return fmt.Errorf("failed to validate secrets client: %w", sErr)
+		}
 		slog.Info("secrets client initialized for application-level encryption")
 		userRepo.SetSecretsClient(secClient)
 	} else {

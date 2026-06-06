@@ -974,3 +974,128 @@ Status update:
 - Config: `WEBAUTHN_RP_ID` (default `localhost`) and `WEBAUTHN_RP_DISPLAY_NAME`; RP origins reuse `CORS_ALLOWED_ORIGINS`.
 - Frontend: `webauthn.ts` (base64url ↔ ArrayBuffer + ceremony serialization), api methods, a `PasskeysSection` for the MFA page, and a "Use a passkey" path in the login MFA stage.
 - Tests: backend service end-to-end ceremony via `descope/virtualwebauthn` (real crypto register→login), handler/auth-integration with fakes, DB-gated repository lifecycle; frontend webauthn helpers (8), api methods (6), and a `PasskeysSection` render smoke test. Verified against the live test Postgres (`go test -p 1 ./...`).
+
+---
+
+## Repository Review (2026-06-06)
+
+### 41. Make OpenBao/Vault field encryption deployment-safe
+
+State: CLOSED
+
+Severity: High
+
+Status: The backend image previously started an embedded OpenBao development
+server with a root token and an in-memory transit key. Restarting the container
+could replace the key and make existing encrypted user and audit data
+undecryptable. Transit ciphertext could also exceed the original user column
+lengths.
+
+Related files:
+- [backend/Dockerfile](/home/m/projects/zerotrust/backend/Dockerfile)
+- [infra/docker-compose.yml](/home/m/projects/zerotrust/infra/docker-compose.yml)
+- [backend/pkg/secrets/secrets.go](/home/m/projects/zerotrust/backend/pkg/secrets/secrets.go)
+- [backend/migrations/000019_expand_encrypted_user_fields.up.sql](/home/m/projects/zerotrust/backend/migrations/000019_expand_encrypted_user_fields.up.sql)
+- [README.md](/home/m/projects/zerotrust/README.md)
+
+Status update:
+- Removed the embedded development OpenBao server and hard-coded root token from the backend container.
+- The backend now runs as a non-root user and connects only to an explicitly configured persistent OpenBao/Vault transit server.
+- Startup requires a token when a secrets server address is configured.
+- Startup verifies encrypt and decrypt access to `db-encryption-key`.
+- Added guards for empty transit responses and compatibility with legacy plaintext values.
+- Expanded encrypted user fields to `TEXT` and added coverage for ciphertext larger than the old limits.
+- Documented persistence, backup, key ownership, and environment requirements.
+
+### 42. Backfill legacy email hashes and protect encrypted audit reads
+
+State: CLOSED
+
+Severity: High
+
+Status: Existing plaintext users could have a null `email_hash`, preventing
+hash-based lookup after field encryption was enabled. Audit listing also did
+not decrypt joined user emails and could silently return encrypted or malformed
+metadata.
+
+Related files:
+- [backend/migrations/000020_backfill_email_hash.up.sql](/home/m/projects/zerotrust/backend/migrations/000020_backfill_email_hash.up.sql)
+- [backend/migrations/000021_enforce_email_hash.up.sql](/home/m/projects/zerotrust/backend/migrations/000021_enforce_email_hash.up.sql)
+- [backend/internal/user/repository.go](/home/m/projects/zerotrust/backend/internal/user/repository.go)
+- [backend/internal/audit/repository.go](/home/m/projects/zerotrust/backend/internal/audit/repository.go)
+
+Status update:
+- Added a migration that backfills deterministic hashes for legacy plaintext email values.
+- Added a follow-up migration that preserves databases already at version 20 and enforces `email_hash NOT NULL`.
+- Audit listing now decrypts user email and encrypted metadata when transit encryption is enabled.
+- Decryption and malformed decrypted JSON failures are returned instead of exposing ciphertext or silently hiding corruption.
+- Added repository and integration tests for the compatibility paths.
+
+### 43. Restore frontend linting and update the vulnerable router dependency
+
+State: CLOSED
+
+Severity: Medium
+
+Related files:
+- [.github/workflows/ci.yml](/home/m/projects/zerotrust/.github/workflows/ci.yml)
+- [frontend/package.json](/home/m/projects/zerotrust/frontend/package.json)
+- [frontend/eslint.config.js](/home/m/projects/zerotrust/frontend/eslint.config.js)
+
+Status update:
+- Added an ESLint flat configuration and fixed the existing lint findings.
+- Added frontend linting to CI.
+- Updated `react-router-dom` to the latest release, `7.17.0`.
+- Frontend lint, type checking, tests, production build, and dependency audit pass.
+
+### 44. Reduce the main frontend production bundle
+
+State: CLOSED
+
+Severity: Low
+
+Status: The production build previously reported a main JavaScript chunk of
+approximately 637 kB after minification.
+
+Related files:
+- [frontend/src/App.tsx](/home/m/projects/zerotrust/frontend/src/App.tsx)
+- [frontend/vite.config.ts](/home/m/projects/zerotrust/frontend/vite.config.ts)
+
+Acceptance criteria:
+- Measure the MUI, data-grid, date utility, and application chunks.
+- Consider stable vendor chunks or additional shell-level lazy loading.
+- Keep authentication bootstrap and error behavior unchanged.
+- Confirm lint, type checking, tests, and production build still pass.
+
+Status update:
+- Lazy-loaded the dashboard shell and all authentication pages in addition to the existing dashboard routes.
+- Added a top-level Suspense boundary while retaining the nested dashboard loading boundary.
+- Reduced the shared main chunk from approximately 637 kB to 451 kB and the application entry chunk to approximately 20 kB.
+- The largest remaining chunk is the data-grid date utility bundle at approximately 494 kB, below Vite's warning threshold.
+- Added coverage proving all 11 lazy route modules resolve.
+- Frontend lint, type checking, all 265 tests, and the production build pass without chunk-size or circular-chunk warnings.
+
+### 45. Prevent integration tests from deleting RBAC configuration
+
+State: CLOSED
+
+Severity: High
+
+Status: Several database integration-test fixtures deleted or truncated the
+global `roles` table. Because `role_permissions` references roles with cascading
+deletes, running those tests against a persistent development database removed
+every admin permission. The UI still showed the `admin` role, but Users, Audit,
+and Service Accounts APIs returned HTTP 403.
+
+Related files:
+- [backend/migrations/000022_repair_admin_permissions.up.sql](/home/m/projects/zerotrust/backend/migrations/000022_repair_admin_permissions.up.sql)
+- [backend/internal/user/user_test.go](/home/m/projects/zerotrust/backend/internal/user/user_test.go)
+- [backend/internal/admin/handler_test.go](/home/m/projects/zerotrust/backend/internal/admin/handler_test.go)
+- [backend/internal/audit/handler_test.go](/home/m/projects/zerotrust/backend/internal/audit/handler_test.go)
+
+Status update:
+- Added migration 22 to restore canonical `admin` and `user` roles and grant every defined permission to `admin`.
+- Removed destructive role-table cleanup from all affected integration fixtures.
+- Test-only roles are now inserted idempotently without replacing application RBAC configuration.
+- Applied migration 22 to the development database; the admin role has all 10 defined permissions.
+- Ran the complete backend suite against a temporary database and confirmed all tests pass while all admin permission mappings remain intact.

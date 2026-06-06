@@ -255,13 +255,17 @@ func TestRepository_LogWithGeoIPLocator(t *testing.T) {
 }
 
 func TestRepository_LogWithEncryptedMetadata(t *testing.T) {
-	pool, ctx, repo, _ := setupTestDB(t)
+	pool, ctx, repo, userRepo := setupTestDB(t)
 	defer pool.Close()
 
-	repo.SetSecretsClient(&mockEncrypter{})
+	encrypter := &mockEncrypter{}
+	repo.SetSecretsClient(encrypter)
+	userRepo.SetSecretsClient(encrypter)
+	uid := seedAuditUser(t, ctx, userRepo, "encrypted-audit@example.com")
 
 	// Log with all plaintext-preserved keys
 	if err := repo.Log(ctx, Entry{
+		UserID: &uid,
 		Action: "test.enc",
 		Metadata: map[string]any{
 			"outcome": "success",
@@ -304,6 +308,26 @@ func TestRepository_LogWithEncryptedMetadata(t *testing.T) {
 		if _, hasPayload := e.Metadata["payload"]; hasPayload {
 			t.Fatalf("payload key should be decrypted and removed, got %+v", e.Metadata)
 		}
+		if e.UserID != nil && (e.UserEmail == nil || *e.UserEmail != "encrypted-audit@example.com") {
+			t.Fatalf("user email=%v want=encrypted-audit@example.com", e.UserEmail)
+		}
+	}
+}
+
+func TestRepository_ListRejectsMalformedEncryptedPayload(t *testing.T) {
+	pool, ctx, repo, _ := setupTestDB(t)
+	defer pool.Close()
+
+	repo.SetSecretsClient(&mockEncrypter{})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_logs (action, metadata)
+		VALUES ('test.malformed', '{"payload":42}'::jsonb)
+	`); err != nil {
+		t.Fatalf("insert malformed audit entry: %v", err)
+	}
+
+	if _, err := repo.List(ctx, ListParams{Action: "test.malformed", Limit: 10}); err == nil {
+		t.Fatal("expected malformed encrypted payload to fail")
 	}
 }
 

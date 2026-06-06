@@ -1,0 +1,2 @@
+ALTER TABLE users
+    ALTER COLUMN email_hash DROP NOT NULL;
