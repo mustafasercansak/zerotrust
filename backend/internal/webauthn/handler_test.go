@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -100,6 +102,103 @@ func TestRegisterFinish_DuplicateCredential(t *testing.T) {
 	h.RegisterFinish(w, authedReq(http.MethodPost, `{"name":"x","credential":{"id":"abc"}}`))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestRegisterBegin_ServiceError(t *testing.T) {
+	h := NewHandler(&fakeService{beginErr: errors.New("boom")})
+	w := httptest.NewRecorder()
+	h.RegisterBegin(w, authedReq(http.MethodPost, ""))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestRegisterFinish_RequiresAuth(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"credential":{"id":"a"}}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestRegisterFinish_CeremonyExpired(t *testing.T) {
+	h := NewHandler(&fakeService{finishErr: ErrSessionNotFound})
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, authedReq(http.MethodPost, `{"credential":{"id":"abc"}}`))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("ceremony_expired")) {
+		t.Fatalf("expected ceremony_expired, got %s", w.Body.String())
+	}
+}
+
+func TestRegisterFinish_InvalidCredential(t *testing.T) {
+	h := NewHandler(&fakeService{finishErr: errors.New("bad attestation")})
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, authedReq(http.MethodPost, `{"credential":{"id":"abc"}}`))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("invalid_credential")) {
+		t.Fatalf("expected invalid_credential, got %s", w.Body.String())
+	}
+}
+
+func TestRegisterFinish_LongNameTruncated(t *testing.T) {
+	f := &fakeService{}
+	h := NewHandler(f)
+	longName := strings.Repeat("é", 150) // 150 runes
+	body := `{"name":"` + longName + `","credential":{"id":"abc"}}`
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, authedReq(http.MethodPost, body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if n := len([]rune(f.finishName)); n != 100 {
+		t.Fatalf("expected name truncated to 100 runes, got %d", n)
+	}
+}
+
+func TestList_RequiresAuth(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.List(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestList_ServiceError(t *testing.T) {
+	h := NewHandler(&fakeService{listErr: errors.New("db down")})
+	w := httptest.NewRecorder()
+	h.List(w, authedReq(http.MethodGet, ""))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestDelete_RequiresAuth(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.Delete(w, httptest.NewRequest(http.MethodDelete, "/", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestDelete_InternalError(t *testing.T) {
+	h := NewHandler(&fakeService{deleteErr: errors.New("db down")})
+	r := authedReq(http.MethodDelete, "")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "c1")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	h.Delete(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
 	}
 }
 

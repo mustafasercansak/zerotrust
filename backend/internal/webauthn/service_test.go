@@ -358,3 +358,107 @@ func TestBeginRegistration_OptionsAreValidJSON(t *testing.T) {
 		t.Fatalf("expected publicKey in creation options, got %v", parsed)
 	}
 }
+
+// A non-UUID userID can't be turned into a WebAuthn user handle, so the
+// ceremony-builders must surface the parse error instead of panicking.
+func TestBeginRegistration_InvalidUserID(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, err := svc.BeginRegistration(context.Background(), "not-a-uuid", "u@example.com", "U"); err == nil {
+		t.Fatal("expected an error for a non-UUID userID")
+	}
+}
+
+func TestBeginLogin_InvalidUserID(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, err := svc.BeginLogin(context.Background(), "not-a-uuid", "u@example.com", "U"); err == nil {
+		t.Fatal("expected an error for a non-UUID userID")
+	}
+}
+
+// When Redis is unreachable the ceremony-begin calls must surface the error from
+// persisting the single-use session rather than returning unusable options.
+func TestBeginCeremonies_RedisUnavailable(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	svc, err := NewService(newMemStore(), rdb, Config{
+		RPID: "localhost", RPDisplayName: "ZeroTrust", RPOrigins: []string{"http://localhost:3000"},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	mr.Close() // Redis now unreachable → saveSession fails.
+
+	ctx := context.Background()
+	if _, err := svc.BeginDiscoverableLogin(ctx); err == nil {
+		t.Fatal("expected BeginDiscoverableLogin to fail when Redis is down")
+	}
+	if _, err := svc.BeginRegistration(ctx, uuid.NewString(), "u@example.com", "U"); err == nil {
+		t.Fatal("expected BeginRegistration to fail when Redis is down")
+	}
+}
+
+// FinishRegistration must reject a malformed attestation body even with a live
+// ceremony session (the response can't be parsed into a creation response).
+func TestFinishRegistration_MalformedBody(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if _, err := svc.BeginRegistration(ctx, userID, "u@example.com", "U"); err != nil {
+		t.Fatalf("BeginRegistration: %v", err)
+	}
+	if err := svc.FinishRegistration(ctx, userID, "u@example.com", "U", "k", []byte(`{"not":"an attestation"}`)); err == nil {
+		t.Fatal("expected an error for a malformed attestation body")
+	}
+}
+
+// FinishLogin must reject a malformed assertion body once a credential exists and
+// a login ceremony is in flight.
+func TestFinishLogin_MalformedBody(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	rp := vwa.RelyingParty{ID: "localhost", Name: "ZeroTrust", Origin: "http://localhost:3000"}
+	authenticator := vwa.NewAuthenticator()
+	cred := vwa.NewCredential(vwa.KeyTypeEC2)
+
+	regJSON, _ := svc.BeginRegistration(ctx, userID, "u@example.com", "U")
+	attOpts, _ := vwa.ParseAttestationOptions(string(regJSON))
+	attResponse := vwa.CreateAttestationResponse(rp, authenticator, cred, *attOpts)
+	if err := svc.FinishRegistration(ctx, userID, "u@example.com", "U", "k", []byte(attResponse)); err != nil {
+		t.Fatalf("FinishRegistration: %v", err)
+	}
+	authenticator.AddCredential(cred)
+
+	if _, err := svc.BeginLogin(ctx, userID, "u@example.com", "U"); err != nil {
+		t.Fatalf("BeginLogin: %v", err)
+	}
+	if err := svc.FinishLogin(ctx, userID, "u@example.com", "U", []byte(`{"not":"an assertion"}`)); err == nil {
+		t.Fatal("expected an error for a malformed assertion body")
+	}
+}
+
+// FinishDiscoverableLogin must reject a malformed assertion body even when the
+// ceremony session exists (the response can't be parsed into an assertion).
+func TestFinishDiscoverableLogin_MalformedAssertion(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	loginJSON, err := svc.BeginDiscoverableLogin(ctx)
+	if err != nil {
+		t.Fatalf("BeginDiscoverableLogin: %v", err)
+	}
+	var begin struct {
+		CeremonyID string `json:"ceremony_id"`
+	}
+	if err := json.Unmarshal(loginJSON, &begin); err != nil {
+		t.Fatalf("unmarshal begin: %v", err)
+	}
+
+	if _, err := svc.FinishDiscoverableLogin(ctx, begin.CeremonyID, []byte(`{"not":"an assertion"}`)); err == nil {
+		t.Fatal("expected an error for a malformed assertion body")
+	}
+}
