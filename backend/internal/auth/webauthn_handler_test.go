@@ -84,3 +84,83 @@ func TestWebAuthnLoginFinishHandler_MissingFields(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }
+
+func TestWebAuthnPasswordlessBeginHandler(t *testing.T) {
+	svc := &fakeAuthService{pwlBeginOpts: json.RawMessage(`{"publicKey":{},"ceremony_id":"c1"}`)}
+	h := NewHandler(svc, nil, nil, false, false, nil, "", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/webauthn/passwordless/begin", nil)
+	rr := httptest.NewRecorder()
+	h.WebAuthnPasswordlessBegin(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("ceremony_id")) {
+		t.Fatalf("expected ceremony_id in options, got %s", rr.Body.String())
+	}
+}
+
+func TestWebAuthnPasswordlessBeginHandler_Unavailable(t *testing.T) {
+	svc := &fakeAuthService{pwlBeginErr: ErrInvalidCredentials}
+	h := NewHandler(svc, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	rr := httptest.NewRecorder()
+	h.WebAuthnPasswordlessBegin(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestWebAuthnPasswordlessFinishHandler_SetsCookies(t *testing.T) {
+	svc := &fakeAuthService{pwlFinishPair: &TokenPair{AccessToken: "at", RefreshToken: "rt"}}
+	h := NewHandler(svc, nil, nil, false, false, nil, "", nil)
+
+	body := `{"ceremony_id":"c1","credential":{"id":"abc"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/webauthn/passwordless/finish", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+	h.WebAuthnPasswordlessFinish(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	if svc.pwlFinishCeremony != "c1" {
+		t.Fatalf("expected ceremony id forwarded, got %q", svc.pwlFinishCeremony)
+	}
+	var sawAccess, sawRefresh bool
+	for _, c := range rr.Result().Cookies() {
+		switch c.Name {
+		case "access_token":
+			sawAccess = true
+		case "refresh_token":
+			sawRefresh = true
+		}
+	}
+	if !sawAccess || !sawRefresh {
+		t.Fatalf("expected session cookies to be set (access=%v refresh=%v)", sawAccess, sawRefresh)
+	}
+}
+
+func TestWebAuthnPasswordlessFinishHandler_InvalidAssertion(t *testing.T) {
+	svc := &fakeAuthService{pwlFinishErr: ErrInvalidCredentials}
+	h := NewHandler(svc, nil, nil, false, false, nil, "", nil)
+
+	body := `{"ceremony_id":"c1","credential":{"id":"abc"}}`
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+	h.WebAuthnPasswordlessFinish(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestWebAuthnPasswordlessFinishHandler_MissingFields(t *testing.T) {
+	h := NewHandler(&fakeAuthService{}, nil, nil, false, false, nil, "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"ceremony_id":"c1"}`))
+	rr := httptest.NewRecorder()
+	h.WebAuthnPasswordlessFinish(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}

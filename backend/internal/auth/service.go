@@ -59,6 +59,11 @@ type WebAuthnVerifier interface {
 	HasCredentials(ctx context.Context, userID string) bool
 	BeginLogin(ctx context.Context, userID, name, displayName string) (json.RawMessage, error)
 	FinishLogin(ctx context.Context, userID, name, displayName string, responseBody []byte) error
+	// BeginDiscoverableLogin / FinishDiscoverableLogin drive passwordless
+	// (usernameless) sign-in via discoverable credentials. Finish returns the
+	// userID the authenticator identified.
+	BeginDiscoverableLogin(ctx context.Context) (json.RawMessage, error)
+	FinishDiscoverableLogin(ctx context.Context, ceremonyID string, responseBody []byte) (string, error)
 }
 
 // SessionStore persists refresh-token sessions.
@@ -545,6 +550,39 @@ func (s *Service) WebAuthnLoginFinish(ctx context.Context, pendingToken string, 
 		return nil, ErrInvalidCredentials
 	}
 	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
+}
+
+// WebAuthnPasswordlessBegin returns assertion options for a passwordless
+// (usernameless) login using discoverable credentials. No prior password step is
+// involved; the authenticator reveals the user on finish.
+func (s *Service) WebAuthnPasswordlessBegin(ctx context.Context) (json.RawMessage, error) {
+	if s.webauthn == nil {
+		return nil, ErrInvalidCredentials
+	}
+	opts, err := s.webauthn.BeginDiscoverableLogin(ctx)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	return opts, nil
+}
+
+// WebAuthnPasswordlessFinish verifies a passwordless assertion and, on success,
+// issues a token pair for the user the authenticator identified. A registered
+// passkey with user verification stands in for both factors (possession +
+// inherence), so no password is required.
+func (s *Service) WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID string, credential []byte, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
+	if s.webauthn == nil {
+		return nil, ErrInvalidCredentials
+	}
+	uid, err := s.webauthn.FinishDiscoverableLogin(ctx, ceremonyID, credential)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	u, err := s.users.FindByID(ctx, uid)
+	if err != nil || !u.IsActive {
+		return nil, ErrInvalidCredentials
+	}
+	return s.completeLogin(ctx, u, ip, ua, deviceInfo)
 }
 
 // peekPendingUID reads the userID from a pending-login record without consuming it.

@@ -36,6 +36,8 @@ type authService interface {
 	ConsumeDPoPProof(ctx context.Context, jti string) error
 	WebAuthnLoginBegin(ctx context.Context, pendingToken string) (json.RawMessage, error)
 	WebAuthnLoginFinish(ctx context.Context, pendingToken string, credential []byte) (*TokenPair, error)
+	WebAuthnPasswordlessBegin(ctx context.Context) (json.RawMessage, error)
+	WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID string, credential []byte, ip, ua string, deviceInfo map[string]string) (*TokenPair, error)
 }
 
 type userService interface {
@@ -346,6 +348,56 @@ func (h *Handler) WebAuthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 	h.logAudit(r.Context(), audit.Entry{
 		Action:    "auth.webauthn_login_success",
 		Resource:  "/api/v1/auth/webauthn/login/finish",
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.Header.Get("User-Agent"),
+		Metadata:  statusMetadata("", http.StatusOK),
+	}, true)
+
+	h.writeCookies(w, r, pair)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/v1/auth/webauthn/passwordless/begin — assertion options for a
+// passwordless (usernameless) passkey login. No request body required.
+func (h *Handler) WebAuthnPasswordlessBegin(w http.ResponseWriter, r *http.Request) {
+	opts, err := h.authSvc.WebAuthnPasswordlessBegin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(opts)
+}
+
+// POST /api/v1/auth/webauthn/passwordless/finish — verify the passwordless
+// assertion and complete login. Body: {"ceremony_id":"...","credential":{...}}
+func (h *Handler) WebAuthnPasswordlessFinish(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CeremonyID string          `json:"ceremony_id"`
+		Credential json.RawMessage `json:"credential"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CeremonyID == "" || len(req.Credential) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	pair, err := h.authSvc.WebAuthnPasswordlessFinish(r.Context(), req.CeremonyID, req.Credential, r.RemoteAddr, r.Header.Get("User-Agent"), nil)
+	if err != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			Action:    "auth.webauthn_passwordless_failed",
+			Resource:  "/api/v1/auth/webauthn/passwordless/finish",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  statusMetadata("invalid_credentials", http.StatusUnauthorized),
+		}, true)
+		writeError(w, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+
+	h.logAudit(r.Context(), audit.Entry{
+		Action:    "auth.webauthn_passwordless_success",
+		Resource:  "/api/v1/auth/webauthn/passwordless/finish",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
 		Metadata:  statusMetadata("", http.StatusOK),

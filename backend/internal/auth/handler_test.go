@@ -60,6 +60,11 @@ type fakeAuthService struct {
 	waBeginErr        error
 	waFinishPair      *TokenPair
 	waFinishErr       error
+	pwlBeginOpts      json.RawMessage
+	pwlBeginErr       error
+	pwlFinishPair     *TokenPair
+	pwlFinishErr      error
+	pwlFinishCeremony string
 }
 
 func (s *fakeAuthService) ClientCredentials(ctx context.Context, clientID, secret string, dpopJKT string) (*ServiceTokenResponse, error) {
@@ -111,6 +116,21 @@ func (s *fakeAuthService) WebAuthnLoginFinish(ctx context.Context, pendingToken 
 		return nil, s.waFinishErr
 	}
 	return s.waFinishPair, nil
+}
+
+func (s *fakeAuthService) WebAuthnPasswordlessBegin(ctx context.Context) (json.RawMessage, error) {
+	if s.pwlBeginErr != nil {
+		return nil, s.pwlBeginErr
+	}
+	return s.pwlBeginOpts, nil
+}
+
+func (s *fakeAuthService) WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID string, credential []byte, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
+	s.pwlFinishCeremony = ceremonyID
+	if s.pwlFinishErr != nil {
+		return nil, s.pwlFinishErr
+	}
+	return s.pwlFinishPair, nil
 }
 
 type fakePasswordResetter struct {

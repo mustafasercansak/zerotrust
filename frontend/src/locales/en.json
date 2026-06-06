@@ -67,6 +67,7 @@
       "webauthn_failed": "Passkey sign-in was cancelled or failed."
     },
     "usePasskey": "Use a passkey",
+    "signInWithPasskey": "Sign in with a passkey",
     "or": "or"
   },
   "nav": {

@@ -67,6 +67,7 @@
       "webauthn_failed": "Geçiş anahtarıyla oturum açma iptal edildi veya başarısız oldu."
     },
     "usePasskey": "Geçiş anahtarı kullan",
+    "signInWithPasskey": "Geçiş anahtarıyla giriş yap",
     "or": "veya"
   },
   "nav": {

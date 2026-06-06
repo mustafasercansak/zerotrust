@@ -171,6 +171,34 @@ func TestBeginLogin_NoCredentials(t *testing.T) {
 	}
 }
 
+func TestBeginDiscoverableLogin_ReturnsCeremonyAndOptions(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	optsJSON, err := svc.BeginDiscoverableLogin(ctx)
+	if err != nil {
+		t.Fatalf("BeginDiscoverableLogin: %v", err)
+	}
+
+	var payload struct {
+		PublicKey  json.RawMessage `json:"publicKey"`
+		CeremonyID string          `json:"ceremony_id"`
+	}
+	if err := json.Unmarshal(optsJSON, &payload); err != nil {
+		t.Fatalf("unmarshal options: %v", err)
+	}
+	if payload.CeremonyID == "" {
+		t.Fatal("expected a ceremony_id in the options")
+	}
+	if len(payload.PublicKey) == 0 {
+		t.Fatal("expected publicKey assertion options")
+	}
+	// The ceremony session is single-use: a bogus ceremony id is rejected.
+	if _, err := svc.FinishDiscoverableLogin(ctx, "does-not-exist", []byte(`{"id":"x"}`)); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected ErrSessionNotFound for unknown ceremony, got %v", err)
+	}
+}
+
 func TestFinishLogin_SessionSingleUse(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()

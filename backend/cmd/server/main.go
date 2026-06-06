@@ -342,6 +342,8 @@ func run(ctx context.Context, cfg config) error {
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/mfa/challenge", authHandler.MFAChallenge)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/login/begin", authHandler.WebAuthnLoginBegin)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/login/finish", authHandler.WebAuthnLoginFinish)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/passwordless/begin", authHandler.WebAuthnPasswordlessBegin)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/passwordless/finish", authHandler.WebAuthnPasswordlessFinish)
 		r.With(publicAudit, tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
 		r.With(publicAudit).Post("/auth/refresh", authHandler.Refresh)
 		r.With(publicAudit).Post("/auth/logout", authHandler.Logout)

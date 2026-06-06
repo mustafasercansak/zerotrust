@@ -3,6 +3,7 @@ import React from "react";
 import LoginPage from "./LoginPage";
 import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
+import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
 
 // Mock react-router-dom
@@ -30,6 +31,9 @@ vi.mock("@/lib/tokenManager", () => ({
 }));
 
 // Mock sonner and qrcode
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 vi.mock("qrcode.react", () => ({
   QRCodeSVG: () => React.createElement("div", null, "QRCode"),
 }));
@@ -244,18 +248,18 @@ describe("LoginPage component", () => {
 
     runRender();
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.account_locked");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
 
     // Rate Limit Error
     vi.spyOn(api, "login").mockRejectedValueOnce(
       new ApiError("rate_limit_exceeded", 30, 429)
     );
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[11]).toBe(30); // retryAfter set to 30
+    expect(stateStore[10]).toBe(30); // retryAfter set to 30
 
     // Test countdown timer in useEffect
     runRender();
-    expect(stateStore[11]).toBe(29);
+    expect(stateStore[10]).toBe(29);
     expect(effectCleanups[0]).toBeDefined();
     effectCleanups[0]();
     expect(window.clearInterval).toHaveBeenCalledWith(123);
@@ -263,7 +267,7 @@ describe("LoginPage component", () => {
 
   it("does not submit credentials or MFA while retry countdown is active", async () => {
     const loginSpy = vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
-    stateStore[11] = 5;
+    stateStore[10] = 5;
     runRender();
 
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
@@ -282,11 +286,11 @@ describe("LoginPage component", () => {
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("invalid_credentials", undefined, 401));
     runRender();
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.invalid_credentials");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
 
     vi.spyOn(api, "login").mockRejectedValueOnce(new Error("Net fail"));
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.internal_error");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.internal_error"));
   });
 
   it("handles MFA challenge failures including rate limiting", async () => {
@@ -300,12 +304,12 @@ describe("LoginPage component", () => {
       new ApiError("rate_limit_exceeded", 10, 429)
     );
     await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(stateStore[11]).toBe(10);
+    expect(stateStore[10]).toBe(10);
 
     // Other failure
     vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(new Error("wrong code"));
     await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.invalid_credentials");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
   });
 
   it("allows backing to credentials stage from MFA layout", () => {
@@ -325,7 +329,7 @@ describe("LoginPage component", () => {
     expect(capturedBackButtonClick).toBeDefined();
     capturedBackButtonClick();
     expect(stateStore[0]).toBe("credentials");
-    expect(stateStore[9]).toBeNull();
+    expect(stateStore[8]).toBe(""); // totpCode cleared
   });
 
   it("handles recovery code (length 14) during MFA verification", async () => {
@@ -345,13 +349,13 @@ describe("LoginPage component", () => {
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("account_locked", undefined, 423));
     runRender();
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.account_locked");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
 
     // Hits rate_limit_exceeded without retryAfter on login
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
     runRender();
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.rate_limit_exceeded");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded"));
 
     // Hits rate_limit_exceeded without retryAfter on MFA verification
     stateStore[0] = "mfa";
@@ -359,7 +363,7 @@ describe("LoginPage component", () => {
     runRender();
     vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
     await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(stateStore[9]).toContain("errors.invalid_credentials");
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
   });
 
   it("renders loading state for both credentials and MFA stages", async () => {
@@ -381,7 +385,7 @@ describe("LoginPage component", () => {
     vi.spyOn(api, "mfaChallenge").mockImplementation(() => new Promise((res) => { resolveMFA = res; }));
 
     stateStore[0] = "mfa";
-    stateStore[12] = true; // totpEnabled → render the TOTP submit button
+    stateStore[11] = true; // totpEnabled → render the TOTP submit button
     runRender();
     capturedOnSubmitMFA({ preventDefault: vi.fn() });
 
@@ -392,17 +396,14 @@ describe("LoginPage component", () => {
     await Promise.resolve(); await Promise.resolve();
   });
 
-  it("renders MFA stage errors and rate limit alerts", () => {
-    // Hits the MFA stage Alert branches (lines 174-176)
+  it("renders the rate-limit countdown on the MFA submit button", () => {
+    // Errors now surface as toasts; the live countdown shows on the submit button.
     stateStore[0] = "mfa";
-    stateStore[9] = "some-error"; // error state
-    let html = runRender();
-    expect(html).toContain("some-error");
-
-    stateStore[9] = null;
-    stateStore[11] = 10; // retryAfter state
-    html = runRender();
-    expect(html).toContain("errors.rate_limit_exceeded_countdown");
+    stateStore[11] = true; // totpEnabled → render the TOTP submit button
+    stateStore[8] = "123456"; // valid length so the button is interactive
+    stateStore[10] = 10; // retryAfter
+    const html = runRender();
+    expect(html).toContain("retryButton");
   });
 
   it("handles logical edge cases for mfa setup conditions", async () => {
@@ -445,11 +446,11 @@ describe("LoginPage component", () => {
     stateStore[8] = "123456"; // valid length bypasses length check
 
     // Case 1: retryAfter > 0 evaluates to true
-    stateStore[11] = 5; 
+    stateStore[10] = 5;
     runRender();
 
     // Case 2: retryAfter = 0, isSetup = true, codesSaved = false evaluates to true
-    stateStore[11] = 0;
+    stateStore[10] = 0;
     stateStore[5] = "otpauth://setup";
     stateStore[7] = false;
     runRender();

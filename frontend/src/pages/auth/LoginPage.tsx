@@ -5,7 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
 import { performAssertion, isWebAuthnSupported } from "@/lib/webauthn";
 import { AuthPage } from "@/components/AuthPage";
-import Alert from "@mui/material/Alert";
+import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
@@ -32,7 +32,6 @@ export default function LoginPage() {
   const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([]);
   const [codesSaved, setCodesSaved] = useState(false);
   const [totpCode, setTotpCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [retryAfter, setRetryAfter] = useState(0);
   // Which second factors the account can use (set from the login response).
@@ -47,7 +46,6 @@ export default function LoginPage() {
 
   async function handleCredentials(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     if (retryAfter > 0) return;
     setLoading(true);
     try {
@@ -71,15 +69,38 @@ export default function LoginPage() {
       if (err instanceof ApiError) {
         if (err.message === "account_locked" && err.retryAfter) {
           const minutes = Math.ceil(err.retryAfter / 60);
-          setError(t("errors.account_locked", { minutes }));
+          toast.error(t("errors.account_locked", { minutes }));
         } else if (err.message === "rate_limit_exceeded" && err.retryAfter) {
           setRetryAfter(err.retryAfter);
-          setError(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+          toast.error(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
         } else {
-          setError(t(`errors.${err.message}`, { defaultValue: t("errors.internal_error") }));
+          toast.error(t(`errors.${err.message}`, { defaultValue: t("errors.internal_error") }));
         }
       } else {
-        setError(t("errors.internal_error"));
+        toast.error(t("errors.internal_error"));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Passwordless sign-in: a discoverable passkey identifies the user, so no
+  // email/password is needed. Available on the first screen when supported.
+  async function handlePasswordlessLogin() {
+    if (retryAfter > 0) return;
+    setLoading(true);
+    try {
+      const options = await api.webauthnPasswordlessBegin();
+      const assertion = await performAssertion(options);
+      await api.webauthnPasswordlessFinish(options.ceremony_id, assertion);
+      scheduleRefresh(() => navigate("/auth/login"));
+      navigate("/dashboard");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
+        setRetryAfter(err.retryAfter);
+        toast.error(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+      } else {
+        toast.error(t("errors.webauthn_failed"));
       }
     } finally {
       setLoading(false);
@@ -88,7 +109,6 @@ export default function LoginPage() {
 
   async function handleMFA(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     if (retryAfter > 0) return;
     setLoading(true);
     try {
@@ -98,9 +118,9 @@ export default function LoginPage() {
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);
-        setError(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+        toast.error(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
       } else {
-        setError(t("errors.invalid_credentials"));
+        toast.error(t("errors.invalid_credentials"));
       }
     } finally {
       setLoading(false);
@@ -108,7 +128,6 @@ export default function LoginPage() {
   }
 
   async function handlePasskeyLogin() {
-    setError(null);
     if (retryAfter > 0) return;
     setLoading(true);
     try {
@@ -120,9 +139,9 @@ export default function LoginPage() {
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);
-        setError(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
+        toast.error(t("errors.rate_limit_exceeded_countdown", { seconds: err.retryAfter }));
       } else {
-        setError(t("errors.webauthn_failed"));
+        toast.error(t("errors.webauthn_failed"));
       }
     } finally {
       setLoading(false);
@@ -210,11 +229,6 @@ export default function LoginPage() {
               slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" } } }}
             />
           )}
-          {(error || retryAfter > 0) && (
-            <Alert severity="error">
-              {retryAfter > 0 ? t("errors.rate_limit_exceeded_countdown", { seconds: retryAfter }) : error}
-            </Alert>
-          )}
           {showTotp && (
             <Button
               type="submit"
@@ -226,7 +240,7 @@ export default function LoginPage() {
           )}
           <Button
             type="button"
-            onClick={() => { setStage("credentials"); setError(null); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); setMfaRecoveryCodes([]); setCodesSaved(false); }}
+            onClick={() => { setStage("credentials"); setTotpCode(""); setMfaSetupURL(""); setMfaSetupSecret(""); setMfaRecoveryCodes([]); setCodesSaved(false); }}
             color="inherit"
           >
             {t("backToLogin")}
@@ -260,14 +274,23 @@ export default function LoginPage() {
             </MuiLink>
           }
         />
-        {(error || retryAfter > 0) && (
-          <Alert severity="error">
-            {retryAfter > 0 ? t("errors.rate_limit_exceeded_countdown", { seconds: retryAfter }) : error}
-          </Alert>
-        )}
         <Button type="submit" variant="contained" disabled={loading || retryAfter > 0}>
           {loading ? "..." : retryAfter > 0 ? t("retryButton", { seconds: retryAfter }) : t("loginButton")}
         </Button>
+        {isWebAuthnSupported() && (
+          <>
+            <Divider sx={{ fontSize: "0.8rem" }}>{t("or")}</Divider>
+            <Button
+              type="button"
+              variant="outlined"
+              startIcon={<Fingerprint />}
+              onClick={handlePasswordlessLogin}
+              disabled={loading || retryAfter > 0}
+            >
+              {t("signInWithPasskey")}
+            </Button>
+          </>
+        )}
       </Box>
     </AuthPage>
   );

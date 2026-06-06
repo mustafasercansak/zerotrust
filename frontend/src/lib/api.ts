@@ -272,6 +272,19 @@ export const api = {
       body: JSON.stringify({ mfa_token: mfaToken, credential }),
     }),
 
+  // Passwordless (usernameless) passkey login via discoverable credentials.
+  // Begin returns assertion options plus an opaque ceremony_id that finish must
+  // echo back; the authenticator reveals the user, so no password step is needed.
+  webauthnPasswordlessBegin: () =>
+    request<CredentialRequestOptionsJSON & { ceremony_id: string }>("/api/v1/auth/webauthn/passwordless/begin", {
+      method: "POST",
+    }),
+  webauthnPasswordlessFinish: (ceremonyId: string, credential: unknown) =>
+    request<{ ok: boolean }>("/api/v1/auth/webauthn/passwordless/finish", {
+      method: "POST",
+      body: JSON.stringify({ ceremony_id: ceremonyId, credential }),
+    }),
+
   logout: () =>
     fetch("/api/v1/auth/logout", {
       method: "POST",

@@ -231,6 +231,74 @@ func (s *Service) FinishLogin(ctx context.Context, userID, name, displayName str
 	return s.repo.UpdateOnLogin(ctx, credID, data, int64(cred.Authenticator.SignCount))
 }
 
+// BeginDiscoverableLogin starts a passwordless (usernameless) assertion ceremony
+// using discoverable credentials (resident keys). The authenticator itself
+// reveals which user is signing in via the userHandle, so no email/password is
+// required up front. It returns the CredentialAssertion options for
+// navigator.credentials.get() with an opaque ceremony_id the caller echoes back
+// to FinishDiscoverableLogin (the ceremony is not bound to a known user yet).
+func (s *Service) BeginDiscoverableLogin(ctx context.Context) (json.RawMessage, error) {
+	assertion, session, err := s.wa.BeginDiscoverableLogin()
+	if err != nil {
+		return nil, err
+	}
+	ceremonyID := uuid.NewString()
+	if err := s.saveSession(ctx, discoSessionKey(ceremonyID), session); err != nil {
+		return nil, err
+	}
+	// Inject the ceremony id alongside the standard {"publicKey": {...}} payload;
+	// performAssertion on the client ignores unknown top-level fields.
+	raw, err := json.Marshal(assertion)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	m["ceremony_id"], _ = json.Marshal(ceremonyID)
+	return json.Marshal(m)
+}
+
+// FinishDiscoverableLogin verifies a passwordless assertion. The userHandle in
+// the response identifies the signing user; the returned userID lets the caller
+// issue tokens. The single-use ceremony session makes concurrent finishes safe.
+func (s *Service) FinishDiscoverableLogin(ctx context.Context, ceremonyID string, responseBody []byte) (string, error) {
+	session, err := s.loadSession(ctx, discoSessionKey(ceremonyID))
+	if err != nil {
+		return "", err
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(responseBody))
+	if err != nil {
+		return "", err
+	}
+
+	var resolvedUserID string
+	handler := func(_, userHandle []byte) (gowebauthn.User, error) {
+		uid, err := uuid.FromBytes(userHandle)
+		if err != nil {
+			return nil, err
+		}
+		resolvedUserID = uid.String()
+		return s.buildUser(ctx, resolvedUserID, "", "")
+	}
+
+	cred, err := s.wa.ValidateDiscoverableLogin(handler, session, parsed)
+	if err != nil {
+		return "", err
+	}
+
+	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.UpdateOnLogin(ctx, credID, data, int64(cred.Authenticator.SignCount)); err != nil {
+		return "", err
+	}
+	return resolvedUserID, nil
+}
+
 func (s *Service) saveSession(ctx context.Context, key string, sd *gowebauthn.SessionData) error {
 	b, err := json.Marshal(sd)
 	if err != nil {
@@ -254,3 +322,4 @@ func (s *Service) loadSession(ctx context.Context, key string) (gowebauthn.Sessi
 
 func regSessionKey(userID string) string   { return "webauthn:reg:" + userID }
 func loginSessionKey(userID string) string { return "webauthn:login:" + userID }
+func discoSessionKey(ceremonyID string) string { return "webauthn:disco:" + ceremonyID }

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,12 +13,16 @@ import (
 )
 
 type fakeWebAuthnVerifier struct {
-	hasCreds    bool
-	beginOpts   json.RawMessage
-	beginErr    error
-	finishErr   error
-	beginCalls  int
-	finishCalls int
+	hasCreds      bool
+	beginOpts     json.RawMessage
+	beginErr      error
+	finishErr     error
+	beginCalls    int
+	finishCalls   int
+	discoOpts     json.RawMessage
+	discoBeginErr error
+	discoUserID   string
+	discoErr      error
 }
 
 func (f *fakeWebAuthnVerifier) HasCredentials(_ context.Context, _ string) bool { return f.hasCreds }
@@ -28,6 +33,12 @@ func (f *fakeWebAuthnVerifier) BeginLogin(_ context.Context, _, _, _ string) (js
 func (f *fakeWebAuthnVerifier) FinishLogin(_ context.Context, _, _, _ string, _ []byte) error {
 	f.finishCalls++
 	return f.finishErr
+}
+func (f *fakeWebAuthnVerifier) BeginDiscoverableLogin(_ context.Context) (json.RawMessage, error) {
+	return f.discoOpts, f.discoBeginErr
+}
+func (f *fakeWebAuthnVerifier) FinishDiscoverableLogin(_ context.Context, _ string, _ []byte) (string, error) {
+	return f.discoUserID, f.discoErr
 }
 
 type waLoginUserReader struct{ u *user.User }
@@ -161,5 +172,70 @@ func TestWebAuthnLoginFinish_VerificationFails(t *testing.T) {
 	// On failure the pending token is preserved so the user can retry.
 	if err := rdb.Get(ctx, key).Err(); err != nil {
 		t.Fatalf("expected pending token to survive a failed assertion, got %v", err)
+	}
+}
+
+func TestWebAuthnPasswordlessBegin_ReturnsOptions(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{discoOpts: json.RawMessage(`{"publicKey":{},"ceremony_id":"c1"}`)}
+	svc, _ := newWebAuthnTestService(t, verifier)
+
+	opts, err := svc.WebAuthnPasswordlessBegin(context.Background())
+	if err != nil {
+		t.Fatalf("WebAuthnPasswordlessBegin: %v", err)
+	}
+	if string(opts) != `{"publicKey":{},"ceremony_id":"c1"}` {
+		t.Fatalf("unexpected options: %s", opts)
+	}
+}
+
+func TestWebAuthnPasswordlessBegin_VerifierError(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{discoBeginErr: errors.New("boom")}
+	svc, _ := newWebAuthnTestService(t, verifier)
+
+	if _, err := svc.WebAuthnPasswordlessBegin(context.Background()); err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestWebAuthnPasswordlessFinish_Success(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{discoUserID: "u1"}
+	svc, _ := newWebAuthnTestService(t, verifier)
+
+	pair, err := svc.WebAuthnPasswordlessFinish(context.Background(), "c1", []byte(`{"id":"abc"}`), "1.2.3.4", "ua", nil)
+	if err != nil {
+		t.Fatalf("WebAuthnPasswordlessFinish: %v", err)
+	}
+	if pair == nil || pair.AccessToken == "" {
+		t.Fatal("expected a token pair")
+	}
+}
+
+func TestWebAuthnPasswordlessFinish_AssertionFails(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{discoErr: errors.New("bad assertion")}
+	svc, _ := newWebAuthnTestService(t, verifier)
+
+	if _, err := svc.WebAuthnPasswordlessFinish(context.Background(), "c1", []byte(`{"id":"abc"}`), "1.2.3.4", "ua", nil); err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestWebAuthnPasswordlessFinish_InactiveUser(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{discoUserID: "u1"}
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ks, err := LoadOrGenerateKeyStore("", "")
+	if err != nil {
+		t.Fatalf("keystore: %v", err)
+	}
+	inactive := &user.User{ID: "u1", Email: "user@example.com", IsActive: false, PasswordHash: "x", Locale: "en"}
+	svc := NewService(&waLoginUserReader{u: inactive}, &logoutSessionStore{}, &testServiceAccountStore{}, rdb, ks, nil, nil)
+	svc.ConfigureWebAuthn(verifier)
+
+	if _, err := svc.WebAuthnPasswordlessFinish(context.Background(), "c1", []byte(`{"id":"abc"}`), "1.2.3.4", "ua", nil); err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials for inactive user, got %v", err)
 	}
 }
