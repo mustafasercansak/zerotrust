@@ -39,6 +39,9 @@ A security-focused Zero Trust authentication and authorization platform built wi
 ### Passwordless Passkey Login
 ![Passwordless Passkey Login](docs/images/passkey_login.png)
 
+### Admin Security Dashboard
+![Admin Security Dashboard](docs/images/security_dashboard.png)
+
 ## Security Features
 
 
@@ -62,6 +65,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Session Management | List and revoke individual sessions from the UI |
 | Session Policy | Idle timeout + absolute timeout (configurable in system settings) |
 | Audit Log | Immutable event log in PostgreSQL |
+| Admin Security Dashboard | Authentication trends, lockouts, anomalies, active sessions, login geography, and failed-login sources across 24-hour, 7-day, and 30-day ranges |
 | CSP / OWASP Headers | `frame-ancestors 'none'`, `object-src 'none'`, HSTS |
 | bcrypt | Cost factor 12 |
 | i18n | Turkish (default) / English |
@@ -80,7 +84,7 @@ ZeroTrust currently includes:
 - TOTP MFA setup, verification (with single-use backup recovery codes), disable, and MFA challenge during login
 - WebAuthn passkeys (FIDO2): register/list/remove credentials, passkey second-factor login, and passwordless (usernameless) login with discoverable credentials
 - Password reset flow with SMTP or development log mailer
-- Audit log listing
+- Audit log listing and an aggregated administrator security dashboard
 - Turkish and English UI messages
 - Docker Compose development and production profiles
 - GitHub Actions CI for backend and frontend checks
@@ -136,7 +140,7 @@ zerotrust/
 │   ├── cmd/server/             # Entry point, router, config
 │   ├── internal/
 │   │   ├── admin/              # User management handler
-│   │   ├── audit/              # Audit log repository
+│   │   ├── audit/              # Audit log and security dashboard aggregation
 │   │   ├── auth/               # JWT, keys, token service, handler
 │   │   ├── mfa/                # TOTP setup/verify/disable
 │   │   ├── passwdreset/        # Password reset tokens and mail flow
@@ -222,6 +226,8 @@ zerotrust/
 | DELETE | `/api/v1/admin/users/{id}/sessions` | `users:update` |
 | DELETE | `/api/v1/admin/users/{id}/sessions/{sessionId}` | `users:update` |
 | GET | `/api/v1/admin/audit` | `audit:read` |
+| GET | `/api/v1/admin/audit/trends` | `audit:read` |
+| GET | `/api/v1/admin/security-dashboard?range=7d` | `audit:read` |
 | GET | `/api/v1/admin/service-accounts` | `service_accounts:read` |
 | POST | `/api/v1/admin/service-accounts` | `service_accounts:create` |
 | PATCH | `/api/v1/admin/service-accounts/{id}` | `service_accounts:update` |

@@ -15,6 +15,9 @@ type mockAuditStore struct {
 	lastParams ListParams
 	trends     []TrendPoint
 	trendsErr  error
+	dashboard  SecurityDashboard
+	dashErr    error
+	lastRange  string
 }
 
 func (m *mockAuditStore) List(_ context.Context, p ListParams) (ListResult, error) {
@@ -30,6 +33,14 @@ func (m *mockAuditStore) Trends(_ context.Context) ([]TrendPoint, error) {
 		return nil, m.trendsErr
 	}
 	return m.trends, nil
+}
+
+func (m *mockAuditStore) SecurityDashboard(_ context.Context, rangeValue string) (SecurityDashboard, error) {
+	m.lastRange = rangeValue
+	if m.dashErr != nil {
+		return SecurityDashboard{}, m.dashErr
+	}
+	return m.dashboard, nil
 }
 
 func TestHandlerListWithMockStore(t *testing.T) {
@@ -113,6 +124,50 @@ func TestHandlerTrendsWithMockStoreError(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	h.Trends(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandlerSecurityDashboardWithMockStore(t *testing.T) {
+	store := &mockAuditStore{
+		dashboard: SecurityDashboard{
+			Range:   "30d",
+			Metrics: SecurityDashboardMetrics{FailedLogins: 4, ActiveSessions: 2},
+		},
+	}
+	h := NewHandler(store)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/security-dashboard?range=30d", nil)
+	rr := httptest.NewRecorder()
+
+	h.SecurityDashboard(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+	}
+	if store.lastRange != "30d" {
+		t.Fatalf("range=%q want=30d", store.lastRange)
+	}
+
+	var payload SecurityDashboard
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Metrics.FailedLogins != 4 || payload.Metrics.ActiveSessions != 2 {
+		t.Fatalf("unexpected dashboard payload: %+v", payload)
+	}
+}
+
+func TestHandlerSecurityDashboardWithMockStoreError(t *testing.T) {
+	store := &mockAuditStore{dashErr: errors.New("boom")}
+	h := NewHandler(store)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/security-dashboard", nil)
+	rr := httptest.NewRecorder()
+
+	h.SecurityDashboard(rr, req)
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)

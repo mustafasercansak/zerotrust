@@ -1099,3 +1099,40 @@ Status update:
 - Test-only roles are now inserted idempotently without replacing application RBAC configuration.
 - Applied migration 22 to the development database; the admin role has all 10 defined permissions.
 - Ran the complete backend suite against a temporary database and confirmed all tests pass while all admin permission mappings remain intact.
+
+### 46. Add an administrator security dashboard
+
+State: CLOSED
+
+Severity: Medium
+
+Related files:
+- [backend/internal/audit/security_dashboard.go](/home/m/projects/zerotrust/backend/internal/audit/security_dashboard.go)
+- [backend/internal/audit/handler.go](/home/m/projects/zerotrust/backend/internal/audit/handler.go)
+- [frontend/src/pages/dashboard/SecurityDashboardPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SecurityDashboardPage.tsx)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Status update:
+- Added a protected security dashboard endpoint with `24h`, `7d`, and `30d` ranges.
+- Aggregated successful and failed logins, account lockouts, login anomalies, and active sessions.
+- Added zero-filled authentication activity buckets plus anomaly, country, and failed-login IP rankings.
+- Preserved categorical audit fields needed for aggregation while keeping sensitive audit details encrypted.
+- Added an admin-only lazy-loaded dashboard page with responsive charts and English and Turkish translations.
+- Added backend repository and handler coverage plus frontend route, API, navigation, and access-control tests.
+
+### 47. Isolate integration tests from development databases
+
+State: OPEN
+
+Severity: High
+
+Status: Multiple backend integration fixtures run destructive `DELETE` or
+`TRUNCATE ... CASCADE` statements against the database supplied through
+`TEST_DATABASE_URL`. A mistaken development-database URL can remove users,
+sessions, service accounts, audit history, and WebAuthn credentials.
+
+Acceptance criteria:
+- Refuse to run destructive fixtures unless the target database is explicitly marked as a test database.
+- Give each integration run an isolated database or schema.
+- Remove assumptions that a shared persistent database can be globally truncated.
+- Verify that running the complete backend suite cannot mutate the development database.

@@ -14,6 +14,7 @@ const HomePage = lazy(() => import("./pages/dashboard/HomePage"));
 const SessionsPage = lazy(() => import("./pages/dashboard/SessionsPage"));
 const UsersPage = lazy(() => import("./pages/dashboard/UsersPage"));
 const AuditPage = lazy(() => import("./pages/dashboard/AuditPage"));
+const SecurityDashboardPage = lazy(() => import("./pages/dashboard/SecurityDashboardPage"));
 const ServiceAccountsPage = lazy(() => import("./pages/dashboard/ServiceAccountsPage"));
 const SettingsPage = lazy(() => import("./pages/dashboard/SettingsPage"));
 const MfaPage = lazy(() => import("./pages/dashboard/MfaPage"));
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="sessions" element={<SessionsPage />} />
                 <Route path="mfa" element={<MfaPage />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="security" element={<SecurityDashboardPage />} />
                 <Route path="audit" element={<AuditPage />} />
                 <Route path="service-accounts" element={<ServiceAccountsPage />} />
                 <Route path="settings" element={<SettingsPage />} />

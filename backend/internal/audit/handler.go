@@ -10,6 +10,7 @@ import (
 type AuditStore interface {
 	List(ctx context.Context, p ListParams) (ListResult, error)
 	Trends(ctx context.Context) ([]TrendPoint, error)
+	SecurityDashboard(ctx context.Context, rangeValue string) (SecurityDashboard, error)
 }
 
 type Handler struct {
@@ -61,6 +62,20 @@ func (h *Handler) Trends(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(points)
+}
+
+// GET /api/v1/admin/security-dashboard?range=24h|7d|30d
+func (h *Handler) SecurityDashboard(w http.ResponseWriter, r *http.Request) {
+	result, err := h.repo.SecurityDashboard(r.Context(), r.URL.Query().Get("range"))
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func queryInt(s string, def int) int {

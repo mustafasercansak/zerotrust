@@ -65,10 +65,12 @@ func (r *Repository) Log(ctx context.Context, e Entry) error {
 			outcome := e.Metadata["outcome"]
 			status := e.Metadata["status"]
 			location := e.Metadata["location"]
+			reason := e.Metadata["reason"]
+			anomalyType := e.Metadata["anomaly_type"]
 
 			sensitiveMeta := make(map[string]any)
 			for k, v := range e.Metadata {
-				if k != "outcome" && k != "status" && k != "location" {
+				if k != "outcome" && k != "status" && k != "location" && k != "reason" && k != "anomaly_type" {
 					sensitiveMeta[k] = v
 				}
 			}
@@ -94,6 +96,12 @@ func (r *Repository) Log(ctx context.Context, e Entry) error {
 			}
 			if location != nil {
 				dbMeta["location"] = location
+			}
+			if reason != nil {
+				dbMeta["reason"] = reason
+			}
+			if anomalyType != nil {
+				dbMeta["anomaly_type"] = anomalyType
 			}
 
 			meta, err = json.Marshal(dbMeta)

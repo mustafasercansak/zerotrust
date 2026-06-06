@@ -125,6 +125,32 @@ export interface AuditTrendPoint {
   failure: number;
 }
 
+export interface SecurityDashboardCount {
+  name: string;
+  count: number;
+}
+
+export interface SecurityDashboardData {
+  range: "24h" | "7d" | "30d";
+  since: string;
+  generated_at: string;
+  metrics: {
+    successful_logins: number;
+    failed_logins: number;
+    lockouts: number;
+    anomalies: number;
+    active_sessions: number;
+  };
+  auth_activity: Array<{
+    bucket: string;
+    success: number;
+    failure: number;
+  }>;
+  anomaly_breakdown: SecurityDashboardCount[];
+  login_countries: SecurityDashboardCount[];
+  failed_login_ips: SecurityDashboardCount[];
+}
+
 // Shared pagination / sort / filter params used by resource table fetchers.
 export interface PageParams {
   page: number;
@@ -347,6 +373,9 @@ export const api = {
   listAuditLogTrends: () =>
     request<AuditTrendPoint[]>("/api/v1/admin/audit/trends"),
 
+  securityDashboard: (range: "24h" | "7d" | "30d") =>
+    request<SecurityDashboardData>(`/api/v1/admin/security-dashboard?range=${range}`),
+
   mfaStatus: () => request<{ enabled: boolean; supported?: boolean }>("/api/v1/mfa/status"),
 
   mfaSetup: () =>
@@ -455,12 +484,13 @@ export const api = {
         headers: { Authorization: `Bearer ${token}` },
       });
       const text = await res.text();
-      let body: unknown = text;
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        body = text;
-      }
+      const body: unknown = (() => {
+        try {
+          return text ? JSON.parse(text) : null;
+        } catch {
+          return text;
+        }
+      })();
       return {
         ok: res.ok,
         status: res.status,

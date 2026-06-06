@@ -76,6 +76,7 @@
     "sessions": "Sessions",
     "mfa": "Two-Factor Auth",
     "users": "Users",
+    "security": "Security Dashboard",
     "audit": "Audit Log",
     "serviceAccounts": "Service Accounts",
     "settings": "Settings"
@@ -196,6 +197,31 @@
     "accessDenied": "You do not have permission to access this page.",
     "errors": {
       "internal_error": "Server error. Please try again."
+    }
+  },
+  "securityDashboard": {
+    "title": "Security Dashboard",
+    "subtitle": "Authentication risk and session activity at a glance.",
+    "accessDenied": "You do not have permission to access this page.",
+    "loadError": "Security dashboard data could not be loaded.",
+    "activityTitle": "Authentication Activity",
+    "successful": "Successful",
+    "failed": "Failed",
+    "anomaliesTitle": "Login Anomalies",
+    "countriesTitle": "Successful Login Countries",
+    "failedIPsTitle": "Top Failed Login IPs",
+    "noData": "No events in this period.",
+    "ranges": {
+      "24h": "24 hours",
+      "7d": "7 days",
+      "30d": "30 days"
+    },
+    "metrics": {
+      "successfulLogins": "Successful logins",
+      "failedLogins": "Failed logins",
+      "lockouts": "Account lockouts",
+      "anomalies": "Login anomalies",
+      "activeSessions": "Active sessions"
     }
   },
   "mfa": {

@@ -156,6 +156,94 @@ func TestRepository_ListAndTrendsClosedDB(t *testing.T) {
 	if _, err := repo.Trends(ctx); err == nil {
 		t.Fatal("expected trends error after pool close")
 	}
+	if _, err := repo.SecurityDashboard(ctx, "7d"); err == nil {
+		t.Fatal("expected security dashboard error after pool close")
+	}
+}
+
+func TestRepository_SecurityDashboard(t *testing.T) {
+	pool, ctx, repo, userRepo := setupTestDB(t)
+	defer pool.Close()
+	uid := seedAuditUser(t, ctx, userRepo, "security-dashboard@example.com")
+
+	entries := []Entry{
+		{
+			UserID:    &uid,
+			Action:    "auth.login_success",
+			IPAddress: "8.8.8.8",
+			Metadata: map[string]any{
+				"outcome":  "success",
+				"location": map[string]any{"country": "United States", "city": "Mountain View"},
+			},
+		},
+		{
+			UserID:    &uid,
+			Action:    "auth.login_failed",
+			IPAddress: "203.0.113.10",
+			Metadata:  map[string]any{"outcome": "failure", "reason": "invalid_credentials"},
+		},
+		{
+			UserID:    &uid,
+			Action:    "auth.login_failed",
+			IPAddress: "203.0.113.10",
+			Metadata:  map[string]any{"outcome": "failure", "reason": "account_locked"},
+		},
+		{
+			UserID:    &uid,
+			Action:    "login.anomaly",
+			IPAddress: "8.8.8.8",
+			Metadata:  map[string]any{"outcome": "success", "anomaly_type": "new_device"},
+		},
+	}
+	for _, entry := range entries {
+		if err := repo.Log(ctx, entry); err != nil {
+			t.Fatalf("log dashboard entry: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
+		VALUES ($1, 'active-dashboard-session', NOW() + INTERVAL '1 hour')
+	`, uid); err != nil {
+		t.Fatalf("insert active session: %v", err)
+	}
+
+	result, err := repo.SecurityDashboard(ctx, "7d")
+	if err != nil {
+		t.Fatalf("SecurityDashboard failed: %v", err)
+	}
+	if result.Range != "7d" || len(result.AuthActivity) != 7 {
+		t.Fatalf("unexpected range data: %+v", result)
+	}
+	if result.Metrics.SuccessfulLogins != 1 || result.Metrics.FailedLogins != 2 ||
+		result.Metrics.Lockouts != 1 || result.Metrics.Anomalies != 1 ||
+		result.Metrics.ActiveSessions != 1 {
+		t.Fatalf("unexpected metrics: %+v", result.Metrics)
+	}
+	if len(result.AnomalyBreakdown) != 1 || result.AnomalyBreakdown[0].Name != "new_device" {
+		t.Fatalf("unexpected anomaly breakdown: %+v", result.AnomalyBreakdown)
+	}
+	if len(result.LoginCountries) != 1 || result.LoginCountries[0].Name != "United States" {
+		t.Fatalf("unexpected countries: %+v", result.LoginCountries)
+	}
+	if len(result.FailedLoginIPs) != 1 || result.FailedLoginIPs[0].Count != 2 {
+		t.Fatalf("unexpected failed login IPs: %+v", result.FailedLoginIPs)
+	}
+
+	result24h, err := repo.SecurityDashboard(ctx, "24h")
+	if err != nil {
+		t.Fatalf("SecurityDashboard 24h failed: %v", err)
+	}
+	if result24h.Range != "24h" || len(result24h.AuthActivity) != 24 {
+		t.Fatalf("unexpected 24h range data: range=%s points=%d", result24h.Range, len(result24h.AuthActivity))
+	}
+
+	defaultResult, err := repo.SecurityDashboard(ctx, "invalid")
+	if err != nil {
+		t.Fatalf("SecurityDashboard default failed: %v", err)
+	}
+	if defaultResult.Range != "7d" {
+		t.Fatalf("default range=%q want=7d", defaultResult.Range)
+	}
 }
 
 func TestNullStrReturnsExpectedPointers(t *testing.T) {

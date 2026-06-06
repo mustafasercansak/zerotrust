@@ -83,6 +83,7 @@ export default function DashboardLayout() {
     ...(isAdmin
       ? [
           { to: "/dashboard/users", label: t("users") },
+          { to: "/dashboard/security", label: t("security") },
           { to: "/dashboard/audit", label: t("audit") },
           { to: "/dashboard/service-accounts", label: t("serviceAccounts") },
         ]

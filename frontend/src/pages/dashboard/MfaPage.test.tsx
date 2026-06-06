@@ -209,11 +209,11 @@ describe("MfaPage page component", () => {
 
   it("handles MFA status unsupported and API error on load", async () => {
     vi.spyOn(api, "mfaStatus").mockResolvedValue({ enabled: false, supported: false });
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     let html = runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    html = runRender();
     expect(html).toContain("unsupported");
 
     // Catch condition

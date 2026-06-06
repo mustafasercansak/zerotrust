@@ -598,6 +598,7 @@ func run(ctx context.Context, cfg config) error {
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit/trends", auditHandler.Trends)
+			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/security-dashboard", auditHandler.SecurityDashboard)
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)

@@ -111,13 +111,15 @@ describe("api helper library", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("handles listAuditLog and listAuditLogTrends successfully", async () => {
+  it("handles audit and security dashboard requests successfully", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.listAuditLog({ page: 0, pageSize: 10, filters: {} });
     await api.listAuditLogTrends();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await api.securityDashboard("30d");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/v1/admin/security-dashboard?range=30d");
   });
 
   it("handles mfaStatus, mfaSetup, mfaVerify, mfaDisable, and mfaStepUp successfully", async () => {

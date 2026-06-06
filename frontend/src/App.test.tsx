@@ -63,6 +63,10 @@ vi.mock("./pages/dashboard/AuditPage", () => ({
   default: () => React.createElement("div", null, "AuditPage"),
 }));
 
+vi.mock("./pages/dashboard/SecurityDashboardPage", () => ({
+  default: () => React.createElement("div", null, "SecurityDashboardPage"),
+}));
+
 vi.mock("./pages/dashboard/ServiceAccountsPage", () => ({
   default: () => React.createElement("div", null, "ServiceAccountsPage"),
 }));
@@ -82,11 +86,11 @@ describe("App main component", () => {
   });
 
   it("registers and resolves all lazy routes", async () => {
-    expect(lazyLoaders).toHaveLength(11);
+    expect(lazyLoaders).toHaveLength(12);
 
     const modules = await Promise.all(lazyLoaders.map((load) => load()));
 
-    expect(modules).toHaveLength(11);
+    expect(modules).toHaveLength(12);
     for (const mod of modules) {
       expect(mod).toHaveProperty("default");
     }

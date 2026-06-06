@@ -995,6 +995,18 @@
         </article>
 
         <article class="gallery-card" data-category="observability">
+          <button class="gallery-trigger" type="button" data-full="images/security_dashboard.png" data-title="Administrator security dashboard" aria-label="Open administrator security dashboard screenshot">
+            <img src="images/security_dashboard.png" alt="Administrator security dashboard with authentication trends, lockouts, anomalies, active sessions, and ranked security signals" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Administrator Security Dashboard</h3>
+            <p>Authentication outcomes, lockouts, anomalies, active sessions, login geography, and failed-login sources are aggregated across selectable time ranges.</p>
+            <ul class="tag-list"><li class="tag">Risk signals</li><li class="tag">Time series</li><li class="tag">Geo context</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="observability">
           <button class="gallery-trigger" type="button" data-full="images/audit.png" data-title="Security audit log" aria-label="Open security audit log screenshot">
             <img src="images/audit.png" alt="Security audit log showing actor, action, resource, and event metadata" width="1440" height="813" loading="lazy" decoding="async">
             <span class="zoom-label" aria-hidden="true">↗ Expand</span>
@@ -1023,7 +1035,7 @@
         <article class="feature-card"><div class="feature-accent"></div><h3>Runtime Session Policy</h3><p>Idle limits, absolute limits, concurrent-session caps, and progressive lockouts are configurable without redeployment.</p></article>
         <article class="feature-card"><div class="feature-accent"></div><h3>CSRF &amp; Browser Hardening</h3><p>Double-submit CSRF tokens, strict cookies, CSP, HSTS, and restrictive browser policies reduce common web attack paths.</p></article>
         <article class="feature-card"><div class="feature-accent"></div><h3>Fine-Grained RBAC</h3><p>Roles map to explicit permissions for user, audit, settings, and service-account operations.</p></article>
-        <article class="feature-card"><div class="feature-accent"></div><h3>Security Observability</h3><p>Synchronous audit events and Prometheus metrics make authentication behavior and administrative changes inspectable.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Security Observability</h3><p>Synchronous audit events, Prometheus metrics, and administrator risk dashboards make authentication behavior and administrative changes inspectable.</p></article>
       </div>
     </section>
 
@@ -1110,6 +1122,11 @@
           "Permission-gated account management covers role assignment, status changes, and session revocation.": "İzin kontrollü hesap yönetimi rol atama, durum değişikliği ve oturum iptalini kapsar.",
           "Machine-to-Machine Access": "Makineden Makineye Erişim",
           "Scoped service accounts use client credentials and DPoP-bound tokens for automated integrations.": "Kapsamlandırılmış servis hesapları otomatik entegrasyonlar için istemci kimlik bilgileri ve DPoP bağlı tokenlar kullanır.",
+          "Administrator Security Dashboard": "Yönetici Güvenlik Paneli",
+          "Authentication outcomes, lockouts, anomalies, active sessions, login geography, and failed-login sources are aggregated across selectable time ranges.": "Kimlik doğrulama sonuçları, hesap kilitlemeleri, anormallikler, aktif oturumlar, giriş konumları ve başarısız giriş kaynakları seçilebilir zaman aralıklarında birleştirilir.",
+          "Risk signals": "Risk sinyalleri",
+          "Time series": "Zaman serisi",
+          "Geo context": "Konum bağlamı",
           "Observable Audit Trail": "Gözlemlenebilir Denetim İzi",
           "Critical authentication and administration events retain actor, resource, network, and result context.": "Kritik kimlik doğrulama ve yönetim olayları aktör, kaynak, ağ ve sonuç bağlamını saklar.",
           "Defense in depth": "Derinlemesine savunma",
@@ -1132,7 +1149,7 @@
           "Fine-Grained RBAC": "Ayrıntılı RBAC",
           "Roles map to explicit permissions for user, audit, settings, and service-account operations.": "Roller kullanıcı, denetim, ayar ve servis hesabı işlemleri için açık izinlerle eşleştirilir.",
           "Security Observability": "Güvenlik Gözlemlenebilirliği",
-          "Synchronous audit events and Prometheus metrics make authentication behavior and administrative changes inspectable.": "Eşzamanlı denetim olayları ve Prometheus metrikleri kimlik doğrulama davranışını ve yönetim değişikliklerini incelenebilir kılar.",
+          "Synchronous audit events, Prometheus metrics, and administrator risk dashboards make authentication behavior and administrative changes inspectable.": "Eşzamanlı denetim olayları, Prometheus metrikleri ve yönetici risk panelleri kimlik doğrulama davranışını ve yönetim değişikliklerini incelenebilir kılar.",
           "Read the implementation, not just the feature list.": "Yalnızca özellik listesini değil, uygulamayı da inceleyin.",
           "The repository includes the Go API, React client, database migrations, Docker environments, and focused backend and frontend tests.": "Depo Go API'sini, React istemcisini, veritabanı geçişlerini, Docker ortamlarını ve odaklanmış backend/frontend testlerini içerir.",
           "Open GitHub repository": "GitHub deposunu aç",

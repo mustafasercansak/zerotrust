@@ -76,6 +76,7 @@
     "sessions": "Oturumlar",
     "mfa": "İki Faktörlü",
     "users": "Kullanıcılar",
+    "security": "Güvenlik Paneli",
     "audit": "Denetim Günlüğü",
     "serviceAccounts": "Servis Hesapları",
     "settings": "Ayarlar"
@@ -196,6 +197,31 @@
     "accessDenied": "Bu sayfaya erişim yetkiniz yok.",
     "errors": {
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
+    }
+  },
+  "securityDashboard": {
+    "title": "Güvenlik Paneli",
+    "subtitle": "Kimlik doğrulama risklerini ve oturum etkinliğini tek bakışta izleyin.",
+    "accessDenied": "Bu sayfaya erişim yetkiniz yok.",
+    "loadError": "Güvenlik paneli verileri yüklenemedi.",
+    "activityTitle": "Kimlik Doğrulama Etkinliği",
+    "successful": "Başarılı",
+    "failed": "Başarısız",
+    "anomaliesTitle": "Giriş Anormallikleri",
+    "countriesTitle": "Başarılı Giriş Ülkeleri",
+    "failedIPsTitle": "En Çok Başarısız Giriş Yapan IP'ler",
+    "noData": "Bu dönemde olay bulunamadı.",
+    "ranges": {
+      "24h": "24 saat",
+      "7d": "7 gün",
+      "30d": "30 gün"
+    },
+    "metrics": {
+      "successfulLogins": "Başarılı girişler",
+      "failedLogins": "Başarısız girişler",
+      "lockouts": "Hesap kilitlemeleri",
+      "anomalies": "Giriş anormallikleri",
+      "activeSessions": "Aktif oturumlar"
     }
   },
   "mfa": {

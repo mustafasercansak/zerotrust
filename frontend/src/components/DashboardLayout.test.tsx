@@ -165,6 +165,7 @@ describe("DashboardLayout component", () => {
     expect(html).toContain("Outlet");
     expect(html).toContain("John Doe");
     expect(html).toContain("test@example.com");
+    expect(html).toContain("security");
   });
 
   it("renders user initials when first/last name are empty", () => {
@@ -199,6 +200,7 @@ describe("DashboardLayout component", () => {
     const html = runRender();
 
     expect(html).toContain("settings");
+    expect(html).not.toContain("security");
     expect(html).not.toContain("serviceAccounts");
   });
 
