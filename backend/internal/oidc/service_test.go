@@ -62,17 +62,10 @@ func TestVerifyPKCE(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:      "plain match",
+			name:      "plain rejected",
 			challenge: "my_verifier",
 			method:    "plain",
 			verifier:  "my_verifier",
-			wantErr:   false,
-		},
-		{
-			name:      "plain mismatch",
-			challenge: "my_verifier",
-			method:    "plain",
-			verifier:  "wrong_verifier",
 			wantErr:   true,
 		},
 		{

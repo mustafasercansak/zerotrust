@@ -332,6 +332,9 @@ export const api = {
     }),
 
   me: () => request<MeData>("/api/v1/me"),
+  getOidcClientInfo: (clientId: string) =>
+    request<{ name: string; allowed_scopes: string[] }>(`/oauth2/clients/${encodeURIComponent(clientId)}`),
+
   submitConsent: (payload: {
     client_id: string;
     redirect_uri: string;

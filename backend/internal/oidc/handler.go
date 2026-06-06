@@ -223,7 +223,7 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	claims, err := auth.ValidateAccessToken(h.ks, tokenStr)
-	if err != nil {
+	if err != nil || h.authSvc.IsRevoked(r.Context(), claims.ID) {
 		http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 		return
 	}
@@ -262,11 +262,29 @@ func (h *Handler) Discovery(w http.ResponseWriter, r *http.Request) {
 		"response_types_supported":              []string{"code"},
 		"grant_types_supported":                 []string{"authorization_code"},
 		"subject_types_supported":               []string{"public"},
-		"id_token_signing_alg_values_supported": []string{"EdDSA"},
+		"id_token_signing_alg_values_supported":  []string{"EdDSA"},
+		"code_challenge_methods_supported":        []string{"S256"},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// GetPublicClient returns the display name and allowed scopes for a client_id.
+// This is intentionally unauthenticated so the consent page can show the real
+// client name before the user approves.
+func (h *Handler) GetPublicClient(w http.ResponseWriter, r *http.Request) {
+	clientID := chi.URLParam(r, "client_id")
+	client, err := h.clientRepo.FindByClientID(r.Context(), clientID)
+	if err != nil {
+		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"name":           client.Name,
+		"allowed_scopes": client.AllowedScopes,
+	})
 }
 
 // ListClients returns all registered OIDC clients (admin only)

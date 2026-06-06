@@ -349,6 +349,7 @@ func run(ctx context.Context, cfg config) error {
 	r.Get("/oauth2/authorize", oidcHandler.Authorize)
 	r.Post("/oauth2/token", oidcHandler.Token)
 	r.Get("/oauth2/userinfo", oidcHandler.UserInfo)
+	r.Get("/oauth2/clients/{client_id}", oidcHandler.GetPublicClient)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authmw.AuditCSRFFailures(auditRepo))

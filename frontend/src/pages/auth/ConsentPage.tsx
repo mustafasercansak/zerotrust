@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/lib/api";
 import { AuthPage } from "@/components/AuthPage";
@@ -16,6 +16,7 @@ import ListItemText from "@mui/material/ListItemText";
 export default function ConsentPage() {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [clientName, setClientName] = useState<string | null>(null);
 
   const clientID = searchParams.get("client_id") || "";
   const redirectURI = searchParams.get("redirect_uri") || "";
@@ -26,6 +27,13 @@ export default function ConsentPage() {
   const nonce = searchParams.get("nonce") || "";
 
   const scopes = scopeStr ? scopeStr.split(" ") : [];
+
+  useEffect(() => {
+    if (!clientID) return;
+    api.getOidcClientInfo(clientID)
+      .then((info) => setClientName(info.name))
+      .catch(() => { /* fall back to showing client_id */ });
+  }, [clientID]);
 
   async function handleResponse(approved: boolean) {
     setLoading(true);
@@ -56,9 +64,14 @@ export default function ConsentPage() {
     <AuthPage title="Authorize Application" subtitle="An application is requesting access to your account.">
       <Box sx={{ display: "grid", gap: 3 }}>
         <Paper variant="outlined" sx={{ p: 2.5, bgcolor: "background.default", border: 1, borderColor: "divider" }}>
-          <Typography variant="body1" sx={{ fontWeight: 700, mb: 1, color: "primary.main" }}>
-            {clientID}
+          <Typography variant="body1" sx={{ fontWeight: 700, mb: 0.5, color: "primary.main" }}>
+            {clientName ?? clientID}
           </Typography>
+          {clientName && (
+            <Typography variant="caption" color="text.disabled" sx={{ display: "block", fontFamily: "monospace", mb: 1 }}>
+              {clientID}
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary">
             is requesting permission to access your profile data and authenticate you via ZeroTrust.
           </Typography>

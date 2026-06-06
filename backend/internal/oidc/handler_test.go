@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
@@ -19,6 +20,12 @@ import (
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/database"
 )
+
+func setChiParam(r *http.Request, key, value string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, value)
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
 
 func TestHandler_Discovery(t *testing.T) {
 	h := &Handler{issuer: "https://auth.example.com"}
@@ -39,6 +46,67 @@ func TestHandler_Discovery(t *testing.T) {
 	}
 	if config["token_endpoint"] != "https://auth.example.com/oauth2/token" {
 		t.Errorf("token_endpoint = %v", config["token_endpoint"])
+	}
+
+	methods, ok := config["code_challenge_methods_supported"].([]any)
+	if !ok || len(methods) != 1 || methods[0] != "S256" {
+		t.Errorf("code_challenge_methods_supported = %v, want [S256]", config["code_challenge_methods_supported"])
+	}
+}
+
+func TestHandler_GetPublicClient_Integration(t *testing.T) {
+	dbURL := testdb.URL(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		t.Fatalf("migrations failed: %v", err)
+	}
+	pool.Exec(ctx, "TRUNCATE TABLE oauth2_clients CASCADE")
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO oauth2_clients (client_id, client_secret_hash, name, redirect_uris, allowed_scopes)
+		VALUES ($1, $2, $3, $4, $5)
+	`, "pub-client", "$2a$12$dummyhashvalue000000000000000000000000000000000000000", "Public App", []string{"http://localhost/cb"}, []string{"openid", "email"})
+	if err != nil {
+		t.Fatalf("insert client: %v", err)
+	}
+
+	clientRepo := NewClientRepository(pool)
+	h := &Handler{clientRepo: clientRepo}
+
+	// known client returns name + allowed_scopes
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/oauth2/clients/pub-client", nil)
+	req = setChiParam(req, "client_id", "pub-client")
+	rr := httptest.NewRecorder()
+	h.GetPublicClient(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["name"] != "Public App" {
+		t.Errorf("name = %v, want Public App", resp["name"])
+	}
+	scopes, _ := resp["allowed_scopes"].([]any)
+	if len(scopes) != 2 {
+		t.Errorf("allowed_scopes len = %d, want 2", len(scopes))
+	}
+
+	// unknown client returns 404
+	req2, _ := http.NewRequestWithContext(ctx, "GET", "/oauth2/clients/no-such-client", nil)
+	req2 = setChiParam(req2, "client_id", "no-such-client")
+	rr2 := httptest.NewRecorder()
+	h.GetPublicClient(rr2, req2)
+	if rr2.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown client, got %d", rr2.Code)
 	}
 }
 

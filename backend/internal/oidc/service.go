@@ -226,10 +226,6 @@ func verifyPKCE(challenge, method, verifier string) error {
 		if subtle.ConstantTimeCompare([]byte(computedChallenge), []byte(challenge)) == 1 {
 			return nil
 		}
-	case "plain":
-		if subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) == 1 {
-			return nil
-		}
 	default:
 		return fmt.Errorf("unsupported code challenge method: %s", method)
 	}

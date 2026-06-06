@@ -9,6 +9,7 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+
 const mockSearchParams = new URLSearchParams();
 
 vi.mock("react-router-dom", () => ({
@@ -75,6 +76,7 @@ describe("ConsentPage", () => {
     mockSearchParams.delete("nonce");
     vi.mocked(toast.error).mockClear();
     vi.stubGlobal("window", { location: { href: "" } });
+    vi.spyOn(api, "getOidcClientInfo").mockResolvedValue({ name: "Test App", allowed_scopes: ["openid"] });
   });
 
   afterEach(() => {
@@ -97,6 +99,23 @@ describe("ConsentPage", () => {
     expect(html).toContain("profile info");
     expect(html).toContain("email address");
     expect(html).toContain("custom_scope");
+  });
+
+  it("shows resolved client display name when clientName state is populated", () => {
+    mockSearchParams.set("client_id", "test-client");
+    // Pre-populate clientName state (idx 1) so the component renders the name
+    stateStore[1] = "My Web App";
+    const html = runRender();
+    expect(html).toContain("My Web App");
+    // Still shows the raw client_id in smaller text as the identifier
+    expect(html).toContain("test-client");
+  });
+
+  it("falls back to client_id when clientName is null", () => {
+    mockSearchParams.set("client_id", "fallback-client");
+    // clientName state (idx 1) defaults to null — not pre-populated
+    const html = runRender();
+    expect(html).toContain("fallback-client");
   });
 
   it("handles approve authorization flow", async () => {

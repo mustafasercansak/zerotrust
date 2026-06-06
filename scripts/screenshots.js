@@ -198,6 +198,7 @@ function generateDocs() {
       heading: "## OIDC Identity Provider",
       image: "images/oidc_clients.png",
       caption: "Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider with roles/groups claims.",
+      description: "ZeroTrust implements the Authorization Code flow with PKCE (S256). Registered clients receive an authorization code on user consent, exchange it for an Ed25519-signed ID token and access token, and can query `/oauth2/userinfo` for live profile claims. The discovery document at `/.well-known/openid-configuration` advertises all supported endpoints, scopes, and signing algorithms.",
     },
     {
       heading: "## Settings",
@@ -230,6 +231,10 @@ function generateDocs() {
     }
     lines.push("");
     lines.push(`*${s.caption}*`);
+    if (s.description) {
+      lines.push("");
+      lines.push(s.description);
+    }
     lines.push("");
     lines.push("---");
     lines.push("");
