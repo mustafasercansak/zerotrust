@@ -236,6 +236,74 @@ func TestBeginDiscoverableLogin_ReturnsCeremonyAndOptions(t *testing.T) {
 	}
 }
 
+// TestDiscoverableLogin_RoundTrip drives a full passwordless (usernameless) login
+// through the real go-webauthn crypto: register a resident credential, then sign in
+// with a discoverable assertion whose userHandle identifies the user — no email or
+// allowCredentials list. It exercises FinishDiscoverableLogin's happy path.
+func TestDiscoverableLogin_RoundTrip(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	rp := vwa.RelyingParty{ID: "localhost", Name: "ZeroTrust", Origin: "http://localhost:3000"}
+	authenticator := vwa.NewAuthenticator()
+	cred := vwa.NewCredential(vwa.KeyTypeEC2)
+
+	// --- Register a resident credential ---
+	regJSON, err := svc.BeginRegistration(ctx, userID, "user@example.com", "User")
+	if err != nil {
+		t.Fatalf("BeginRegistration: %v", err)
+	}
+	attOpts, err := vwa.ParseAttestationOptions(string(regJSON))
+	if err != nil {
+		t.Fatalf("ParseAttestationOptions: %v", err)
+	}
+	attResponse := vwa.CreateAttestationResponse(rp, authenticator, cred, *attOpts)
+	if err := svc.FinishRegistration(ctx, userID, "user@example.com", "User", "My Passkey", []byte(attResponse)); err != nil {
+		t.Fatalf("FinishRegistration: %v", err)
+	}
+	authenticator.AddCredential(cred)
+
+	// The server derives the WebAuthn user handle from the first 16 bytes of the
+	// user UUID; the authenticator must echo that handle back on a discoverable
+	// assertion so FinishDiscoverableLogin can resolve the user.
+	uid := uuid.MustParse(userID)
+	handle := make([]byte, 16)
+	copy(handle, uid[:])
+	authenticator.Options.UserHandle = handle
+
+	// --- Passwordless ceremony ---
+	loginJSON, err := svc.BeginDiscoverableLogin(ctx)
+	if err != nil {
+		t.Fatalf("BeginDiscoverableLogin: %v", err)
+	}
+	var begin struct {
+		CeremonyID string `json:"ceremony_id"`
+	}
+	if err := json.Unmarshal(loginJSON, &begin); err != nil {
+		t.Fatalf("unmarshal begin: %v", err)
+	}
+
+	asrOpts, err := vwa.ParseAssertionOptions(string(loginJSON))
+	if err != nil {
+		t.Fatalf("ParseAssertionOptions: %v", err)
+	}
+	asrResponse := vwa.CreateAssertionResponse(rp, authenticator, cred, *asrOpts)
+
+	gotUserID, err := svc.FinishDiscoverableLogin(ctx, begin.CeremonyID, []byte(asrResponse))
+	if err != nil {
+		t.Fatalf("FinishDiscoverableLogin: %v", err)
+	}
+	if gotUserID != userID {
+		t.Fatalf("resolved userID = %q, want %q", gotUserID, userID)
+	}
+
+	// The ceremony is single-use — a replay of the same assertion is rejected.
+	if _, err := svc.FinishDiscoverableLogin(ctx, begin.CeremonyID, []byte(asrResponse)); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected ErrSessionNotFound on replay, got %v", err)
+	}
+}
+
 func TestFinishLogin_SessionSingleUse(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
