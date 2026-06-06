@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type SecurityDashboardCount, type SecurityDashboardData } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
+import { humanizeSecurityLabel } from "./securityDashboardLabels";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -86,7 +87,17 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   );
 }
 
-function RankingCard({ title, items, empty }: { title: string; items: SecurityDashboardCount[]; empty: string }) {
+function RankingCard({
+  title,
+  items,
+  empty,
+  labelFor = (name) => name,
+}: {
+  title: string;
+  items: SecurityDashboardCount[];
+  empty: string;
+  labelFor?: (name: string) => string;
+}) {
   const maxCount = Math.max(1, ...items.map((item) => item.count));
   return (
     <Paper variant="outlined" sx={{ p: 2.5, minHeight: 250 }}>
@@ -95,17 +106,20 @@ function RankingCard({ title, items, empty }: { title: string; items: SecurityDa
         <Typography variant="body2" color="text.secondary">{empty}</Typography>
       ) : (
         <Box sx={{ display: "grid", gap: 1.75 }}>
-          {items.map((item) => (
+          {items.map((item) => {
+            const label = labelFor(item.name);
+            return (
             <Box key={item.name}>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.5 }}>
-                <Typography variant="body2" noWrap title={item.name}>{item.name}</Typography>
+                <Typography variant="body2" noWrap title={label}>{label}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.count}</Typography>
               </Box>
               <Box sx={{ height: 5, borderRadius: 4, bgcolor: "action.hover", overflow: "hidden" }}>
                 <Box sx={{ width: `${(item.count / maxCount) * 100}%`, height: "100%", bgcolor: "primary.main", borderRadius: 4 }} />
               </Box>
             </Box>
-          ))}
+            );
+          })}
         </Box>
       )}
     </Paper>
@@ -146,6 +160,12 @@ export default function SecurityDashboardPage() {
     { label: t("metrics.anomalies"), value: data.metrics.anomalies, accent: "#a855f7" },
     { label: t("metrics.activeSessions"), value: data.metrics.active_sessions, accent: "#3b82f6" },
   ] : [], [data, t]);
+  const anomalyLabel = (name: string) => t(`anomalyTypes.${name}`, {
+    defaultValue: humanizeSecurityLabel(name),
+  });
+  const countryLabel = (name: string) => name.toLowerCase() === "unknown"
+    ? t("locations.unknown")
+    : name;
 
   if (!me?.roles.includes("admin")) {
     return <Box sx={{ p: 4 }}><Alert severity="error">{t("accessDenied")}</Alert></Box>;
@@ -177,8 +197,8 @@ export default function SecurityDashboardPage() {
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
             <ActivityChart data={data.auth_activity} />
-            <RankingCard title={t("anomaliesTitle")} items={data.anomaly_breakdown} empty={t("noData")} />
-            <RankingCard title={t("countriesTitle")} items={data.login_countries} empty={t("noData")} />
+            <RankingCard title={t("anomaliesTitle")} items={data.anomaly_breakdown} empty={t("noData")} labelFor={anomalyLabel} />
+            <RankingCard title={t("countriesTitle")} items={data.login_countries} empty={t("noData")} labelFor={countryLabel} />
             <RankingCard title={t("failedIPsTitle")} items={data.failed_login_ips} empty={t("noData")} />
           </Box>
         </>

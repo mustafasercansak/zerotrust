@@ -211,6 +211,14 @@
     "countriesTitle": "Başarılı Giriş Ülkeleri",
     "failedIPsTitle": "En Çok Başarısız Giriş Yapan IP'ler",
     "noData": "Bu dönemde olay bulunamadı.",
+    "anomalyTypes": {
+      "new_device": "Yeni cihaz",
+      "impossible_travel": "Olanaksız seyahat",
+      "unknown": "Bilinmeyen anormallik"
+    },
+    "locations": {
+      "unknown": "Bilinmeyen konum"
+    },
     "ranges": {
       "24h": "24 saat",
       "7d": "7 gün",

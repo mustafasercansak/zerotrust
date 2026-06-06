@@ -211,6 +211,14 @@
     "countriesTitle": "Successful Login Countries",
     "failedIPsTitle": "Top Failed Login IPs",
     "noData": "No events in this period.",
+    "anomalyTypes": {
+      "new_device": "New device",
+      "impossible_travel": "Impossible travel",
+      "unknown": "Unknown anomaly"
+    },
+    "locations": {
+      "unknown": "Unknown location"
+    },
     "ranges": {
       "24h": "24 hours",
       "7d": "7 days",

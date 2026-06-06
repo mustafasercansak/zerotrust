@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import SecurityDashboardPage from "./SecurityDashboardPage";
+import { humanizeSecurityLabel } from "./securityDashboardLabels";
 import { useMeContext } from "@/contexts/MeContext";
 
 vi.mock("react-i18next", () => ({
@@ -22,6 +23,11 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("SecurityDashboardPage", () => {
+  it("turns unknown backend codes into readable fallback labels", () => {
+    expect(humanizeSecurityLabel("new_device")).toBe("New Device");
+    expect(humanizeSecurityLabel("future_risk_signal")).toBe("Future Risk Signal");
+  });
+
   it("denies access to non-admin users", () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "user-1",
