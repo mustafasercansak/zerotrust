@@ -33,6 +33,12 @@ A security-focused Zero Trust authentication and authorization platform built wi
 ### Multi-Factor Authentication (MFA) Setup with QR Code
 ![MFA Setup](docs/images/mfa_setup.png)
 
+### Passkey Registration and Management
+![Passkey Registration and Management](docs/images/passkey_management.png)
+
+### Passwordless Passkey Login
+![Passwordless Passkey Login](docs/images/passkey_login.png)
+
 ## Security Features
 
 
@@ -285,6 +291,14 @@ Security policies and session limits are fetched and cached dynamically from the
 
 ### 5. WebAuthn Passkeys (FIDO2)
 Phishing-resistant authentication built on `github.com/go-webauthn/webauthn`, with single-use ceremony state kept in Redis (5-minute TTL) and credentials persisted in PostgreSQL. The Relying Party is configured via `WEBAUTHN_RP_ID` (effective domain, e.g. `localhost`) and `WEBAUTHN_RP_DISPLAY_NAME`; allowed origins come from `CORS_ALLOWED_ORIGINS`.
+
+How the passkey flow works:
+
+1. **Enroll**: From **Two-Factor Auth → Passkeys**, the signed-in user selects **Add a passkey** and names the device. The browser creates a discoverable credential after local biometric, PIN, or security-key verification.
+2. **Use as MFA**: After a correct password, an account with a registered passkey can complete the second-factor challenge with that passkey instead of a TOTP code.
+3. **Sign in without a password**: From the login page, **Sign in with a passkey** starts a usernameless assertion. The authenticator selects a discoverable credential, returns its `userHandle`, and the backend resolves the account before issuing the normal secure session cookies.
+4. **Manage credentials**: Registered passkeys show their creation and last-used dates and can be removed individually. Removing a credential prevents future assertions with that passkey.
+
 - **Registration**: An authenticated user enrolls a passkey through `register/begin` → `register/finish`. Registration requests a **discoverable (resident) credential** (`residentKey: required`) so the same passkey can later be used for passwordless login. Already-registered authenticators are excluded to prevent duplicate enrollment.
 - **Second-factor login**: When a user with a registered passkey signs in with their password, the passkey satisfies the MFA step — the client runs an assertion via `webauthn/login/begin` → `webauthn/login/finish` (keyed by the pending `mfa_token`) instead of entering a TOTP code.
 - **Passwordless (usernameless) login**: `passwordless/begin` returns assertion options with an empty `allowCredentials` list plus an opaque `ceremony_id`; the authenticator surfaces a discoverable credential and reveals the user via its `userHandle`. `passwordless/finish` validates the assertion, confirms the account is active, and issues a full session — no email or password required. **User verification is required** (`userVerification: required`), so the authenticator's biometric/PIN stands in for both possession and inherence factors.

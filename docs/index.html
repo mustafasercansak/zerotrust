@@ -3,24 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ZeroTrust — Security Showcase</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono&display=swap" rel="stylesheet">
+  <meta name="description" content="ZeroTrust is a security-focused authentication and authorization platform built with Go, React, PostgreSQL, Redis, WebAuthn, and DPoP.">
+  <meta name="theme-color" content="#080c14">
+  <title>ZeroTrust | Security Engineering Showcase</title>
   <style>
     :root {
-      --bg: #090d16;
-      --bg-card: rgba(17, 25, 40, 0.75);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text: #f3f4f6;
-      --text-muted: #9ca3af;
-      --primary: #6366f1;
-      --primary-glow: rgba(99, 102, 241, 0.15);
-      --accent-cyan: #06b6d4;
-      --accent-emerald: #10b981;
-      --accent-rose: #f43f5e;
-      --font-sans: 'Outfit', sans-serif;
-      --font-mono: 'Space Mono', monospace;
+      color-scheme: dark;
+      --bg: #080c14;
+      --bg-elevated: #0d1422;
+      --card: rgba(16, 25, 42, 0.86);
+      --card-solid: #10192a;
+      --border: rgba(148, 163, 184, 0.16);
+      --border-strong: rgba(129, 140, 248, 0.38);
+      --text: #f8fafc;
+      --muted: #b2bed0;
+      --primary: #818cf8;
+      --primary-strong: #6366f1;
+      --cyan: #22d3ee;
+      --emerald: #34d399;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     }
 
     * {
@@ -29,481 +32,1043 @@
       padding: 0;
     }
 
-    body {
-      background-color: var(--bg);
-      background-image: 
-        radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.08) 0%, transparent 40%);
-      background-attachment: fixed;
-      color: var(--text);
-      font-family: var(--font-sans);
-      line-height: 1.6;
-      overflow-x: hidden;
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 5.5rem;
     }
 
-    header {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 4rem 2rem 2rem;
+    body {
+      min-width: 320px;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(99, 102, 241, 0.14), transparent 28rem),
+        radial-gradient(circle at 88% 28%, rgba(34, 211, 238, 0.09), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.65;
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--cyan);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 100;
+      padding: 0.65rem 1rem;
+      border-radius: 0.5rem;
+      background: var(--text);
+      color: var(--bg);
+      font-weight: 700;
+      transform: translateY(-160%);
+      transition: transform 0.2s ease;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8, 12, 20, 0.82);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav-inner,
+    .container {
+      width: min(1180px, calc(100% - 2rem));
+      margin-inline: auto;
+    }
+
+    .nav-inner {
+      min-height: 4.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7rem;
+      color: var(--text);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      text-decoration: none;
+    }
+
+    .brand-mark {
+      width: 2rem;
+      height: 2rem;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: 0.65rem;
+      background: rgba(99, 102, 241, 0.14);
+      color: var(--primary);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+    }
+
+    .nav-github {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+    }
+
+    .hero {
+      padding: clamp(5rem, 10vw, 8rem) 0 5rem;
       text-align: center;
     }
 
-    .badge {
+    .eyebrow {
       display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
-      background: rgba(99, 102, 241, 0.12);
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #a5b4fc;
-      padding: 0.4rem 1rem;
-      border-radius: 9999px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
+      gap: 0.55rem;
       margin-bottom: 1.5rem;
-      animation: fadeIn 0.8s ease-out;
+      padding: 0.45rem 0.85rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      background: rgba(99, 102, 241, 0.1);
+      color: #c7d2fe;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow-dot {
+      width: 0.48rem;
+      height: 0.48rem;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 0 0.25rem rgba(52, 211, 153, 0.12);
     }
 
     h1 {
-      font-size: 3.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 1.5rem;
-      animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 920px;
+      margin-inline: auto;
+      font-size: clamp(2.8rem, 7vw, 5.6rem);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+      text-wrap: balance;
     }
 
-    .lead {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      max-width: 700px;
-      margin: 0 auto 3rem;
-      animation: slideUp 1s cubic-bezier(0.16, 1, 0.3, 1);
+    .gradient-text {
+      background: linear-gradient(120deg, #fff 20%, #a5b4fc 65%, #67e8f9);
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      margin: 1.75rem auto 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 2.2vw, 1.2rem);
+      text-wrap: balance;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.85rem;
+      margin-top: 2rem;
+    }
+
+    .button {
+      min-height: 2.9rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      padding: 0.7rem 1.05rem;
+      border: 1px solid var(--border);
+      border-radius: 0.65rem;
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--text);
+      font-weight: 750;
+      text-decoration: none;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-strong);
+      background: rgba(255, 255, 255, 0.065);
+    }
+
+    .button-primary {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--primary-strong), #7c3aed);
+      box-shadow: 0 12px 32px rgba(99, 102, 241, 0.25);
+    }
+
+    .button-primary:hover {
+      border-color: transparent;
+      background: linear-gradient(135deg, #7174f7, #8b5cf6);
+    }
+
+    .stack-list {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.55rem;
+      margin-top: 2.25rem;
+      list-style: none;
+    }
+
+    .stack-list li,
+    .tag {
+      padding: 0.3rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 0.45rem;
+      background: rgba(255, 255, 255, 0.035);
+      color: #ced7e5;
+      font-family: var(--mono);
+      font-size: 0.75rem;
     }
 
     main {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 2rem 6rem;
+      padding-bottom: 6rem;
     }
 
-    .section-title {
-      font-size: 2rem;
-      font-weight: 700;
-      margin-bottom: 2.5rem;
-      text-align: center;
-      position: relative;
+    .section {
+      padding: 4rem 0;
     }
 
-    .section-title::after {
-      content: '';
+    .section-heading {
+      max-width: 690px;
+      margin-bottom: 2rem;
+    }
+
+    .section-kicker {
       display: block;
-      width: 40px;
-      height: 4px;
-      background: var(--primary);
-      margin: 0.75rem auto 0;
-      border-radius: 2px;
+      margin-bottom: 0.55rem;
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
-    /* Screenshot Gallery Showcase */
-    .showcase-grid {
+    .section-heading h2 {
+      font-size: clamp(2rem, 5vw, 3.25rem);
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+      text-wrap: balance;
+    }
+
+    .section-heading p {
+      margin-top: 0.8rem;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    .architecture {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 4rem;
-      margin-bottom: 6rem;
+      grid-template-columns: repeat(7, minmax(0, auto));
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--card);
+      box-shadow: var(--shadow);
     }
 
-    .showcase-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
+    .architecture-node {
+      min-height: 8rem;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 0.55rem;
+      padding: 1.15rem;
+      border: 1px solid var(--border);
+      border-radius: 0.8rem;
+      background: rgba(4, 9, 18, 0.52);
+      text-align: center;
+    }
+
+    .architecture-node strong {
+      font-size: 1rem;
+    }
+
+    .architecture-node span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+    }
+
+    .node-icon {
+      width: 2.35rem;
+      height: 2.35rem;
+      display: grid;
+      place-items: center;
+      border-radius: 0.65rem;
+      background: rgba(129, 140, 248, 0.12);
+      color: var(--primary);
+    }
+
+    .architecture-arrow {
+      color: var(--muted);
+      font-size: 1.4rem;
+      text-align: center;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      counter-reset: flow;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 15rem;
+      padding: 1.5rem;
       overflow: hidden;
-      display: grid;
-      grid-template-columns: 1.2fr 1fr;
-      transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--card);
+      counter-increment: flow;
     }
 
-    @media (max-width: 968px) {
-      .showcase-card {
+    .flow-step::after {
+      content: "0" counter(flow);
+      position: absolute;
+      right: 1rem;
+      bottom: -1.25rem;
+      color: rgba(129, 140, 248, 0.075);
+      font-size: 6rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .flow-icon {
+      width: 2.75rem;
+      height: 2.75rem;
+      display: grid;
+      place-items: center;
+      margin-bottom: 1.15rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 0.75rem;
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--primary);
+    }
+
+    .flow-step h3 {
+      margin-bottom: 0.55rem;
+      font-size: 1.2rem;
+    }
+
+    .flow-step p {
+      position: relative;
+      z-index: 1;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .gallery-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .filter-button {
+      padding: 0.55rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 750;
+    }
+
+    .filter-button:hover,
+    .filter-button[aria-pressed="true"] {
+      border-color: var(--border-strong);
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--text);
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .gallery-card {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--card);
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .gallery-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--border-strong);
+    }
+
+    .gallery-card[hidden] {
+      display: none;
+    }
+
+    .gallery-trigger {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      display: block;
+      overflow: hidden;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      background: #050a13;
+      color: var(--text);
+      cursor: zoom-in;
+    }
+
+    .gallery-trigger img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      transition: transform 0.3s ease;
+    }
+
+    .gallery-trigger:hover img {
+      transform: scale(1.025);
+    }
+
+    .zoom-label {
+      position: absolute;
+      right: 0.75rem;
+      bottom: 0.75rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.55rem;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 0.45rem;
+      background: rgba(4, 9, 18, 0.82);
+      font-size: 0.72rem;
+      font-weight: 750;
+    }
+
+    .gallery-body {
+      padding: 1.25rem;
+    }
+
+    .gallery-body h3 {
+      margin-bottom: 0.45rem;
+      font-size: 1.15rem;
+    }
+
+    .gallery-body p {
+      min-height: 3.1rem;
+      margin-bottom: 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      list-style: none;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    .feature-card {
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      border-radius: 0.9rem;
+      background: var(--card);
+    }
+
+    .feature-card h3 {
+      margin-bottom: 0.5rem;
+      font-size: 1.08rem;
+    }
+
+    .feature-card p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .feature-accent {
+      width: 2rem;
+      height: 0.2rem;
+      margin-bottom: 1rem;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--primary), var(--cyan));
+    }
+
+    .cta {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 2rem;
+      padding: 2rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 1rem;
+      background:
+        linear-gradient(120deg, rgba(99, 102, 241, 0.16), rgba(34, 211, 238, 0.06)),
+        var(--card-solid);
+    }
+
+    .cta h2 {
+      margin-bottom: 0.45rem;
+      font-size: clamp(1.6rem, 4vw, 2.3rem);
+      letter-spacing: -0.03em;
+    }
+
+    .cta p {
+      max-width: 690px;
+      color: var(--muted);
+    }
+
+    .cta .hero-actions {
+      justify-content: flex-end;
+      margin-top: 0;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+
+    footer a {
+      color: #c7d2fe;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    dialog {
+      width: min(94vw, 1280px);
+      max-height: 92vh;
+      margin: auto;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 1rem;
+      background: var(--card-solid);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+
+    dialog::backdrop {
+      background: rgba(2, 6, 14, 0.88);
+      backdrop-filter: blur(8px);
+    }
+
+    .lightbox-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .lightbox-header h2 {
+      font-size: 1rem;
+    }
+
+    .lightbox-close {
+      width: 2.25rem;
+      height: 2.25rem;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 1.25rem;
+    }
+
+    .lightbox-image {
+      width: 100%;
+      max-height: calc(92vh - 4rem);
+      display: block;
+      object-fit: contain;
+      background: #050a13;
+    }
+
+    @media (max-width: 900px) {
+      .architecture {
+        grid-template-columns: 1fr;
+      }
+
+      .architecture-arrow {
+        transform: rotate(90deg);
+      }
+
+      .flow-grid,
+      .features-grid {
         grid-template-columns: 1fr;
       }
     }
 
-    .showcase-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(99, 102, 241, 0.25);
-      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 0 40px 5px rgba(99, 102, 241, 0.05);
-    }
+    @media (max-width: 720px) {
+      .nav-inner {
+        min-height: 4rem;
+      }
 
-    .showcase-img-wrapper {
-      position: relative;
-      background: #0f172a;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-right: 1px solid var(--border-card);
-    }
+      .nav-links li:not(:last-child) {
+        display: none;
+      }
 
-    @media (max-width: 968px) {
-      .showcase-img-wrapper {
-        border-right: none;
-        border-bottom: 1px solid var(--border-card);
+      .hero {
+        padding-top: 4rem;
+      }
+
+      .section {
+        padding: 3rem 0;
+      }
+
+      .gallery-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .gallery-body p {
+        min-height: auto;
+      }
+
+      .cta {
+        grid-template-columns: 1fr;
+      }
+
+      .cta .hero-actions {
+        justify-content: flex-start;
       }
     }
 
-    .showcase-img-wrapper img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-      padding: 1.5rem;
-      filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.5));
-      transition: transform 0.5s ease;
-    }
-
-    .showcase-card:hover .showcase-img-wrapper img {
-      transform: scale(1.02);
-    }
-
-    .showcase-content {
-      padding: 3rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-
-    @media (max-width: 640px) {
-      .showcase-content {
-        padding: 2rem;
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
       }
-    }
 
-    .showcase-content h3 {
-      font-size: 1.75rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      color: #ffffff;
-    }
-
-    .showcase-content p {
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
-      font-size: 1.05rem;
-    }
-
-    .tech-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .tech-tag {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 0.25rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: var(--font-mono);
-      color: var(--text);
-    }
-
-    /* Security Architecture Grid */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 2rem;
-      margin-bottom: 6rem;
-    }
-
-    .feature-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 2.5rem;
-      transition: all 0.3s ease;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .feature-card:hover {
-      border-color: rgba(6, 182, 212, 0.25);
-      box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.4);
-      transform: translateY(-2px);
-    }
-
-    .feature-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 8px;
-      background: rgba(6, 182, 212, 0.1);
-      border: 1px solid rgba(6, 182, 212, 0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 1.5rem;
-      color: var(--accent-cyan);
-    }
-
-    .feature-card:nth-child(even) .feature-icon {
-      background: rgba(99, 102, 241, 0.1);
-      border: 1px solid rgba(99, 102, 241, 0.2);
-      color: var(--primary);
-    }
-
-    .feature-card h4 {
-      font-size: 1.25rem;
-      font-weight: 600;
-      margin-bottom: 0.75rem;
-      color: #ffffff;
-    }
-
-    .feature-card p {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      flex-grow: 1;
-    }
-
-    footer {
-      border-top: 1px solid var(--border-card);
-      padding: 3rem 2rem;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.9rem;
-    }
-
-    footer a {
-      color: var(--primary);
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-
-    footer a:hover {
-      color: #a5b4fc;
-    }
-
-    /* Animations */
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
 
-  <header>
-    <div class="badge">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      Zero Trust Architecture
+  <nav class="site-nav" aria-label="Primary navigation">
+    <div class="nav-inner">
+      <a class="brand" href="#top" aria-label="ZeroTrust showcase home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </span>
+        ZeroTrust
+      </a>
+      <ul class="nav-links">
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#passkeys">Passkeys</a></li>
+        <li><a href="#showcase">Showcase</a></li>
+        <li><a href="#security">Security</a></li>
+        <li>
+          <a href="https://www.linkedin.com/in/mustafa-sercan-sak-30190684" target="_blank" rel="noopener noreferrer">
+            LinkedIn
+          </a>
+        </li>
+        <li>
+          <a class="nav-github" href="https://github.com/mustafasercansak/zerotrust" target="_blank" rel="noopener noreferrer">
+            GitHub
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M7 17 17 7M7 7h10v10"/>
+            </svg>
+          </a>
+        </li>
+      </ul>
     </div>
-    <h1>ZeroTrust Security Showcase</h1>
-    <p class="lead">A complete authentication, authorization, and audit infrastructure built on Zero Trust principles with Go, PostgreSQL, Redis, and React.</p>
+  </nav>
+
+  <header class="hero container" id="top">
+    <div class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Security engineering showcase</div>
+    <h1><span class="gradient-text">Authentication designed around continuous verification.</span></h1>
+    <p class="hero-copy">A full-stack Zero Trust platform combining passwordless WebAuthn, Ed25519 tokens, DPoP, rotating sessions, fine-grained authorization, and observable security controls.</p>
+    <div class="hero-actions">
+      <a class="button button-primary" href="#showcase">Explore the interface</a>
+      <a class="button" href="https://github.com/mustafasercansak/zerotrust" target="_blank" rel="noopener noreferrer">
+        View source on GitHub
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M7 17 17 7M7 7h10v10"/>
+        </svg>
+      </a>
+      <a class="button" href="https://www.linkedin.com/in/mustafa-sercan-sak-30190684" target="_blank" rel="noopener noreferrer">
+        Connect on LinkedIn
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M7 17 17 7M7 7h10v10"/>
+        </svg>
+      </a>
+    </div>
+    <ul class="stack-list" aria-label="Core technologies">
+      <li>WebAuthn</li>
+      <li>Ed25519</li>
+      <li>DPoP RFC 9449</li>
+      <li>Go</li>
+      <li>React</li>
+      <li>PostgreSQL</li>
+      <li>Redis</li>
+    </ul>
   </header>
 
-  <main>
-    
-    <section>
-      <h2 class="section-title">Core Interface Showcase</h2>
-      <div class="showcase-grid">
-        
-        <!-- Showcase 1 -->
-        <div class="showcase-card">
-          <div class="showcase-img-wrapper">
-            <img src="images/dashboard.png" alt="Dashboard Overview">
-          </div>
-          <div class="showcase-content">
-            <h3>Dashboard Control Panel</h3>
-            <p>A unified user portal that aggregates active sessions, account details, and quick configuration routes. Features clean responsive menus, localization support (EN/TR), and lightweight bundles leveraging route-level lazy loading.</p>
-            <div class="tech-list">
-              <span class="tech-tag">React 19</span>
-              <span class="tech-tag">Vite</span>
-              <span class="tech-tag">MUI v9</span>
-              <span class="tech-tag">i18next</span>
-            </div>
-          </div>
+  <main id="main-content">
+    <section class="section container" id="architecture">
+      <div class="section-heading">
+        <span class="section-kicker">System design</span>
+        <h2>Clear boundaries, short-lived trust</h2>
+        <p>The browser never reads authentication tokens. The Go API verifies every request, PostgreSQL owns durable identity state, and Redis handles short-lived security decisions.</p>
+      </div>
+      <div class="architecture" aria-label="ZeroTrust system architecture">
+        <div class="architecture-node">
+          <span class="node-icon" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
+          </span>
+          <strong>React Client</strong>
+          <span>UI + WebAuthn</span>
         </div>
-
-        <!-- Showcase 2 -->
-        <div class="showcase-card">
-          <div class="showcase-img-wrapper">
-            <img src="images/session_management.png" alt="Unified User Settings & Sessions">
-          </div>
-          <div class="showcase-content">
-            <h3>Unified Settings & Session Audits</h3>
-            <p>Provides users a consolidated dashboard to modify names, upload/delete profiles securely with backend content sniffing, and audit active devices (IP addresses, last active timestamp, and instant session revocation controls).</p>
-            <div class="tech-list">
-              <span class="tech-tag">Avatar Sniffing</span>
-              <span class="tech-tag">PostgreSQL Store</span>
-              <span class="tech-tag">Token Rotation</span>
-              <span class="tech-tag">JTI Revocation</span>
-            </div>
-          </div>
+        <span class="architecture-arrow" aria-hidden="true">→</span>
+        <div class="architecture-node">
+          <span class="node-icon" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 7v5c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V7l-8-4z"/><path d="m9 12 2 2 4-4"/></svg>
+          </span>
+          <strong>Go API</strong>
+          <span>Policy enforcement</span>
         </div>
-
-        <!-- Showcase 3 -->
-        <div class="showcase-card">
-          <div class="showcase-img-wrapper">
-            <img src="images/mfa_setup.png" alt="Multi-Factor Authentication Setup">
-          </div>
-          <div class="showcase-content">
-            <h3>TOTP Multi-Factor Authentication & Recovery Codes</h3>
-            <p>Robust security enrollment using Time-based One-Time Passwords (TOTP). Displays a dynamic, high-contrast QR Code for easy scanning, fallback manual secrets, and generates 8 single-use, bcrypt-hashed backup recovery codes to prevent lockout.</p>
-            <div class="tech-list">
-              <span class="tech-tag">qrcode.react</span>
-              <span class="tech-tag">AES-256-GCM</span>
-              <span class="tech-tag">Step-Up MFA</span>
-              <span class="tech-tag">Recovery Codes</span>
-              <span class="tech-tag">TOTP Verification</span>
-            </div>
-          </div>
+        <span class="architecture-arrow" aria-hidden="true">→</span>
+        <div class="architecture-node">
+          <span class="node-icon" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg>
+          </span>
+          <strong>PostgreSQL</strong>
+          <span>Identity + sessions</span>
         </div>
-
-        <!-- Showcase 4 -->
-        <div class="showcase-card">
-          <div class="showcase-img-wrapper">
-            <img src="images/session_management.png" alt="Global System Security Settings">
-          </div>
-          <div class="showcase-content">
-            <h3>Global System Security Settings</h3>
-            <p>Administrator-level dashboard to configure critical security policies dynamically. Exposes control inputs (secured via Step-Up MFA verification) for the following platform policies:</p>
-            
-            <div class="settings-grid" style="display: grid; gap: 0.75rem; margin: 1.5rem 0;">
-              <!-- Item 1 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Max Concurrent Sessions</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">max_sessions_per_user</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Cap on active sessions allowed per account (1–20, default: 5). Evicts oldest sessions first.</div>
-              </div>
-              <!-- Item 2 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Password Complexity Level</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">password_complexity</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Enforce <strong>Low</strong> (min 6 chars), <strong>Medium</strong> (min 8, letter/digit), or <strong>Strong</strong> (min 8, mixed case/digit/symbol) policies.</div>
-              </div>
-              <!-- Item 3 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Max Login Attempts</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">max_login_attempts</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Lockout threshold (1–20, default: 5). Failures trigger progressive 1/5/30-minute lockouts.</div>
-              </div>
-              <!-- Item 4 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Global Two-Factor Auth (2FA)</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">global_mfa_required</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Enforce MFA setup and challenge verification globally for all active logins.</div>
-              </div>
-              <!-- Item 5 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Session Idle Timeouts</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">session_idle_timeout_seconds</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Inactivity windows. User range 60–3600s (default: 300s); Admin range 60–1800s (default: 180s).</div>
-              </div>
-              <!-- Item 6 -->
-              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <strong style="color: #ffffff; font-size: 0.95rem;">Absolute Session Timeout</strong>
-                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">session_absolute_timeout_seconds</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Hard cap on overall session duration. Range 1800–172800s (default: 28800s / 8 hours).</div>
-              </div>
-            </div>
-
-            <div class="tech-list">
-              <span class="tech-tag">Dynamic Policies</span>
-              <span class="tech-tag">MFA Step-Up Gate</span>
-              <span class="tech-tag">Session Timeouts</span>
-              <span class="tech-tag">Lockout Thresholds</span>
-              <span class="tech-tag">Complexity Rules</span>
-            </div>
-          </div>
+        <span class="architecture-arrow" aria-hidden="true">+</span>
+        <div class="architecture-node">
+          <span class="node-icon" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="7" cy="7" r="1"/><circle cx="7" cy="12" r="1"/><circle cx="7" cy="17" r="1"/></svg>
+          </span>
+          <strong>Redis</strong>
+          <span>Ceremonies + limits</span>
         </div>
-
       </div>
     </section>
 
-    <section>
-      <h2 class="section-title">Zero Trust Security Principles</h2>
+    <section class="section container" id="passkeys">
+      <div class="section-heading">
+        <span class="section-kicker">WebAuthn flow</span>
+        <h2>Passkeys without hidden magic</h2>
+        <p>The authenticator keeps private key material. The application stores public credentials and validates origin-bound signatures through short-lived, single-use ceremonies.</p>
+      </div>
+      <div class="flow-grid">
+        <article class="flow-step">
+          <div class="flow-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6M9 5h6"/><rect x="4" y="8" width="16" height="13" rx="2"/><path d="M8 13h8M8 17h5"/></svg>
+          </div>
+          <h3>Begin ceremony</h3>
+          <p>The API creates challenge options and stores ceremony state in Redis with a five-minute TTL. Passwordless login uses an opaque ceremony ID because the user is not known yet.</p>
+        </article>
+        <article class="flow-step">
+          <div class="flow-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/><path d="M5 10a7 7 0 0 1 14 0v4a7 7 0 0 1-14 0v-4z"/><path d="M9 21v-2M15 21v-2"/></svg>
+          </div>
+          <h3>Verify locally</h3>
+          <p>The browser invokes the platform authenticator or security key. A fingerprint, device PIN, or hardware touch verifies the user without exposing biometric data to the application.</p>
+        </article>
+        <article class="flow-step">
+          <div class="flow-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/><path d="M21 12a9 9 0 1 1-5.3-8.2"/></svg>
+          </div>
+          <h3>Validate and issue</h3>
+          <p>The backend validates RP ID, origin, challenge, signature, user handle, and counter. The ceremony is consumed once, then secure httpOnly session cookies are issued.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section container" id="showcase">
+      <div class="section-heading">
+        <span class="section-kicker">Product tour</span>
+        <h2>Security controls people can actually use</h2>
+        <p>Filter the interface by workflow. Select any screenshot to inspect it at full size.</p>
+      </div>
+      <div class="gallery-controls" role="group" aria-label="Filter screenshots">
+        <button class="filter-button" type="button" data-filter="all" aria-pressed="true">All</button>
+        <button class="filter-button" type="button" data-filter="authentication" aria-pressed="false">Authentication</button>
+        <button class="filter-button" type="button" data-filter="account" aria-pressed="false">Account</button>
+        <button class="filter-button" type="button" data-filter="administration" aria-pressed="false">Administration</button>
+        <button class="filter-button" type="button" data-filter="observability" aria-pressed="false">Observability</button>
+      </div>
+
+      <div class="gallery-grid">
+        <article class="gallery-card" data-category="account">
+          <button class="gallery-trigger" type="button" data-full="images/dashboard.png" data-title="Dashboard overview" aria-label="Open dashboard overview screenshot">
+            <img src="images/dashboard.png" alt="ZeroTrust user dashboard with account and security summary" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Account Dashboard</h3>
+            <p>A focused overview of identity, roles, locale, and security status with responsive navigation.</p>
+            <ul class="tag-list"><li class="tag">React</li><li class="tag">MUI</li><li class="tag">i18n</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="account">
+          <button class="gallery-trigger" type="button" data-full="images/sessions.png" data-title="Active session management" aria-label="Open active session management screenshot">
+            <img src="images/sessions.png" alt="Active session list with device details and revocation controls" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Session Management</h3>
+            <p>Users inspect active devices and revoke individual sessions or every other session immediately.</p>
+            <ul class="tag-list"><li class="tag">Rotation</li><li class="tag">Revocation</li><li class="tag">SSE</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="authentication">
+          <button class="gallery-trigger" type="button" data-full="images/mfa_setup.png" data-title="TOTP and recovery-code setup" aria-label="Open TOTP setup screenshot">
+            <img src="images/mfa_setup.png" alt="TOTP setup screen with QR code and backup recovery codes" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>TOTP &amp; Recovery Codes</h3>
+            <p>Encrypted TOTP enrollment pairs a QR setup flow with eight single-use, bcrypt-hashed recovery codes.</p>
+            <ul class="tag-list"><li class="tag">AES-256-GCM</li><li class="tag">TOTP</li><li class="tag">Step-up</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="authentication">
+          <button class="gallery-trigger" type="button" data-full="images/passkey_management.png" data-title="Passkey registration and management" aria-label="Open passkey management screenshot">
+            <img src="images/passkey_management.png" alt="Passkey management screen with an add passkey action" width="1440" height="1000" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Passkey Management</h3>
+            <p>Users enroll discoverable credentials, review last-used details, and remove devices independently.</p>
+            <ul class="tag-list"><li class="tag">WebAuthn</li><li class="tag">FIDO2</li><li class="tag">Resident key</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="authentication">
+          <button class="gallery-trigger" type="button" data-full="images/passkey_login.png" data-title="Passwordless passkey login" aria-label="Open passwordless login screenshot">
+            <img src="images/passkey_login.png" alt="Login screen offering passwordless sign-in with a passkey" width="1440" height="1000" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Passwordless Login</h3>
+            <p>A discoverable credential identifies the account and completes sign-in without an email or password.</p>
+            <ul class="tag-list"><li class="tag">Usernameless</li><li class="tag">User verification</li><li class="tag">GETDEL</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="administration">
+          <button class="gallery-trigger" type="button" data-full="images/session_management.png" data-title="Global security settings" aria-label="Open global security settings screenshot">
+            <img src="images/session_management.png" alt="Administrative security policy settings for sessions, passwords, and MFA" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Runtime Security Policies</h3>
+            <p>Administrators tune session limits, timeouts, lockout thresholds, password rules, and global MFA.</p>
+            <ul class="tag-list"><li class="tag">Dynamic policy</li><li class="tag">Step-up gate</li><li class="tag">Fail closed</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="administration">
+          <button class="gallery-trigger" type="button" data-full="images/users.png" data-title="User and role administration" aria-label="Open user administration screenshot">
+            <img src="images/users.png" alt="Administrative user list with role and status controls" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>User &amp; Role Administration</h3>
+            <p>Permission-gated account management covers role assignment, status changes, and session revocation.</p>
+            <ul class="tag-list"><li class="tag">RBAC</li><li class="tag">Step-up MFA</li><li class="tag">Audit</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="administration">
+          <button class="gallery-trigger" type="button" data-full="images/service_accounts.png" data-title="Service account management" aria-label="Open service account management screenshot">
+            <img src="images/service_accounts.png" alt="Service account management with scopes and lifecycle controls" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Machine-to-Machine Access</h3>
+            <p>Scoped service accounts use client credentials and DPoP-bound tokens for automated integrations.</p>
+            <ul class="tag-list"><li class="tag">OAuth 2.0</li><li class="tag">DPoP</li><li class="tag">Scopes</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="observability">
+          <button class="gallery-trigger" type="button" data-full="images/audit.png" data-title="Security audit log" aria-label="Open security audit log screenshot">
+            <img src="images/audit.png" alt="Security audit log showing actor, action, resource, and event metadata" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Observable Audit Trail</h3>
+            <p>Critical authentication and administration events retain actor, resource, network, and result context.</p>
+            <ul class="tag-list"><li class="tag">Immutable events</li><li class="tag">Prometheus</li><li class="tag">Forensics</li></ul>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section container" id="security">
+      <div class="section-heading">
+        <span class="section-kicker">Defense in depth</span>
+        <h2>Controls that reinforce each other</h2>
+        <p>The platform combines cryptographic proof, constrained sessions, explicit authorization, and security telemetry instead of relying on one perimeter check.</p>
+      </div>
       <div class="features-grid">
-        
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          </div>
-          <h4>Double Token Auth Model</h4>
-          <p>Access tokens are short-lived (1-minute TTL) ES256 ECDSA signed JSON Web Tokens (JWT) kept in secure, httpOnly cookies. Rotation relies on opaque database-backed refresh tokens.</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          </div>
-          <h4>Token Reuse Protection</h4>
-          <p>If an older rotated refresh token is re-submitted, the system flags it as a potential hijack attempt, immediately invalidates all active sessions for that user, and registers a security alert.</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          </div>
-          <h4>Runtime Session Policies</h4>
-          <p>System settings govern session lifecycles dynamically: enforcing idle timeout windows (e.g. 5 minutes for regular users, 3 minutes for admins) and hard absolute caps (8 hours).</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          </div>
-          <h4>Observable Audit Logging</h4>
-          <p>Every critical security event (login, token rotation, session revocation, MFA setup, role change) writes synchronously to a database audit log, feeding an exported Prometheus metric counter.</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-          </div>
-          <h4>Step-Up MFA Gates</h4>
-          <p>Sensitive user administration and token-management activities require recent (within 10 minutes) multi-factor authentication. If expired, an inline TOTP challenge is triggered.</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
-          <h4>Machine-to-Machine Auth</h4>
-          <p>Secure client_credentials flow for service accounts. Emits scope-bounded access tokens, permitting automated API-driven integrations with fine-grained access policies.</p>
-        </div>
-
+        <article class="feature-card"><div class="feature-accent"></div><h3>Ed25519 Session Tokens</h3><p>One-minute EdDSA access tokens stay in httpOnly cookies while opaque refresh tokens rotate through database-backed sessions.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Refresh-Reuse Detection</h3><p>Replaying a rotated refresh token is treated as possible theft and revokes the account's active session family.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Phishing-Resistant Passkeys</h3><p>Origin-bound WebAuthn credentials provide passkey MFA and discoverable passwordless login with required user verification.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>DPoP-Bound M2M Tokens</h3><p>Service-account tokens bind to a client public key and require signed proof of possession on protected requests.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Step-Up Authorization</h3><p>Sensitive administrator actions require a recent MFA marker in addition to the correct role and permission.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Runtime Session Policy</h3><p>Idle limits, absolute limits, concurrent-session caps, and progressive lockouts are configurable without redeployment.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>CSRF &amp; Browser Hardening</h3><p>Double-submit CSRF tokens, strict cookies, CSP, HSTS, and restrictive browser policies reduce common web attack paths.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Fine-Grained RBAC</h3><p>Roles map to explicit permissions for user, audit, settings, and service-account operations.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Security Observability</h3><p>Synchronous audit events and Prometheus metrics make authentication behavior and administrative changes inspectable.</p></article>
       </div>
     </section>
 
+    <section class="section container">
+      <div class="cta">
+        <div>
+          <h2>Read the implementation, not just the feature list.</h2>
+          <p>The repository includes the Go API, React client, database migrations, Docker environments, and focused backend and frontend tests.</p>
+        </div>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/mustafasercansak/zerotrust" target="_blank" rel="noopener noreferrer">Open GitHub repository</a>
+          <a class="button" href="https://www.linkedin.com/in/mustafa-sercan-sak-30190684" target="_blank" rel="noopener noreferrer">Connect on LinkedIn</a>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>
-    <p>ZeroTrust Security System © 2026. Made with ❤️ for modern security engineering.</p>
+    <p>ZeroTrust Security System · Built by <a href="https://www.linkedin.com/in/mustafa-sercan-sak-30190684" target="_blank" rel="noopener noreferrer">Mustafa Sercan Sak</a> · <a href="https://github.com/mustafasercansak/zerotrust">Source on GitHub</a></p>
   </footer>
 
+  <dialog id="lightbox" aria-labelledby="lightbox-title">
+    <div class="lightbox-header">
+      <h2 id="lightbox-title">Screenshot</h2>
+      <button class="lightbox-close" type="button" aria-label="Close screenshot">×</button>
+    </div>
+    <img class="lightbox-image" src="" alt="">
+  </dialog>
+
+  <script>
+    const filterButtons = document.querySelectorAll(".filter-button");
+    const galleryCards = document.querySelectorAll(".gallery-card");
+    const lightbox = document.querySelector("#lightbox");
+    const lightboxImage = lightbox.querySelector(".lightbox-image");
+    const lightboxTitle = lightbox.querySelector("#lightbox-title");
+    const closeButton = lightbox.querySelector(".lightbox-close");
+
+    filterButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const filter = button.dataset.filter;
+
+        filterButtons.forEach((candidate) => {
+          candidate.setAttribute("aria-pressed", String(candidate === button));
+        });
+
+        galleryCards.forEach((card) => {
+          card.hidden = filter !== "all" && card.dataset.category !== filter;
+        });
+      });
+    });
+
+    document.querySelectorAll(".gallery-trigger").forEach((trigger) => {
+      trigger.addEventListener("click", () => {
+        const thumbnail = trigger.querySelector("img");
+        lightboxImage.src = trigger.dataset.full;
+        lightboxImage.alt = thumbnail.alt;
+        lightboxTitle.textContent = trigger.dataset.title;
+        lightbox.showModal();
+        document.body.classList.add("modal-open");
+      });
+    });
+
+    function closeLightbox() {
+      lightbox.close();
+      document.body.classList.remove("modal-open");
+      lightboxImage.src = "";
+    }
+
+    closeButton.addEventListener("click", closeLightbox);
+    lightbox.addEventListener("click", (event) => {
+      if (event.target === lightbox) closeLightbox();
+    });
+    lightbox.addEventListener("close", () => {
+      document.body.classList.remove("modal-open");
+      lightboxImage.src = "";
+    });
+  </script>
 </body>
 </html>
