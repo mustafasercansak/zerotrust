@@ -22,6 +22,22 @@ import (
 	"github.com/zerotrust/backend/internal/serviceaccount"
 )
 
+func setIntegrationRedisEnv(t *testing.T) {
+	t.Helper()
+
+	addr := os.Getenv("TEST_REDIS_ADDR")
+	if addr == "" {
+		addr = "localhost:6379"
+	}
+	password, configured := os.LookupEnv("TEST_REDIS_PASSWORD")
+	if !configured {
+		password = "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e"
+	}
+
+	t.Setenv("REDIS_ADDR", addr)
+	t.Setenv("REDIS_PASSWORD", password)
+}
+
 func TestLoadConfig_MFADisabledAllowsMissingOrInvalidKey(t *testing.T) {
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("MFA_ENCRYPTION_KEY", "")
@@ -573,8 +589,7 @@ func TestRunSessionCleanupLoopRunsBothTickers(t *testing.T) {
 func TestRun_BadDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://bad:bad@127.0.0.1:19999/bad?sslmode=disable")
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 
 	cfg, err := loadConfig()
@@ -624,8 +639,7 @@ func TestRun_WithMFAAndSMTPAndAdminSeed(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", addr)
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "true")
 	t.Setenv("MFA_ENCRYPTION_KEY", strings.Repeat("ab", 32)) // 64-char hex
 	t.Setenv("REGISTRATION_ENABLED", "false")
@@ -688,8 +702,7 @@ func TestRun_ServerStartsAndResponds(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", addr)
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("COOKIES_SECURE", "false")
@@ -803,8 +816,7 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", addr)
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("COOKIES_SECURE", "false")
@@ -1099,8 +1111,7 @@ func TestRun_ServerListenFailureReturnsError(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", "127.0.0.1:18769")
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("COOKIES_SECURE", "false")
@@ -1130,8 +1141,7 @@ func TestRun_InvalidBaoAddrFailsSecretsClientInit(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", "127.0.0.1:18770")
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("COOKIES_SECURE", "false")
@@ -1166,8 +1176,7 @@ func TestRun_RefreshAndAvatarSuccessPaths(t *testing.T) {
 	t.Setenv("DATABASE_URL", dbURL)
 	t.Setenv("MIGRATIONS_PATH", "../../migrations")
 	t.Setenv("SERVER_ADDR", addr)
-	t.Setenv("REDIS_ADDR", "localhost:6379")
-	t.Setenv("REDIS_PASSWORD", "61325153d3fbda68c0a7a620e591447fbe75c5dabc93603e")
+	setIntegrationRedisEnv(t)
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("COOKIES_SECURE", "false")
