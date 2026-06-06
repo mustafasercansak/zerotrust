@@ -76,6 +76,16 @@ export interface ServiceProbeResult {
   body: unknown;
 }
 
+export interface OidcClient {
+  id: string;
+  client_id: string;
+  client_secret?: string;
+  name: string;
+  redirect_uris: string[];
+  allowed_scopes: string[];
+  created_at: string;
+}
+
 export interface Session {
   id: string;
   ip_address: string;
@@ -322,6 +332,20 @@ export const api = {
     }),
 
   me: () => request<MeData>("/api/v1/me"),
+  submitConsent: (payload: {
+    client_id: string;
+    redirect_uri: string;
+    scopes: string[];
+    code_challenge?: string;
+    code_challenge_method?: string;
+    nonce?: string;
+    state?: string;
+    approved: boolean;
+  }) =>
+    request<{ redirect_url: string }>("/api/v1/oauth2/consent", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   updateLocale: (locale: string) =>
     request<void>("/api/v1/me/locale", {
@@ -517,6 +541,26 @@ export const api = {
       request<void>("/api/v1/admin/settings", {
         method: "PATCH",
         body: JSON.stringify(patch),
+      }),
+
+    listOidcClients: () =>
+      request<OidcClient[]>("/api/v1/admin/oidc/clients"),
+
+    createOidcClient: (payload: { client_id: string; name: string; redirect_uris: string[]; allowed_scopes: string[] }) =>
+      request<OidcClient>("/api/v1/admin/oidc/clients", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    deleteOidcClient: (id: string) =>
+      request<void>(`/api/v1/admin/oidc/clients/${id}`, {
+        method: "DELETE",
+      }),
+
+    updateOidcClient: (id: string, payload: { name: string; redirect_uris: string[]; allowed_scopes: string[] }) =>
+      request<OidcClient>(`/api/v1/admin/oidc/clients/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
       }),
   },
 };

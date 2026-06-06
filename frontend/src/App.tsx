@@ -17,7 +17,9 @@ const AuditPage = lazy(() => import("./pages/dashboard/AuditPage"));
 const SecurityDashboardPage = lazy(() => import("./pages/dashboard/SecurityDashboardPage"));
 const ServiceAccountsPage = lazy(() => import("./pages/dashboard/ServiceAccountsPage"));
 const SettingsPage = lazy(() => import("./pages/dashboard/SettingsPage"));
+const OidcClientsPage = lazy(() => import("./pages/dashboard/OidcClientsPage"));
 const MfaPage = lazy(() => import("./pages/dashboard/MfaPage"));
+const ConsentPage = lazy(() => import("./pages/auth/ConsentPage"));
 
 export default function App() {
   return (
@@ -41,6 +43,7 @@ export default function App() {
               <Route path="/auth/login" element={<LoginPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/oauth2/consent" element={<ConsentPage />} />
 
               {/* ── Dashboard (protected, nested) ─────────────────────────────── */}
               <Route path="/dashboard" element={<DashboardLayout />}>
@@ -52,6 +55,7 @@ export default function App() {
                 <Route path="audit" element={<AuditPage />} />
                 <Route path="service-accounts" element={<ServiceAccountsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="oidc-clients" element={<OidcClientsPage />} />
               </Route>
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />

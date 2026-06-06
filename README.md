@@ -24,6 +24,11 @@ A security-focused Zero Trust authentication and authorization platform built wi
 
 ## Screenshots
 
+> Run `make screenshots ADMIN_PASSWORD=<your-password>` to refresh all screenshots automatically.
+
+### Login
+![Login Page](docs/images/login.png)
+
 ### Dashboard Overview
 ![Dashboard Overview](docs/images/dashboard.png)
 
@@ -41,6 +46,15 @@ A security-focused Zero Trust authentication and authorization platform built wi
 
 ### Admin Security Dashboard
 ![Admin Security Dashboard](docs/images/security_dashboard.png)
+
+### OIDC Identity Provider Configuration
+![OIDC Clients](docs/images/oidc_clients.png)
+
+### Audit Log
+![Audit Log](docs/images/audit.png)
+
+### Service Accounts (M2M)
+![Service Accounts](docs/images/service_accounts.png)
 
 ## Security Features
 
@@ -68,6 +82,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Admin Security Dashboard | Authentication trends, lockouts, anomalies, active sessions, login geography, and failed-login sources across 24-hour, 7-day, and 30-day ranges |
 | CSP / OWASP Headers | `frame-ancestors 'none'`, `object-src 'none'`, HSTS |
 | bcrypt | Cost factor 12 |
+| OIDC Provider | Standards-compliant OpenID Connect IdP — issue authorization codes, ID tokens, and UserInfo with `openid`/`profile`/`email` scopes; manage clients from the admin UI |
 | i18n | Turkish (default) / English |
 
 ## Current Scope
@@ -85,6 +100,7 @@ ZeroTrust currently includes:
 - WebAuthn passkeys (FIDO2): register/list/remove credentials, passkey second-factor login, and passwordless (usernameless) login with discoverable credentials
 - Password reset flow with SMTP or development log mailer
 - Audit log listing and an aggregated administrator security dashboard
+- OIDC Identity Provider — register clients, issue authorization codes & ID tokens, manage scopes from the dashboard
 - Turkish and English UI messages
 - Docker Compose development and production profiles
 - GitHub Actions CI for backend and frontend checks
@@ -391,15 +407,17 @@ GitHub Actions runs backend build/vet/test and frontend type-check/build on push
 ## Makefile Commands
 
 ```
-make secrets   Generate secrets (infra/.env, Ed25519 key pair)
-make up        Start in development-style HTTP mode
-make dev       Start in development mode with hot reload
-make up-prod   Start production-style HTTPS mode via nginx
-make down      Stop all services
-make down-v    Stop and delete volumes (resets database)
-make test      Run backend tests
-make lint      Run go vet + tsc
-make clean     Remove Docker images and volumes
+make secrets      Generate secrets (infra/.env, Ed25519 key pair)
+make up           Start in development-style HTTP mode
+make dev          Start in development mode with hot reload
+make up-prod      Start production-style HTTPS mode via nginx
+make down         Stop all services
+make down-v       Stop and delete volumes (resets database)
+make test         Run backend tests
+make lint         Run go vet + tsc
+make clean        Remove Docker images and volumes
+make screenshots  Take UI screenshots and update docs/index.md
+                  (requires ADMIN_PASSWORD=<pass>; optionally SCREENSHOT_URL, ADMIN_EMAIL)
 ```
 
 ## License

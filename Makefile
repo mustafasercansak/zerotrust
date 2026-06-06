@@ -1,4 +1,4 @@
-.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean
+.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean screenshots
 
 TEST_DB_DOCKER_IMAGE ?= postgres:16-alpine
 TEST_DB_CONTAINER ?= zerotrust-test-db
@@ -197,3 +197,8 @@ lint: ## Run go vet + frontend tsc
 
 clean: ## Remove Docker images and volumes
 	cd infra && sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.prod.yml down -v --rmi local --remove-orphans
+
+screenshots: ## Take UI screenshots and regenerate docs/index.md  (ADMIN_PASSWORD=<pass> make screenshots)
+	@command -v npx >/dev/null 2>&1 || (echo '❌  npx not found; install Node.js first' && exit 1)
+	@node -e "require('playwright')" 2>/dev/null || (echo '📦  Installing playwright...' && cd frontend && npm install --save-dev playwright && npx playwright install chromium)
+	node scripts/screenshots.js --url $${SCREENSHOT_URL:-http://localhost:3000} --email $${ADMIN_EMAIL:-admin@company.com} --password $${ADMIN_PASSWORD}

@@ -6,11 +6,12 @@ import { scheduleRefresh } from "@/lib/tokenManager";
 import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
 
-// Mock react-router-dom
 const mockNavigate = vi.fn();
+const mockSearchParams = new URLSearchParams();
 vi.mock("react-router-dom", () => ({
   Link: ({ children, to }: any) => React.createElement("a", { href: to }, children),
   useNavigate: () => mockNavigate,
+  useSearchParams: () => [mockSearchParams],
 }));
 
 // Mock react-i18next

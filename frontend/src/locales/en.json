@@ -79,7 +79,8 @@
     "security": "Security Dashboard",
     "audit": "Audit Log",
     "serviceAccounts": "Service Accounts",
-    "settings": "Settings"
+    "settings": "Settings",
+    "oidcClients": "OIDC Clients"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -278,6 +279,7 @@
     "tabProfile": "Profile Settings",
     "tabSecurity": "Security & Sessions",
     "tabSystem": "System Settings",
+    "tabOidc": "OIDC Clients",
     "maxSessions": "Max Concurrent Sessions",
     "maxSessionsInput": "Limit",
     "maxSessionsDesc": "Maximum number of active sessions allowed per user account (1–20). Oldest sessions are evicted when the limit is reached.",
@@ -302,6 +304,30 @@
       "internal_error": "Server error. Please try again.",
       "invalid_value": "Invalid value.",
       "unknown_setting": "Unknown setting key."
+    },
+    "oidc": {
+      "title": "OIDC Identity Provider Configuration",
+      "create": "Register OIDC Client",
+      "createTitle": "New OIDC Client",
+      "name": "Application Name",
+      "clientId": "Client ID",
+      "redirectUris": "Authorized Redirect URIs (comma-separated)",
+      "allowedScopes": "Allowed Scopes (space-separated)",
+      "secretTitle": "Copy client credentials",
+      "secretWarning": "Write this client secret down. It will never be shown again.",
+      "clientSecret": "Client Secret",
+      "done": "Close",
+      "noClients": "No OIDC clients registered yet.",
+      "deleteConfirm": "Are you sure you want to delete client \"{{name}}\"? This cannot be undone.",
+      "editTitle": "Edit OIDC Client",
+      "redirectUrisHeader": "Redirect URIs",
+      "scopes": "Scopes",
+      "actions": "Actions",
+      "copied": "Copied to clipboard",
+      "errors": {
+        "client_id_taken": "This Client ID is already in use.",
+        "internal_error": "Server error. Please try again."
+      }
     }
   },
   "serviceAccounts": {

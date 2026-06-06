@@ -27,6 +27,7 @@ import (
 	"github.com/zerotrust/backend/internal/audit"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/mfa"
+	"github.com/zerotrust/backend/internal/oidc"
 	"github.com/zerotrust/backend/internal/passwdreset"
 	"github.com/zerotrust/backend/internal/serviceaccount"
 	"github.com/zerotrust/backend/internal/session"
@@ -295,6 +296,11 @@ func run(ctx context.Context, cfg config) error {
 	authSvc.ConfigureWebAuthn(webauthnSvc)
 	webauthnHandler := webauthn.NewHandler(webauthnSvc)
 
+	oidcRepo := oidc.NewClientRepository(db)
+	oidcCodeStore := oidc.NewAuthCodeStore(rdb)
+	oidcSvc := oidc.NewService(oidcRepo, oidcCodeStore, userSvc, ks, cfg.OIDCIssuerURL)
+	oidcHandler := oidc.NewHandler(oidcSvc, oidcRepo, userSvc, authSvc, ks, cfg.OIDCIssuerURL, cfg.PublicAppURL)
+
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo)
@@ -339,6 +345,11 @@ func run(ctx context.Context, cfg config) error {
 		json.NewEncoder(w).Encode(ks.PublicJWKS())
 	})
 
+	r.Get("/.well-known/openid-configuration", oidcHandler.Discovery)
+	r.Get("/oauth2/authorize", oidcHandler.Authorize)
+	r.Post("/oauth2/token", oidcHandler.Token)
+	r.Get("/oauth2/userinfo", oidcHandler.UserInfo)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authmw.AuditCSRFFailures(auditRepo))
 		r.Use(authmw.CSRF())
@@ -356,6 +367,7 @@ func run(ctx context.Context, cfg config) error {
 		r.With(publicAudit).Post("/auth/register", authHandler.Register)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
 		r.With(publicAudit).Post("/auth/reset-password", authHandler.ResetPassword)
+		r.Post("/oauth2/consent", oidcHandler.Consent)
 
 		// SSE stream — auth handled inside handler via cookie (EventSource sends cookies automatically)
 		r.With(publicAudit).Get("/admin/service-accounts/events", saHandler.Events)
@@ -595,6 +607,12 @@ func run(ctx context.Context, cfg config) error {
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Patch("/admin/settings", settingsHandler.Update)
 
+			// OIDC Clients — admin role only
+			r.With(authmw.RequireRole("admin")).Get("/admin/oidc/clients", oidcHandler.ListClients)
+			r.With(authmw.RequireRole("admin"), stepUpMFA).Post("/admin/oidc/clients", oidcHandler.CreateClient)
+			r.With(authmw.RequireRole("admin"), stepUpMFA).Put("/admin/oidc/clients/{id}", oidcHandler.UpdateClient)
+			r.With(authmw.RequireRole("admin"), stepUpMFA).Delete("/admin/oidc/clients/{id}", oidcHandler.DeleteClient)
+
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit/trends", auditHandler.Trends)
@@ -695,6 +713,7 @@ type config struct {
 	WebAuthnRPID             string
 	WebAuthnRPDisplayName    string
 	GeoIPDBPath              string
+	OIDCIssuerURL            string
 }
 
 func loadConfig() (config, error) {
@@ -778,6 +797,7 @@ func loadConfig() (config, error) {
 		WebAuthnRPID:             getEnv("WEBAUTHN_RP_ID", "localhost"),
 		WebAuthnRPDisplayName:    getEnv("WEBAUTHN_RP_DISPLAY_NAME", "ZeroTrust"),
 		GeoIPDBPath:              getEnv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb"),
+		OIDCIssuerURL:            getEnv("OIDC_ISSUER_URL", "http://localhost:8080"),
 	}, nil
 }
 

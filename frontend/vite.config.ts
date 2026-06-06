@@ -22,6 +22,9 @@ export default defineConfig({
       "/api": { target: backendUrl, changeOrigin: true },
       "/.well-known": { target: backendUrl, changeOrigin: true },
       "/health": { target: backendUrl, changeOrigin: true },
+      "/oauth2/authorize": { target: backendUrl, changeOrigin: true },
+      "/oauth2/token": { target: backendUrl, changeOrigin: true },
+      "/oauth2/userinfo": { target: backendUrl, changeOrigin: true },
     },
   },
   build: {

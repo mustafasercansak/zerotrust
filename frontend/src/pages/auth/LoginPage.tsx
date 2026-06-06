@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
@@ -22,6 +22,16 @@ type Stage = "credentials" | "mfa";
 export default function LoginPage() {
   const { t } = useTranslation("auth");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTo = searchParams.get("redirect_to") || "/dashboard";
+
+  function completeLogin() {
+    if (redirectTo.startsWith("/oauth2/") || redirectTo.startsWith("http")) {
+      window.location.href = redirectTo;
+    } else {
+      navigate(redirectTo);
+    }
+  }
 
   const [stage, setStage] = useState<Stage>("credentials");
   const [email, setEmail] = useState("");
@@ -64,7 +74,7 @@ export default function LoginPage() {
         return;
       }
       scheduleRefresh(() => navigate("/auth/login"));
-      navigate("/dashboard");
+      completeLogin();
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         if (err.message === "account_locked" && err.retryAfter) {
@@ -97,7 +107,7 @@ export default function LoginPage() {
       const assertion = await performAssertion(options);
       await api.webauthnPasswordlessFinish(options.ceremony_id, assertion);
       scheduleRefresh(() => navigate("/auth/login"));
-      navigate("/dashboard");
+      completeLogin();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);
@@ -121,7 +131,7 @@ export default function LoginPage() {
     try {
       await api.mfaChallenge(mfaToken, totpCode);
       scheduleRefresh(() => navigate("/auth/login"));
-      navigate("/dashboard");
+      completeLogin();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);
@@ -142,7 +152,7 @@ export default function LoginPage() {
       const assertion = await performAssertion(options);
       await api.webauthnLoginFinish(mfaToken, assertion);
       scheduleRefresh(() => navigate("/auth/login"));
-      navigate("/dashboard");
+      completeLogin();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "rate_limit_exceeded" && err.retryAfter) {
         setRetryAfter(err.retryAfter);

@@ -86,11 +86,11 @@ describe("App main component", () => {
   });
 
   it("registers and resolves all lazy routes", async () => {
-    expect(lazyLoaders).toHaveLength(12);
+    expect(lazyLoaders).toHaveLength(14);
 
     const modules = await Promise.all(lazyLoaders.map((load) => load()));
 
-    expect(modules).toHaveLength(12);
+    expect(modules).toHaveLength(14);
     for (const mod of modules) {
       expect(mod).toHaveProperty("default");
     }

@@ -79,7 +79,8 @@
     "security": "Güvenlik Paneli",
     "audit": "Denetim Günlüğü",
     "serviceAccounts": "Servis Hesapları",
-    "settings": "Ayarlar"
+    "settings": "Ayarlar",
+    "oidcClients": "OIDC İstemcileri"
   },
   "dashboard": {
     "title": "Kontrol Paneli",
@@ -278,6 +279,7 @@
     "tabProfile": "Profil Ayarları",
     "tabSecurity": "Güvenlik & Oturumlar",
     "tabSystem": "Sistem Ayarları",
+    "tabOidc": "OIDC İstemcileri",
     "maxSessions": "Maksimum Eş Zamanlı Oturum",
     "maxSessionsInput": "Limit",
     "maxSessionsDesc": "Kullanıcı başına izin verilen maksimum aktif oturum sayısı (1–20). Sınır aşıldığında en eski oturumlar sonlandırılır.",
@@ -302,6 +304,30 @@
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin.",
       "invalid_value": "Geçersiz değer.",
       "unknown_setting": "Bilinmeyen ayar anahtarı."
+    },
+    "oidc": {
+      "title": "OIDC Kimlik Sağlayıcı Yapılandırması",
+      "create": "OIDC İstemcisi Kaydet",
+      "createTitle": "Yeni OIDC İstemcisi",
+      "name": "Uygulama Adı",
+      "clientId": "Client ID",
+      "redirectUris": "Yetkilendirilmiş Yönlendirme Adresleri (virgülle ayrılmış)",
+      "allowedScopes": "İzin Verilen Kapsamlar (boşlukla ayrılmış)",
+      "secretTitle": "İstemci bilgilerini kopyalayın",
+      "secretWarning": "Bu client secret'ı güvenli bir yere kaydedin. Bir daha gösterilmeyecektir.",
+      "clientSecret": "Client Secret",
+      "done": "Kapat",
+      "noClients": "Henüz kayıtlı OIDC istemcisi yok.",
+      "deleteConfirm": "\"{{name}}\" istemcisini silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+      "editTitle": "OIDC İstemcisini Düzenle",
+      "redirectUrisHeader": "Yönlendirme Adresleri",
+      "scopes": "Kapsamlar",
+      "actions": "İşlemler",
+      "copied": "Panoya kopyalandı",
+      "errors": {
+        "client_id_taken": "Bu Client ID zaten kullanımda.",
+        "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
+      }
     }
   },
   "serviceAccounts": {

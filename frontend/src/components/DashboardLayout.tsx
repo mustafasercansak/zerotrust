@@ -86,6 +86,7 @@ export default function DashboardLayout() {
           { to: "/dashboard/security", label: t("security") },
           { to: "/dashboard/audit", label: t("audit") },
           { to: "/dashboard/service-accounts", label: t("serviceAccounts") },
+          { to: "/dashboard/oidc-clients", label: t("oidcClients") },
         ]
       : []),
   ];
