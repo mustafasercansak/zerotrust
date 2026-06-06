@@ -161,8 +161,10 @@
     .showcase-img-wrapper img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
       display: block;
+      padding: 1.5rem;
+      filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.5));
       transition: transform 0.5s ease;
     }
 
@@ -365,6 +367,76 @@
               <span class="tech-tag">Step-Up MFA</span>
               <span class="tech-tag">Recovery Codes</span>
               <span class="tech-tag">TOTP Verification</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Showcase 4 -->
+        <div class="showcase-card">
+          <div class="showcase-img-wrapper">
+            <img src="images/session_management.png" alt="Global System Security Settings">
+          </div>
+          <div class="showcase-content">
+            <h3>Global System Security Settings</h3>
+            <p>Administrator-level dashboard to configure critical security policies dynamically. Exposes control inputs (secured via Step-Up MFA verification) for the following platform policies:</p>
+            
+            <div class="settings-grid" style="display: grid; gap: 0.75rem; margin: 1.5rem 0;">
+              <!-- Item 1 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Max Concurrent Sessions</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">max_sessions_per_user</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Cap on active sessions allowed per account (1–20, default: 5). Evicts oldest sessions first.</div>
+              </div>
+              <!-- Item 2 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Password Complexity Level</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">password_complexity</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Enforce <strong>Low</strong> (min 6 chars), <strong>Medium</strong> (min 8, letter/digit), or <strong>Strong</strong> (min 8, mixed case/digit/symbol) policies.</div>
+              </div>
+              <!-- Item 3 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Max Login Attempts</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">max_login_attempts</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Lockout threshold (1–20, default: 5). Failures trigger progressive 1/5/30-minute lockouts.</div>
+              </div>
+              <!-- Item 4 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Global Two-Factor Auth (2FA)</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">global_mfa_required</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Enforce MFA setup and challenge verification globally for all active logins.</div>
+              </div>
+              <!-- Item 5 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Session Idle Timeouts</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">session_idle_timeout_seconds</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Inactivity windows. User range 60–3600s (default: 300s); Admin range 60–1800s (default: 180s).</div>
+              </div>
+              <!-- Item 6 -->
+              <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 0.75rem 1rem; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                  <strong style="color: #ffffff; font-size: 0.95rem;">Absolute Session Timeout</strong>
+                  <span class="tech-tag" style="border-color: rgba(6, 182, 212, 0.3); color: var(--accent-cyan); font-size: 0.75rem; padding: 0.1rem 0.5rem;">session_absolute_timeout_seconds</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Hard cap on overall session duration. Range 1800–172800s (default: 28800s / 8 hours).</div>
+              </div>
+            </div>
+
+            <div class="tech-list">
+              <span class="tech-tag">Dynamic Policies</span>
+              <span class="tech-tag">MFA Step-Up Gate</span>
+              <span class="tech-tag">Session Timeouts</span>
+              <span class="tech-tag">Lockout Thresholds</span>
+              <span class="tech-tag">Complexity Rules</span>
             </div>
           </div>
         </div>

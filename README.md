@@ -241,14 +241,18 @@ Authentication is built on secure, token-based session cookies:
 - **Refresh Token**: A cryptographically random opaque string stored as a SHA-256 hash in PostgreSQL. It is exchanged periodically via `/api/v1/auth/refresh` to rotate both access and refresh tokens.
 - **CSRF Protection**: Critical mutation endpoints enforce the double-submit cookie pattern. The backend issues a `csrf_token` cookie, which the frontend must send back in the `X-CSRF-Token` header.
 
-### 2. Runtime Session Policy (System Settings)
-Session limits are fetched and cached dynamically from the `system_settings` table. 
+### 2. Runtime Session Policy & System Settings
+Security policies and session limits are fetched and cached dynamically from the `system_settings` table.
 
-| Setting Key | Default | Description |
-|---|---:|---|
-| `session_idle_timeout_seconds` | `300` | Inactivity window (5 minutes) for regular users. Refreshing is blocked if the session has been idle longer than this window. |
-| `session_idle_timeout_seconds_admin` | `180` | Stricter inactivity window (3 minutes) for administrators. |
-| `session_absolute_timeout_seconds` | `28800` | Hard cap on session duration (8 hours). Once reached, token rotation fails and the user is forced to re-authenticate regardless of active usage. |
+| Setting Key | Default | Validation / Values | Description |
+|---|---:|---|---|
+| `max_sessions_per_user` | `5` | `1` to `20` | Cap on the number of concurrent active sessions allowed per user account. |
+| `password_complexity` | `low` | `low` / `medium` / `strong` | Rules for new user passwords (low: min 6 chars; medium: min 8 + letter/digit; strong: min 8 + mixed case/digit/symbol). |
+| `max_login_attempts` | `5` | `1` to `20` | Limit of consecutive failed attempts before triggering progressive temporary lockout. |
+| `global_mfa_required` | `false` | `true` / `false` | Force all accounts to complete TOTP setup and verification upon sign-in. |
+| `session_idle_timeout_seconds` | `300` | `60` to `3600` (seconds) | Inactivity timeout window (default 5 minutes) for regular users. |
+| `session_idle_timeout_seconds_admin` | `180` | `60` to `1800` (seconds) | Stricter inactivity timeout window (default 3 minutes) for administrators. |
+| `session_absolute_timeout_seconds` | `28800` | `1800` to `172800` (seconds) | Hard cap on session lifetime (default 8 hours), forcing re-authentication once reached. |
 
 - Access token TTL is strictly locked to 1 minute.
 - Idle timeouts prevent inactive devices from maintaining prolonged sessions.
