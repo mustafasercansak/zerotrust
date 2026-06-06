@@ -188,6 +188,7 @@ func TestBeginRegistration_RequestsDiscoverableCredential(t *testing.T) {
 			AuthenticatorSelection struct {
 				ResidentKey        string `json:"residentKey"`
 				RequireResidentKey *bool  `json:"requireResidentKey"`
+				UserVerification   string `json:"userVerification"`
 			} `json:"authenticatorSelection"`
 		} `json:"publicKey"`
 	}
@@ -201,6 +202,9 @@ func TestBeginRegistration_RequestsDiscoverableCredential(t *testing.T) {
 	}
 	if as.RequireResidentKey == nil || !*as.RequireResidentKey {
 		t.Fatalf("expected requireResidentKey=true, got %v", as.RequireResidentKey)
+	}
+	if as.UserVerification != "required" {
+		t.Fatalf("expected userVerification=required at enrollment, got %q", as.UserVerification)
 	}
 }
 

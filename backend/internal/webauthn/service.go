@@ -140,10 +140,16 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, name, displayNa
 	// Require a client-side discoverable (resident) credential so the passkey can
 	// later be used for passwordless/usernameless login, where the authenticator
 	// must surface the credential by userHandle with no allowCredentials list.
+	// Require user verification at enrollment too, so adding a passkey confirms
+	// the user (biometric/PIN) and matches the verification demanded at login.
 	creation, session, err := s.wa.BeginRegistration(
 		user,
 		gowebauthn.WithExclusions(exclusions),
-		gowebauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
+		gowebauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
+			ResidentKey:        protocol.ResidentKeyRequirementRequired,
+			RequireResidentKey: protocol.ResidentKeyRequired(),
+			UserVerification:   protocol.VerificationRequired,
+		}),
 	)
 	if err != nil {
 		return nil, err
