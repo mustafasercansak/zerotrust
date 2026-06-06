@@ -156,6 +156,31 @@
       border-radius: 0.55rem;
     }
 
+    .language-switch {
+      display: inline-flex;
+      padding: 0.2rem;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .language-button {
+      padding: 0.3rem 0.48rem;
+      border: 0;
+      border-radius: 0.35rem;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+
+    .language-button[aria-pressed="true"] {
+      background: rgba(99, 102, 241, 0.22);
+      color: var(--text);
+    }
+
     .hero {
       padding: clamp(5rem, 10vw, 8rem) 0 5rem;
       text-align: center;
@@ -671,7 +696,7 @@
         min-height: 4rem;
       }
 
-      .nav-links li:not(:last-child) {
+      .nav-links li:not(.nav-essential) {
         display: none;
       }
 
@@ -737,13 +762,19 @@
             LinkedIn
           </a>
         </li>
-        <li>
+        <li class="nav-essential">
           <a class="nav-github" href="https://github.com/mustafasercansak/zerotrust" target="_blank" rel="noopener noreferrer">
             GitHub
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M7 17 17 7M7 7h10v10"/>
             </svg>
           </a>
+        </li>
+        <li class="nav-essential">
+          <div class="language-switch" role="group" aria-label="Language">
+            <button class="language-button" type="button" data-language="en" aria-pressed="true">EN</button>
+            <button class="language-button" type="button" data-language="tr" aria-pressed="false">TR</button>
+          </div>
         </li>
       </ul>
     </div>
@@ -1023,6 +1054,146 @@
   </dialog>
 
   <script>
+    const translations = {
+      tr: {
+        title: "ZeroTrust | Güvenlik Mühendisliği Vitrini",
+        texts: {
+          "Skip to main content": "Ana içeriğe geç",
+          "Architecture": "Mimari",
+          "Passkeys": "Geçiş Anahtarları",
+          "Showcase": "Vitrin",
+          "Security": "Güvenlik",
+          "Security engineering showcase": "Güvenlik mühendisliği vitrini",
+          "Authentication designed around continuous verification.": "Sürekli doğrulama etrafında tasarlanmış kimlik doğrulama.",
+          "A full-stack Zero Trust platform combining passwordless WebAuthn, Ed25519 tokens, DPoP, rotating sessions, fine-grained authorization, and observable security controls.": "Parolasız WebAuthn, Ed25519 tokenları, DPoP, dönen oturumlar, ayrıntılı yetkilendirme ve gözlemlenebilir güvenlik kontrollerini birleştiren uçtan uca Zero Trust platformu.",
+          "Explore the interface": "Arayüzü incele",
+          "View source on GitHub": "Kaynak kodu GitHub'da görüntüle",
+          "Connect on LinkedIn": "LinkedIn'de bağlantı kur",
+          "System design": "Sistem tasarımı",
+          "Clear boundaries, short-lived trust": "Net sınırlar, kısa ömürlü güven",
+          "The browser never reads authentication tokens. The Go API verifies every request, PostgreSQL owns durable identity state, and Redis handles short-lived security decisions.": "Tarayıcı kimlik doğrulama tokenlarını hiçbir zaman okuyamaz. Go API her isteği doğrular, PostgreSQL kalıcı kimlik durumunu tutar, Redis ise kısa ömürlü güvenlik kararlarını yönetir.",
+          "React Client": "React İstemcisi",
+          "UI + WebAuthn": "Arayüz + WebAuthn",
+          "Policy enforcement": "Politika uygulama",
+          "Identity + sessions": "Kimlik + oturumlar",
+          "Ceremonies + limits": "Törenler + limitler",
+          "WebAuthn flow": "WebAuthn akışı",
+          "Passkeys without hidden magic": "Gizli sihir olmadan geçiş anahtarları",
+          "The authenticator keeps private key material. The application stores public credentials and validates origin-bound signatures through short-lived, single-use ceremonies.": "Özel anahtar materyali doğrulayıcıda kalır. Uygulama açık kimlik bilgilerini saklar ve kaynağa bağlı imzaları kısa ömürlü, tek kullanımlık törenlerle doğrular.",
+          "Begin ceremony": "Töreni başlat",
+          "The API creates challenge options and stores ceremony state in Redis with a five-minute TTL. Passwordless login uses an opaque ceremony ID because the user is not known yet.": "API doğrulama seçeneklerini oluşturur ve tören durumunu Redis'te beş dakikalık süreyle saklar. Kullanıcı henüz bilinmediği için parolasız giriş opak bir tören kimliği kullanır.",
+          "Verify locally": "Yerel olarak doğrula",
+          "The browser invokes the platform authenticator or security key. A fingerprint, device PIN, or hardware touch verifies the user without exposing biometric data to the application.": "Tarayıcı platform doğrulayıcısını veya güvenlik anahtarını çağırır. Parmak izi, cihaz PIN'i ya da donanım dokunuşu biyometrik veriyi uygulamaya açmadan kullanıcıyı doğrular.",
+          "Validate and issue": "Doğrula ve oturum oluştur",
+          "The backend validates RP ID, origin, challenge, signature, user handle, and counter. The ceremony is consumed once, then secure httpOnly session cookies are issued.": "Backend RP ID, kaynak, doğrulama isteği, imza, kullanıcı tanıtıcısı ve sayacı doğrular. Tören bir kez tüketilir ve güvenli httpOnly oturum çerezleri oluşturulur.",
+          "Product tour": "Ürün turu",
+          "Security controls people can actually use": "İnsanların gerçekten kullanabileceği güvenlik kontrolleri",
+          "Filter the interface by workflow. Select any screenshot to inspect it at full size.": "Arayüzü iş akışına göre filtreleyin. Tam boyutta incelemek için bir ekran görüntüsü seçin.",
+          "All": "Tümü",
+          "Authentication": "Kimlik Doğrulama",
+          "Account": "Hesap",
+          "Administration": "Yönetim",
+          "Observability": "Gözlemlenebilirlik",
+          "Account Dashboard": "Hesap Paneli",
+          "A focused overview of identity, roles, locale, and security status with responsive navigation.": "Kimlik, roller, dil ve güvenlik durumuna odaklanan duyarlı bir genel bakış.",
+          "Session Management": "Oturum Yönetimi",
+          "Users inspect active devices and revoke individual sessions or every other session immediately.": "Kullanıcılar aktif cihazları inceler, tekil oturumları veya diğer tüm oturumları anında iptal eder.",
+          "TOTP & Recovery Codes": "TOTP ve Kurtarma Kodları",
+          "Encrypted TOTP enrollment pairs a QR setup flow with eight single-use, bcrypt-hashed recovery codes.": "Şifreli TOTP kurulumu, QR akışını sekiz tek kullanımlık bcrypt özetli kurtarma koduyla birleştirir.",
+          "Passkey Management": "Geçiş Anahtarı Yönetimi",
+          "Users enroll discoverable credentials, review last-used details, and remove devices independently.": "Kullanıcılar keşfedilebilir kimlik bilgilerini kaydeder, son kullanım ayrıntılarını görür ve cihazları ayrı ayrı kaldırır.",
+          "Passwordless Login": "Parolasız Giriş",
+          "A discoverable credential identifies the account and completes sign-in without an email or password.": "Keşfedilebilir kimlik bilgisi hesabı tanımlar ve e-posta ya da parola olmadan girişi tamamlar.",
+          "Runtime Security Policies": "Çalışma Zamanı Güvenlik Politikaları",
+          "Administrators tune session limits, timeouts, lockout thresholds, password rules, and global MFA.": "Yöneticiler oturum limitlerini, zaman aşımlarını, kilitleme eşiklerini, parola kurallarını ve genel MFA'yı ayarlar.",
+          "User & Role Administration": "Kullanıcı ve Rol Yönetimi",
+          "Permission-gated account management covers role assignment, status changes, and session revocation.": "İzin kontrollü hesap yönetimi rol atama, durum değişikliği ve oturum iptalini kapsar.",
+          "Machine-to-Machine Access": "Makineden Makineye Erişim",
+          "Scoped service accounts use client credentials and DPoP-bound tokens for automated integrations.": "Kapsamlandırılmış servis hesapları otomatik entegrasyonlar için istemci kimlik bilgileri ve DPoP bağlı tokenlar kullanır.",
+          "Observable Audit Trail": "Gözlemlenebilir Denetim İzi",
+          "Critical authentication and administration events retain actor, resource, network, and result context.": "Kritik kimlik doğrulama ve yönetim olayları aktör, kaynak, ağ ve sonuç bağlamını saklar.",
+          "Defense in depth": "Derinlemesine savunma",
+          "Controls that reinforce each other": "Birbirini güçlendiren kontroller",
+          "The platform combines cryptographic proof, constrained sessions, explicit authorization, and security telemetry instead of relying on one perimeter check.": "Platform tek bir çevre kontrolüne güvenmek yerine kriptografik kanıtı, sınırlandırılmış oturumları, açık yetkilendirmeyi ve güvenlik telemetrisini birleştirir.",
+          "Ed25519 Session Tokens": "Ed25519 Oturum Tokenları",
+          "One-minute EdDSA access tokens stay in httpOnly cookies while opaque refresh tokens rotate through database-backed sessions.": "Bir dakikalık EdDSA erişim tokenları httpOnly çerezlerde kalırken opak yenileme tokenları veritabanı destekli oturumlarda döndürülür.",
+          "Refresh-Reuse Detection": "Yenileme Tokenı Tekrar Kullanım Tespiti",
+          "Replaying a rotated refresh token is treated as possible theft and revokes the account's active session family.": "Döndürülmüş yenileme tokenının tekrar kullanılması olası hırsızlık olarak değerlendirilir ve hesabın aktif oturum ailesini iptal eder.",
+          "Phishing-Resistant Passkeys": "Oltalamaya Dayanıklı Geçiş Anahtarları",
+          "Origin-bound WebAuthn credentials provide passkey MFA and discoverable passwordless login with required user verification.": "Kaynağa bağlı WebAuthn kimlik bilgileri, zorunlu kullanıcı doğrulamasıyla geçiş anahtarı MFA'sı ve keşfedilebilir parolasız giriş sağlar.",
+          "DPoP-Bound M2M Tokens": "DPoP Bağlı M2M Tokenları",
+          "Service-account tokens bind to a client public key and require signed proof of possession on protected requests.": "Servis hesabı tokenları istemci açık anahtarına bağlanır ve korunan isteklerde imzalı sahiplik kanıtı gerektirir.",
+          "Step-Up Authorization": "Ek Doğrulamalı Yetkilendirme",
+          "Sensitive administrator actions require a recent MFA marker in addition to the correct role and permission.": "Hassas yönetici işlemleri doğru rol ve izne ek olarak yakın zamanda oluşturulmuş bir MFA işareti gerektirir.",
+          "Runtime Session Policy": "Çalışma Zamanı Oturum Politikası",
+          "Idle limits, absolute limits, concurrent-session caps, and progressive lockouts are configurable without redeployment.": "Boşta kalma ve mutlak süre limitleri, eşzamanlı oturum sınırları ve kademeli kilitlemeler yeniden dağıtım olmadan yapılandırılabilir.",
+          "CSRF & Browser Hardening": "CSRF ve Tarayıcı Güçlendirmesi",
+          "Double-submit CSRF tokens, strict cookies, CSP, HSTS, and restrictive browser policies reduce common web attack paths.": "Çift gönderimli CSRF tokenları, katı çerezler, CSP, HSTS ve kısıtlayıcı tarayıcı politikaları yaygın web saldırı yollarını azaltır.",
+          "Fine-Grained RBAC": "Ayrıntılı RBAC",
+          "Roles map to explicit permissions for user, audit, settings, and service-account operations.": "Roller kullanıcı, denetim, ayar ve servis hesabı işlemleri için açık izinlerle eşleştirilir.",
+          "Security Observability": "Güvenlik Gözlemlenebilirliği",
+          "Synchronous audit events and Prometheus metrics make authentication behavior and administrative changes inspectable.": "Eşzamanlı denetim olayları ve Prometheus metrikleri kimlik doğrulama davranışını ve yönetim değişikliklerini incelenebilir kılar.",
+          "Read the implementation, not just the feature list.": "Yalnızca özellik listesini değil, uygulamayı da inceleyin.",
+          "The repository includes the Go API, React client, database migrations, Docker environments, and focused backend and frontend tests.": "Depo Go API'sini, React istemcisini, veritabanı geçişlerini, Docker ortamlarını ve odaklanmış backend/frontend testlerini içerir.",
+          "Open GitHub repository": "GitHub deposunu aç",
+          "Built by": "Geliştiren",
+          "Source on GitHub": "GitHub'da kaynak kod"
+        }
+      }
+    };
+
+    const originalTexts = new Map();
+    const languageButtons = document.querySelectorAll(".language-button");
+
+    function translatableTextNodes() {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent || ["SCRIPT", "STYLE"].includes(parent.tagName) || !node.textContent.trim()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      return nodes;
+    }
+
+    translatableTextNodes().forEach((node) => {
+      originalTexts.set(node, node.textContent);
+    });
+
+    function setLanguage(language) {
+      const dictionary = translations[language]?.texts ?? {};
+      document.documentElement.lang = language;
+      document.title = translations[language]?.title ?? "ZeroTrust | Security Engineering Showcase";
+
+      originalTexts.forEach((original, node) => {
+        const trimmed = original.trim();
+        const translated = dictionary[trimmed] ?? trimmed;
+        node.textContent = original.replace(trimmed, translated);
+      });
+
+      languageButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.language === language));
+      });
+
+      localStorage.setItem("showcase-language", language);
+      const url = new URL(window.location.href);
+      if (language === "tr") url.searchParams.set("lang", "tr");
+      else url.searchParams.delete("lang");
+      history.replaceState(null, "", url);
+    }
+
+    languageButtons.forEach((button) => {
+      button.addEventListener("click", () => setLanguage(button.dataset.language));
+    });
+
+    const requestedLanguage = new URLSearchParams(window.location.search).get("lang");
+    const savedLanguage = localStorage.getItem("showcase-language");
+    setLanguage(requestedLanguage === "tr" || (!requestedLanguage && savedLanguage === "tr") ? "tr" : "en");
+
     const filterButtons = document.querySelectorAll(".filter-button");
     const galleryCards = document.querySelectorAll(".gallery-card");
     const lightbox = document.querySelector("#lightbox");
