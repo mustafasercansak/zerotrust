@@ -37,6 +37,20 @@ vi.mock("@mui/x-data-grid", () => ({
   GridToolbar: () => React.createElement("div", null),
 }));
 
+vi.mock("@/components/SecretDisplayCard", () => ({
+  SecretDisplayCard: (props: any) => {
+    const onCopy = () => {
+      navigator.clipboard.writeText(props.value);
+      toast.success(props.successMessage || "Copied");
+    };
+    capturedButtonClicks.push(onCopy);
+    return React.createElement("div", null,
+      React.createElement("span", null, props.label),
+      React.createElement("span", null, props.value)
+    );
+  }
+}));
+
 const capturedSubmits: any[] = [];
 const capturedButtonClicks: any[] = [];
 const capturedTextFieldChanges: any[] = [];

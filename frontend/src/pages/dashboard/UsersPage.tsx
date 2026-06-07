@@ -448,12 +448,36 @@ export default function UsersPage() {
         <Box component="form" onSubmit={handleCreate}>
           <DialogTitle>{t("createUserTitle")}</DialogTitle>
           <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
-            <TextField label={t("email")} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} fullWidth />
+            <TextField
+              label={t("email")}
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(email.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField label={t("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
               <TextField label={t("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
             </Stack>
-            <TextField label={t("password")} type="password" required value={password} onChange={(e) => setPassword(e.target.value)} fullWidth />
+            <TextField
+              label={t("password")}
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(password.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
             <Stack direction="row" spacing={1}>
               {AVAILABLE_ROLES.map((role) => (
                 <Chip key={role} label={role}

@@ -14,6 +14,9 @@
     "authBootstrap": {
       "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
       "server": "Sunucu oturumunuzu şu anda doğrulayamadı. Lütfen tekrar deneyin."
+    },
+    "validation": {
+      "required": "Lütfen bu alanı doldurun."
     }
   },
   "auth": {
@@ -333,7 +336,9 @@
       "create": "OIDC İstemcisi Kaydet",
       "createTitle": "Yeni OIDC İstemcisi",
       "name": "Uygulama Adı",
+      "namePlaceholder": "Web Uygulamam",
       "clientId": "Client ID",
+      "clientIdPlaceholder": "istemci-id-123",
       "redirectUris": "Yetkilendirilmiş Yönlendirme Adresleri (virgülle ayrılmış)",
       "allowedScopes": "İzin Verilen Kapsamlar (boşlukla ayrılmış)",
       "secretTitle": "İstemci bilgilerini kopyalayın",

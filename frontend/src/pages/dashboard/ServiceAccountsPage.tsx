@@ -23,8 +23,6 @@ import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import Check from "@mui/icons-material/Check";
-import ContentCopy from "@mui/icons-material/ContentCopy";
 import DeleteOutlined from "@mui/icons-material/DeleteOutlined";
 import Edit from "@mui/icons-material/Edit";
 import Key from "@mui/icons-material/Key";
@@ -32,6 +30,7 @@ import PlayArrow from "@mui/icons-material/PlayArrow";
 import Science from "@mui/icons-material/Science";
 import VerifiedUser from "@mui/icons-material/VerifiedUser";
 import type { GridColDef } from "@mui/x-data-grid";
+import { SecretDisplayCard } from "@/components/SecretDisplayCard";
 
 const PERMISSION_GROUPS = [
   { key: "users", labelKey: "scopeGroups.users", scopes: ["users:read", "users:create", "users:update", "users:delete"] },
@@ -341,9 +340,7 @@ export default function ServiceAccountsPage() {
     }
   }
 
-  function handleCopy() {
-    navigator.clipboard.writeText(newSecret!.client_secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  }
+
 
   async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
     try {
@@ -418,7 +415,18 @@ export default function ServiceAccountsPage() {
         <Box component="form" onSubmit={handleCreate}>
           <DialogTitle>{t("createTitle")}</DialogTitle>
           <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
-            <TextField label={t("name")} value={name} onChange={(e) => setName(e.target.value)} required fullWidth />
+            <TextField
+              label={t("name")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(name.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
             <ScopeSelector selected={selectedScopes} onToggle={toggleScope} />
             <TextField label={`${t("expiresAt")} (${t("noExpiry")})`} type="date" value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
@@ -435,7 +443,18 @@ export default function ServiceAccountsPage() {
         <Box component="form" onSubmit={handleUpdate}>
           <DialogTitle>{t("editTitle")}</DialogTitle>
           <DialogContent sx={{ display: "grid", gap: 2, pt: 1 }}>
-            <TextField label={t("name")} value={editName} onChange={(e) => setEditName(e.target.value)} required fullWidth />
+            <TextField
+              label={t("name")}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(editName.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
             <TextField
               label={t("clientId")}
               value={editing?.client_id ?? ""}
@@ -594,62 +613,13 @@ export default function ServiceAccountsPage() {
           <DialogContentText color="warning.main" sx={{ fontWeight: 500, fontSize: "0.875rem", display: "flex", gap: 1, alignItems: "flex-start", bgcolor: "rgba(245, 158, 11, 0.04)", border: "1px solid rgba(245, 158, 11, 0.15)", p: 2, borderRadius: 2 }}>
             ⚠️ {t("secretWarning")}
           </DialogContentText>
-          <Box
-            sx={{
-              border: "1px solid rgba(99, 102, 241, 0.25)",
-              borderRadius: 2.5,
-              p: 3,
-              bgcolor: "rgba(99, 102, 241, 0.04)",
-              boxShadow: "0 8px 32px 0 rgba(99, 102, 241, 0.06)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #4f46e5, #818cf8)" }} />
-            
-            <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.5, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
-              <Key fontSize="inherit" color="primary" /> {t("secretLabel")}
-            </Typography>
-
-            <Box
-              sx={{
-                alignItems: "center",
-                bgcolor: "#030712",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: 1.5,
-                color: "success.main",
-                display: "flex",
-                fontFamily: "monospace",
-                gap: 1.5,
-                p: 2,
-                transition: "all 0.2s ease",
-                "&:hover": {
-                  borderColor: "rgba(99, 102, 241, 0.3)",
-                }
-              }}
-            >
-              <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere", fontFamily: "monospace", fontWeight: 700, fontSize: "0.95rem", letterSpacing: "0.02em" }}>
-                {newSecret?.client_secret}
-              </Typography>
-              <Tooltip title="Copy">
-                <IconButton
-                  size="small"
-                  onClick={handleCopy}
-                  sx={{
-                    bgcolor: "rgba(255, 255, 255, 0.03)",
-                    border: "1px solid rgba(255, 255, 255, 0.08)",
-                    transition: "all 0.2s",
-                    "&:hover": {
-                      bgcolor: "rgba(255, 255, 255, 0.08)",
-                      borderColor: "rgba(255, 255, 255, 0.2)",
-                    }
-                  }}
-                >
-                  {copied ? <Check color="success" fontSize="small" /> : <ContentCopy fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Box>
+          <SecretDisplayCard
+            label={t("secretLabel")}
+            value={newSecret?.client_secret || ""}
+            hasGradient
+            icon={<Key fontSize="inherit" color="primary" />}
+            successMessage={tCommon("saved", { defaultValue: "Saved" })}
+          />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3 }}>
           <Button variant="contained" fullWidth onClick={() => setNewSecret(null)} sx={{ py: 1.25, fontWeight: 700, borderRadius: 2 }}>{t("done")}</Button>

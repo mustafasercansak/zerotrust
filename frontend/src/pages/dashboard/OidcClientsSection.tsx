@@ -26,6 +26,9 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import LinkIcon from "@mui/icons-material/Link";
+import { SecretDisplayCard } from "@/components/SecretDisplayCard";
+
+
 
 export default function OidcClientsSection() {
   const { t } = useTranslation("settings");
@@ -415,10 +418,58 @@ export default function OidcClientsSection() {
         <Box component="form" onSubmit={handleCreate}>
           <DialogTitle>{t("oidc.createTitle")}</DialogTitle>
           <DialogContent sx={{ display: "grid", gap: 2.5, pt: 1 }}>
-            <TextField label={t("oidc.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Web Application" required fullWidth />
-            <TextField label={t("oidc.clientId")} value={clientIdInput} onChange={(e) => setClientIdInput(e.target.value)} placeholder="my-web-app" required fullWidth />
-            <TextField label={t("oidc.redirectUris")} value={redirectUris} onChange={(e) => setRedirectUris(e.target.value)} placeholder="http://localhost:3000/callback, https://myapp.com/callback" required fullWidth />
-            <TextField label={t("oidc.allowedScopes")} value={allowedScopes} onChange={(e) => setAllowedScopes(e.target.value)} placeholder="openid profile email" required fullWidth />
+            <TextField
+              label={t("oidc.name")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t("oidc.namePlaceholder")}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(name.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
+            <TextField
+              label={t("oidc.clientId")}
+              value={clientIdInput}
+              onChange={(e) => setClientIdInput(e.target.value)}
+              placeholder={t("oidc.clientIdPlaceholder")}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(clientIdInput.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
+            <TextField
+              label={t("oidc.redirectUris")}
+              value={redirectUris}
+              onChange={(e) => setRedirectUris(e.target.value)}
+              placeholder="http://localhost:3000/callback, https://myapp.com/callback"
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(redirectUris.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
+            <TextField
+              label={t("oidc.allowedScopes")}
+              value={allowedScopes}
+              onChange={(e) => setAllowedScopes(e.target.value)}
+              placeholder="openid profile email"
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(allowedScopes.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpenCreate(false)} color="inherit">{tCommon("cancel")}</Button>
@@ -431,26 +482,27 @@ export default function OidcClientsSection() {
 
       {/* Secret Display Dialog */}
       <Dialog open={!!createdClient} onClose={() => setCreatedClient(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t("oidc.secretTitle")}</DialogTitle>
-        <DialogContent sx={{ display: "grid", gap: 2.5, pt: 1 }}>
-          <Typography variant="body2" color="warning.main" sx={{ fontWeight: 600 }}>{t("oidc.secretWarning")}</Typography>
-          <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>{t("oidc.clientId")}</Typography>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Typography sx={{ fontFamily: "monospace", fontWeight: 700 }}>{createdClient?.client_id}</Typography>
-              <Button size="small" onClick={() => handleCopy(createdClient?.client_id || "")}><ContentCopyIcon fontSize="small" /></Button>
-            </Box>
-          </Box>
-          <Box sx={{ bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>{t("oidc.clientSecret")}</Typography>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Typography sx={{ fontFamily: "monospace", fontWeight: 700, overflowWrap: "anywhere" }}>{createdClient?.client_secret}</Typography>
-              <Button size="small" onClick={() => handleCopy(createdClient?.client_secret || "")}><ContentCopyIcon fontSize="small" /></Button>
-            </Box>
-          </Box>
+        <DialogTitle sx={{ fontWeight: 750 }}>{t("oidc.secretTitle")}</DialogTitle>
+        <DialogContent sx={{ display: "grid", gap: 3, pt: 1 }}>
+          <Typography variant="body2" color="warning.main" sx={{ fontWeight: 500, fontSize: "0.875rem", display: "flex", gap: 1, alignItems: "flex-start", bgcolor: "rgba(245, 158, 11, 0.04)", border: "1px solid rgba(245, 158, 11, 0.15)", p: 2, borderRadius: 2 }}>
+            ⚠️ {t("oidc.secretWarning")}
+          </Typography>
+
+          <SecretDisplayCard
+            label={t("oidc.clientId")}
+            value={createdClient?.client_id || ""}
+            successMessage={t("oidc.copied", { defaultValue: "Copied" })}
+          />
+
+          <SecretDisplayCard
+            label={t("oidc.clientSecret")}
+            value={createdClient?.client_secret || ""}
+            hasGradient
+            successMessage={t("oidc.copied", { defaultValue: "Copied" })}
+          />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreatedClient(null)} variant="contained">{t("oidc.done")}</Button>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={() => setCreatedClient(null)} variant="contained" fullWidth sx={{ py: 1.25, fontWeight: 700, borderRadius: 2 }}>{t("oidc.done")}</Button>
         </DialogActions>
       </Dialog>
 
@@ -459,9 +511,42 @@ export default function OidcClientsSection() {
         <Box component="form" onSubmit={handleUpdate}>
           <DialogTitle>{t("oidc.editTitle", { defaultValue: "Edit OIDC Client" })}</DialogTitle>
           <DialogContent sx={{ display: "grid", gap: 2.5, pt: 1 }}>
-            <TextField label={t("oidc.name")} value={editName} onChange={(e) => setEditName(e.target.value)} required fullWidth />
-            <TextField label={t("oidc.redirectUris")} value={editRedirectUris} onChange={(e) => setEditRedirectUris(e.target.value)} required fullWidth />
-            <TextField label={t("oidc.allowedScopes")} value={editAllowedScopes} onChange={(e) => setEditAllowedScopes(e.target.value)} required fullWidth />
+            <TextField
+              label={t("oidc.name")}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(editName.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
+            <TextField
+              label={t("oidc.redirectUris")}
+              value={editRedirectUris}
+              onChange={(e) => setEditRedirectUris(e.target.value)}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(editRedirectUris.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
+            <TextField
+              label={t("oidc.allowedScopes")}
+              value={editAllowedScopes}
+              onChange={(e) => setEditAllowedScopes(e.target.value)}
+              required
+              fullWidth
+              inputRef={(el: HTMLInputElement | null) => {
+                if (el) {
+                  el.setCustomValidity(editAllowedScopes.trim() ? "" : tCommon("validation.required"));
+                }
+              }}
+            />
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setEditingClient(null)} color="inherit">{tCommon("cancel")}</Button>

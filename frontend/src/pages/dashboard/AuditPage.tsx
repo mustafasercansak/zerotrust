@@ -4,6 +4,7 @@ import { api, type AuditEntry, type AuditTrendPoint, type PageParams } from "@/l
 import { formatDateTime } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
+import { getBezierPath, getBezierAreaPath } from "@/lib/chartUtils";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -95,11 +96,13 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
     return { x, ySuccess, yFailure, ...pt };
   });
 
-  const successPath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.ySuccess}`).join(" ");
-  const failurePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.yFailure}`).join(" ");
+  const successPts = points.map(p => ({ x: p.x, y: p.ySuccess }));
+  const successPath = getBezierPath(successPts);
+  const successArea = getBezierAreaPath(successPts, height - paddingY);
 
-  const successArea = `${successPath} L${points[points.length - 1].x},${height - paddingY} L${points[0].x},${height - paddingY} Z`;
-  const failureArea = `${failurePath} L${points[points.length - 1].x},${height - paddingY} L${points[0].x},${height - paddingY} Z`;
+  const failurePts = points.map(p => ({ x: p.x, y: p.yFailure }));
+  const failurePath = getBezierPath(failurePts);
+  const failureArea = getBezierAreaPath(failurePts, height - paddingY);
 
   return (
     <Paper variant="outlined" sx={{ p: 3, mb: 2, bgcolor: "background.paper" }}>
@@ -109,7 +112,7 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
         </Typography>
         <Box sx={{ display: "flex", gap: 2 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "#10b981" }} />
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "#22c55e" }} />
             <Typography variant="caption" color="text.secondary">{t("success")}</Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
@@ -123,33 +126,33 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
         <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ minWidth: 600, display: "block" }}>
           <defs>
             <linearGradient id="successGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+              <stop offset="0%" stopColor="#22c55e" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#22c55e" stopOpacity="0.0" />
             </linearGradient>
             <linearGradient id="failureGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.12" />
+              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
               <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
             </linearGradient>
           </defs>
 
           {/* Horizontal Grid lines */}
-          <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-          <line x1={paddingX} y1={paddingY + chartHeight / 2} x2={width - paddingX} y2={paddingY + chartHeight / 2} stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-          <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.08)" />
+          <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="currentColor" opacity="0.08" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={paddingY + chartHeight / 2} x2={width - paddingX} y2={paddingY + chartHeight / 2} stroke="currentColor" opacity="0.08" strokeDasharray="3 3" />
+          <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="currentColor" opacity="0.08" />
 
           {/* Area Gradients */}
-          <path d={successArea} fill="url(#successGrad)" />
-          <path d={failureArea} fill="url(#failureGrad)" />
+          {successArea && <path d={successArea} fill="url(#successGrad)" />}
+          {failureArea && <path d={failureArea} fill="url(#failureGrad)" />}
 
           {/* Line paths */}
-          <path d={successPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={failurePath} fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          {successPath && <path d={successPath} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {failurePath && <path d={failurePath} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
 
           {/* Dots and values for Success */}
           {points.map((p, i) => (
             <g key={`succ-${i}`}>
-              <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#10b981" stroke="#090d16" strokeWidth="1" />
-              <text x={p.x} y={p.ySuccess - 8} textAnchor="middle" fill="#10b981" fontSize="9" fontWeight="700">
+              <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#22c55e" stroke="#0b1120" strokeWidth="1.5" />
+              <text x={p.x} y={p.ySuccess - 8} textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="700">
                 {p.success > 0 ? p.success : ""}
               </text>
             </g>
@@ -158,7 +161,7 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
           {/* Dots and values for Failure */}
           {points.map((p, i) => (
             <g key={`fail-${i}`}>
-              <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#090d16" strokeWidth="1" />
+              <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#0b1120" strokeWidth="1.5" />
               <text x={p.x} y={p.yFailure - 8} textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="700">
                 {p.failure > 0 ? p.failure : ""}
               </text>
@@ -170,7 +173,7 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
             const m = p.date.split("-");
             const label = m.length >= 3 ? `${m[2]}/${m[1]}` : p.date;
             return (
-              <text key={`lbl-${i}`} x={p.x} y={height - 6} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="9">
+              <text key={`lbl-${i}`} x={p.x} y={height - 6} textAnchor="middle" fill="currentColor" opacity="0.35" fontSize="9">
                 {label}
               </text>
             );

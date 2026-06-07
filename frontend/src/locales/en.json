@@ -14,6 +14,9 @@
     "authBootstrap": {
       "network": "We could not reach the server. Check your connection and try again.",
       "server": "The server could not verify your session right now. Please try again."
+    },
+    "validation": {
+      "required": "Please fill out this field."
     }
   },
   "auth": {
@@ -333,7 +336,9 @@
       "create": "Register OIDC Client",
       "createTitle": "New OIDC Client",
       "name": "Application Name",
+      "namePlaceholder": "My Web Application",
       "clientId": "Client ID",
+      "clientIdPlaceholder": "client-id-123",
       "redirectUris": "Authorized Redirect URIs (comma-separated)",
       "allowedScopes": "Allowed Scopes (space-separated)",
       "secretTitle": "Copy client credentials",

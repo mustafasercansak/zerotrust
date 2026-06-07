@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, type SecurityDashboardCount, type SecurityDashboardData } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { humanizeSecurityLabel } from "./securityDashboardLabels";
+import { getBezierPath, getBezierAreaPath } from "@/lib/chartUtils";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -49,32 +50,13 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
     return { x, ySuccess, yFailure, bucket: point.bucket };
   });
 
-  const getBezierPath = (pts: { x: number; y: number }[]) => {
-    if (pts.length === 0) return "";
-    let d = `M ${pts[0].x} ${pts[0].y}`;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i];
-      const p1 = pts[i + 1];
-      const cp1x = p0.x + (p1.x - p0.x) / 3;
-      const cp1y = p0.y;
-      const cp2x = p0.x + 2 * (p1.x - p0.x) / 3;
-      const cp2y = p1.y;
-      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p1.x} ${p1.y}`;
-    }
-    return d;
-  };
-
   const successPts = points.map(p => ({ x: p.x, y: p.ySuccess }));
   const successLine = getBezierPath(successPts);
-  const successFill = successPts.length > 0
-    ? `${successLine} L ${successPts[successPts.length - 1].x} ${padding.top + chartHeight} L ${successPts[0].x} ${padding.top + chartHeight} Z`
-    : "";
+  const successFill = getBezierAreaPath(successPts, padding.top + chartHeight);
 
   const failurePts = points.map(p => ({ x: p.x, y: p.yFailure }));
   const failureLine = getBezierPath(failurePts);
-  const failureFill = failurePts.length > 0
-    ? `${failureLine} L ${failurePts[failurePts.length - 1].x} ${padding.top + chartHeight} L ${failurePts[0].x} ${padding.top + chartHeight} Z`
-    : "";
+  const failureFill = getBezierAreaPath(failurePts, padding.top + chartHeight);
 
   return (
     <Paper variant="outlined" sx={{ p: 2.5, gridColumn: { lg: "span 2" } }}>
