@@ -50,11 +50,57 @@ export default function DashboardLayout() {
 
   if (loading) {
     return (
-      <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "background.default" }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <CircularProgress size={18} />
-          <Typography color="text.secondary">{tCommon("loading")}</Typography>
+      <Box
+        sx={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          bgcolor: "background.default",
+          gap: 3,
+        }}
+      >
+        <Box
+          sx={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Box
+            sx={{
+              position: "absolute",
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              border: "2px solid #6366f1",
+              opacity: 0.5,
+              animation: "pulseRing 2s cubic-bezier(0.215, 0.610, 0.355, 1) infinite",
+              "@keyframes pulseRing": {
+                "0%": { transform: "scale(0.8)", opacity: 0.5 },
+                "80%, 100%": { transform: "scale(2.2)", opacity: 0 },
+              },
+            }}
+          />
+          <CircularProgress size={48} thickness={3.5} sx={{ color: "primary.main" }} />
         </Box>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{
+            fontWeight: 500,
+            letterSpacing: 0.5,
+            animation: "pulseText 1.5s ease-in-out infinite alternate",
+            "@keyframes pulseText": {
+              "0%": { opacity: 0.4 },
+              "100%": { opacity: 1 },
+            },
+          }}
+        >
+          {tCommon("loading")}
+        </Typography>
       </Box>
     );
   }
@@ -149,9 +195,40 @@ export default function DashboardLayout() {
                 component={Link}
                 to={to}
                 selected={pathname === to}
-                sx={{ borderRadius: 1, mb: 0.5 }}
+                sx={{
+                  borderRadius: 1.25,
+                  mb: 0.75,
+                  position: "relative",
+                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                  px: 2,
+                  py: 1.25,
+                  "&.Mui-selected": {
+                    bgcolor: "rgba(99, 102, 241, 0.12)",
+                    color: "primary.main",
+                    fontWeight: 600,
+                    "&::before": {
+                      content: '""',
+                      position: "absolute",
+                      left: 0,
+                      top: "20%",
+                      height: "60%",
+                      width: 3,
+                      borderRadius: 1,
+                      bgcolor: "primary.main",
+                    },
+                    "&:hover": {
+                      bgcolor: "rgba(99, 102, 241, 0.18)",
+                    },
+                  },
+                  "&:hover": {
+                    bgcolor: "rgba(255, 255, 255, 0.04)",
+                    transform: "translateX(4px)",
+                  },
+                }}
               >
-                <Typography variant="body2">{label}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: pathname === to ? 600 : 400 }}>
+                  {label}
+                </Typography>
               </ListItemButton>
             ))}
           </List>

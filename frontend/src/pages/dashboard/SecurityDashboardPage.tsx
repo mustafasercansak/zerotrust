@@ -33,7 +33,6 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   const chartHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(1, ...data.flatMap((point) => [point.success, point.failure]));
   const groupWidth = chartWidth / Math.max(data.length, 1);
-  const barWidth = Math.max(2, Math.min(14, groupWidth * 0.3));
   const labelEvery = data.length > 12 ? Math.ceil(data.length / 6) : 1;
 
   const formatBucket = (bucket: string) => {
@@ -42,6 +41,40 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
       ? { hour: "2-digit" }
       : { month: "short", day: "numeric" }).format(date);
   };
+
+  const points = data.map((point, index) => {
+    const x = padding.left + groupWidth * index + groupWidth / 2;
+    const ySuccess = padding.top + chartHeight - (point.success / maxValue) * chartHeight;
+    const yFailure = padding.top + chartHeight - (point.failure / maxValue) * chartHeight;
+    return { x, ySuccess, yFailure, bucket: point.bucket };
+  });
+
+  const getBezierPath = (pts: { x: number; y: number }[]) => {
+    if (pts.length === 0) return "";
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i];
+      const p1 = pts[i + 1];
+      const cp1x = p0.x + (p1.x - p0.x) / 3;
+      const cp1y = p0.y;
+      const cp2x = p0.x + 2 * (p1.x - p0.x) / 3;
+      const cp2y = p1.y;
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p1.x} ${p1.y}`;
+    }
+    return d;
+  };
+
+  const successPts = points.map(p => ({ x: p.x, y: p.ySuccess }));
+  const successLine = getBezierPath(successPts);
+  const successFill = successPts.length > 0
+    ? `${successLine} L ${successPts[successPts.length - 1].x} ${padding.top + chartHeight} L ${successPts[0].x} ${padding.top + chartHeight} Z`
+    : "";
+
+  const failurePts = points.map(p => ({ x: p.x, y: p.yFailure }));
+  const failureLine = getBezierPath(failurePts);
+  const failureFill = failurePts.length > 0
+    ? `${failureLine} L ${failurePts[failurePts.length - 1].x} ${padding.top + chartHeight} L ${failurePts[0].x} ${padding.top + chartHeight} Z`
+    : "";
 
   return (
     <Paper variant="outlined" sx={{ p: 2.5, gridColumn: { lg: "span 2" } }}>
@@ -61,26 +94,58 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
       </Box>
       <Box sx={{ overflowX: "auto" }}>
         <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ minWidth: 620, display: "block" }} role="img" aria-label={t("activityTitle")}>
+          <defs>
+            <linearGradient id="successGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22c55e" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#22c55e" stopOpacity="0.00" />
+            </linearGradient>
+            <linearGradient id="failureGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.00" />
+            </linearGradient>
+          </defs>
+
           {[0, 0.5, 1].map((ratio) => {
             const y = padding.top + chartHeight * ratio;
             return <line key={ratio} x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="currentColor" opacity="0.08" />;
           })}
-          {data.map((point, index) => {
-            const center = padding.left + groupWidth * index + groupWidth / 2;
-            const successHeight = (point.success / maxValue) * chartHeight;
-            const failureHeight = (point.failure / maxValue) * chartHeight;
+
+          {points.map((p, index) => {
+            if (index % labelEvery !== 0) return null;
             return (
-              <g key={point.bucket}>
-                <rect x={center - barWidth - 1} y={padding.top + chartHeight - successHeight} width={barWidth} height={successHeight} rx="2" fill="#22c55e" />
-                <rect x={center + 1} y={padding.top + chartHeight - failureHeight} width={barWidth} height={failureHeight} rx="2" fill="#f43f5e" />
-                {index % labelEvery === 0 && (
-                  <text x={center} y={height - 12} textAnchor="middle" fill="currentColor" opacity="0.55" fontSize="11">
-                    {formatBucket(point.bucket)}
-                  </text>
-                )}
-              </g>
+              <line
+                key={`grid-${p.bucket}`}
+                x1={p.x}
+                y1={padding.top}
+                x2={p.x}
+                y2={padding.top + chartHeight}
+                stroke="currentColor"
+                opacity="0.04"
+                strokeDasharray="4 4"
+              />
             );
           })}
+
+          {successFill && <path d={successFill} fill="url(#successGradient)" />}
+          {failureFill && <path d={failureFill} fill="url(#failureGradient)" />}
+
+          {successLine && <path d={successLine} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {failureLine && <path d={failureLine} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+
+          {points.map((p) => (
+            <g key={p.bucket}>
+              <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#22c55e" stroke="#0b1120" strokeWidth="1.5" />
+              <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#0b1120" strokeWidth="1.5" />
+            </g>
+          ))}
+
+          {points.map((p, index) => (
+            index % labelEvery === 0 ? (
+              <text key={`lbl-${p.bucket}`} x={p.x} y={height - 12} textAnchor="middle" fill="currentColor" opacity="0.55" fontSize="11">
+                {formatBucket(p.bucket)}
+              </text>
+            ) : null
+          ))}
         </svg>
       </Box>
     </Paper>
