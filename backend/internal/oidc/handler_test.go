@@ -632,7 +632,7 @@ func TestHandler_AuditLogging_Introspect(t *testing.T) {
 	// Active token — should log active=true
 	form := url.Values{}
 	form.Set("client_id", "audit-intro-client")
-	form.Set("client_secret", "client-secret-123")
+	form.Set("client_secret", "demo-secret")
 	form.Set("token", tokenPair.AccessToken)
 	req, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -650,7 +650,7 @@ func TestHandler_AuditLogging_Introspect(t *testing.T) {
 
 	form2 := url.Values{}
 	form2.Set("client_id", "audit-intro-client")
-	form2.Set("client_secret", "client-secret-123")
+	form2.Set("client_secret", "demo-secret")
 	form2.Set("token", "not.a.valid.token")
 	req2, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(form2.Encode()))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -930,7 +930,7 @@ func TestHandler_Introspect_Integration(t *testing.T) {
 	// Active token via form params
 	form := url.Values{}
 	form.Set("client_id", "intro-client")
-	form.Set("client_secret", "client-secret-123")
+	form.Set("client_secret", "demo-secret")
 	form.Set("token", tokenPair.AccessToken)
 	req, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1045,7 +1045,7 @@ func TestHandler_RefreshToken_Integration(t *testing.T) {
 	codeForm.Set("grant_type", "authorization_code")
 	codeForm.Set("code", code)
 	codeForm.Set("client_id", "refresh-client")
-	codeForm.Set("client_secret", "client-secret-123")
+	codeForm.Set("client_secret", "demo-secret")
 	codeForm.Set("redirect_uri", "http://localhost/cb")
 	codeReq, _ := http.NewRequest("POST", "/oauth2/token", strings.NewReader(codeForm.Encode()))
 	codeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1069,7 +1069,7 @@ func TestHandler_RefreshToken_Integration(t *testing.T) {
 	rtForm.Set("grant_type", "refresh_token")
 	rtForm.Set("refresh_token", firstResp.RefreshToken)
 	rtForm.Set("client_id", "refresh-client")
-	rtForm.Set("client_secret", "client-secret-123")
+	rtForm.Set("client_secret", "demo-secret")
 	rtReq, _ := http.NewRequest("POST", "/oauth2/token", strings.NewReader(rtForm.Encode()))
 	rtReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rtRR := httptest.NewRecorder()
@@ -1095,7 +1095,7 @@ func TestHandler_RefreshToken_Integration(t *testing.T) {
 	rtForm2.Set("grant_type", "refresh_token")
 	rtForm2.Set("refresh_token", firstResp.RefreshToken)
 	rtForm2.Set("client_id", "refresh-client")
-	rtForm2.Set("client_secret", "client-secret-123")
+	rtForm2.Set("client_secret", "demo-secret")
 	rtReq2, _ := http.NewRequest("POST", "/oauth2/token", strings.NewReader(rtForm2.Encode()))
 	rtReq2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rtRR2 := httptest.NewRecorder()
