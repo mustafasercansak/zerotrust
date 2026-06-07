@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { AuthPage } from "@/components/AuthPage";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 
 export default function ConsentPage() {
+  const { t } = useTranslation("auth");
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [clientName, setClientName] = useState<string | null>(null);
@@ -35,25 +37,37 @@ export default function ConsentPage() {
       .catch(() => { /* fall back to showing client_id */ });
   }, [clientID]);
 
+  async function submitConsent(approved: boolean) {
+    return api.submitConsent({
+      client_id: clientID,
+      redirect_uri: redirectURI,
+      scopes,
+      code_challenge: codeChallenge,
+      code_challenge_method: codeChallengeMethod,
+      nonce,
+      state,
+      approved,
+    });
+  }
+
   async function handleResponse(approved: boolean) {
     setLoading(true);
     try {
-      const resp = await api.submitConsent({
-        client_id: clientID,
-        redirect_uri: redirectURI,
-        scopes,
-        code_challenge: codeChallenge,
-        code_challenge_method: codeChallengeMethod,
-        nonce,
-        state,
-        approved,
+      const resp = await submitConsent(approved).catch(async (err: unknown) => {
+        if (err instanceof ApiError && err.message === "mfa_required" && err.status === 403) {
+          const code = window.prompt(t("consent.mfaPrompt"))?.trim() ?? "";
+          if (!code) throw err;
+          await api.mfaStepUp(code);
+          return submitConsent(approved);
+        }
+        throw err;
       });
       window.location.href = resp.redirect_url;
     } catch (err: unknown) {
       if (err instanceof ApiError) {
-        toast.error(`Error: ${err.message}`);
+        toast.error(t(`errors.${err.message}`, { defaultValue: err.message }));
       } else {
-        toast.error("Internal server error");
+        toast.error(t("consent.errorInternal"));
       }
     } finally {
       setLoading(false);
@@ -61,7 +75,7 @@ export default function ConsentPage() {
   }
 
   return (
-    <AuthPage title="Authorize Application" subtitle="An application is requesting access to your account.">
+    <AuthPage title={t("consent.title")} subtitle={t("consent.subtitle")}>
       <Box sx={{ display: "grid", gap: 3 }}>
         <Paper variant="outlined" sx={{ p: 2.5, bgcolor: "background.default", border: 1, borderColor: "divider" }}>
           <Typography variant="body1" sx={{ fontWeight: 700, mb: 0.5, color: "primary.main" }}>
@@ -73,14 +87,14 @@ export default function ConsentPage() {
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary">
-            is requesting permission to access your profile data and authenticate you via ZeroTrust.
+            {t("consent.requestingAccess")}
           </Typography>
         </Paper>
 
         {scopes.length > 0 && (
           <Box>
             <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
-              Requested Permissions:
+              {t("consent.permissionsTitle")}
             </Typography>
             <List dense disablePadding>
               {scopes.map((s) => (
@@ -91,13 +105,7 @@ export default function ConsentPage() {
                   <ListItemText
                     primary={
                       <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                        {s === "openid"
-                          ? "Verify your identity (OpenID)"
-                          : s === "profile"
-                          ? "Access your profile info (Name, Locale)"
-                          : s === "email"
-                          ? "View your email address"
-                          : s}
+                        {t(`consent.scopes.${s}`, { defaultValue: s })}
                       </Typography>
                     }
                   />
@@ -115,7 +123,7 @@ export default function ConsentPage() {
             onClick={() => handleResponse(true)}
             disabled={loading}
           >
-            Authorize
+            {t("consent.authorize")}
           </Button>
           <Button
             fullWidth
@@ -124,7 +132,7 @@ export default function ConsentPage() {
             onClick={() => handleResponse(false)}
             disabled={loading}
           >
-            Cancel
+            {t("consent.cancel")}
           </Button>
         </Box>
       </Box>

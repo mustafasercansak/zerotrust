@@ -73,7 +73,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | WebAuthn Passkeys | FIDO2 passkeys as a phishing-resistant second factor **and** passwordless (usernameless) login via discoverable credentials |
 | Password Reset | Opaque reset tokens, atomic consume + password update + session revocation |
 | Progressive Lockout | 1 / 5 / 30 min escalating lockout (Redis) |
-| Rate Limiting | Login 10/min · global 300/min (sliding window) |
+| Rate Limiting | Login 10/min · OIDC token/authorize/revoke/introspect/end_session 30/min · userinfo 100/min · global 300/min (sliding window, per IP) |
 | RBAC | Roles → role_permissions → permissions |
 | Service Accounts | OAuth2 `client_credentials` for M2M tokens |
 | Session Management | List and revoke individual sessions from the UI |
@@ -82,7 +82,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Admin Security Dashboard | Authentication trends, lockouts, anomalies, active sessions, login geography, and failed-login sources across 24-hour, 7-day, and 30-day ranges |
 | CSP / OWASP Headers | `frame-ancestors 'none'`, `object-src 'none'`, HSTS |
 | bcrypt | Cost factor 12 |
-| OIDC Provider | Standards-compliant OpenID Connect IdP — issue authorization codes, ID tokens, and UserInfo with `openid`/`profile`/`email` scopes; manage clients from the admin UI |
+| OIDC Provider | Standards-compliant OpenID Connect IdP — Authorization Code + PKCE (S256, RFC 7636), refresh token grant (RFC 6749 §6) with rotating opaque tokens, token revocation (RFC 7009), introspection (RFC 7662), `max_age` re-auth (OIDC Core §3.1.2.1), `prompt=none/login`, `offline_access` scope, MFA step-up on consent, admin client management with step-up MFA |
 | i18n | Turkish (default) / English |
 
 ## Current Scope
@@ -100,15 +100,15 @@ ZeroTrust currently includes:
 - WebAuthn passkeys (FIDO2): register/list/remove credentials, passkey second-factor login, and passwordless (usernameless) login with discoverable credentials
 - Password reset flow with SMTP or development log mailer
 - Audit log listing and an aggregated administrator security dashboard
-- OIDC Identity Provider — register clients, issue authorization codes & ID tokens, manage scopes from the dashboard
+- OIDC Identity Provider — Authorization Code + PKCE (S256, RFC 7636), refresh token grant with single-use rotating opaque tokens (RFC 6749 §6, `offline_access` scope), token revocation (RFC 7009), introspection (RFC 7662), `max_age` re-auth enforcement (OIDC Core §3.1.2.1), `prompt=none/login`, MFA step-up on consent, rate-limited endpoints, admin client management with step-up MFA
 - Turkish and English UI messages
 - Docker Compose development and production profiles
 - GitHub Actions CI for backend and frontend checks
 
 Planned/ongoing hardening:
 
-- Broader backend test coverage for MFA, password reset, session revocation, and service accounts
-- More end-to-end tests around browser auth flows
+- Broader unit test coverage for MFA, password reset, session revocation, and service account handlers
+- End-to-end browser auth flow tests
 - Operational security review before any real production deployment
 
 ## Quick Start
@@ -234,9 +234,13 @@ zerotrust/
 |--------|----------|-------------|
 | GET | `/.well-known/openid-configuration` | OpenID Connect discovery document |
 | GET | `/.well-known/jwks.json` | JSON Web Key Set (shared with auth) |
-| GET | `/oauth2/authorize` | Authorization endpoint — redirects to login then consent |
-| POST | `/oauth2/token` | Token endpoint — exchanges authorization code for access + ID tokens |
+| GET | `/oauth2/authorize` | Authorization endpoint — redirects to login then consent; supports `prompt`, `max_age`, `code_challenge` |
+| POST | `/oauth2/token` | Token endpoint — `authorization_code` and `refresh_token` grants |
+| POST | `/oauth2/consent` | Consent submission — approves or denies a pending authorization request |
+| POST | `/oauth2/revoke` | Token revocation (RFC 7009) — revokes access or refresh tokens |
 | GET | `/oauth2/userinfo` | Returns OIDC claims for a Bearer access token |
+| POST | `/oauth2/introspect` | Token introspection (RFC 7662) — returns active status and claims |
+| GET, POST | `/oauth2/end_session` | RP-Initiated Logout — revokes session, clears cookies, redirects to `post_logout_redirect_uri` |
 | GET | `/oauth2/clients/{client_id}` | Public client metadata (name + allowed scopes) — used by the consent page |
 
 ### Protected (any authenticated user)
@@ -286,6 +290,7 @@ zerotrust/
 | POST | `/api/v1/admin/oidc/clients` | `admin` role + step-up MFA |
 | PUT | `/api/v1/admin/oidc/clients/{id}` | `admin` role + step-up MFA |
 | DELETE | `/api/v1/admin/oidc/clients/{id}` | `admin` role + step-up MFA |
+| POST | `/api/v1/admin/oidc/clients/{id}/rotate` | Rotate client secret — `admin` role + step-up MFA |
 
 ## Environment Variables
 
@@ -389,21 +394,38 @@ Designed for secure machine-to-machine integrations:
 ### 7. OIDC Provider
 ZeroTrust acts as a standards-compliant OpenID Connect Identity Provider. External applications can delegate authentication to ZeroTrust and receive verifiable ID tokens in return.
 
-**Flow:**
-1. The client redirects the user's browser to `GET /oauth2/authorize` with `response_type=code`, `client_id`, `redirect_uri`, `scope`, and a PKCE `code_challenge` (S256).
-2. If the user is not logged in, they are sent through the normal ZeroTrust login flow and redirected back.
-3. After login, the user lands on the consent screen (`/oauth2/consent` in the frontend) showing the requesting application's registered display name and the requested scopes.
-4. On approval, the backend issues a short-lived authorization code (5-minute TTL, stored in Redis) and redirects the browser to the client's `redirect_uri` with `?code=…&state=…`.
-5. The client backend exchanges the code at `POST /oauth2/token` (with `grant_type=authorization_code` and the PKCE `code_verifier`), receiving an access token and, when `openid` scope was requested, a signed Ed25519 ID token.
-6. The client can fetch the authenticated user's profile at `GET /oauth2/userinfo` using the access token as a Bearer credential.
+**Authorization Code + PKCE flow:**
+1. The client redirects the user's browser to `GET /oauth2/authorize` with `response_type=code`, `client_id`, `redirect_uri`, `scope`, and a PKCE `code_challenge` (S256). Optional: `prompt` (`none` / `login` / `consent`), `max_age`, `nonce`, `state`.
+2. If the user is not logged in (or `prompt=login` is set), they are sent through the normal ZeroTrust login flow and redirected back. `prompt=none` skips the UI entirely and returns `login_required` to the client if the session is absent or expired.
+3. After login, the user lands on the consent screen showing the requesting application's registered display name and the requested scopes. If the user has MFA enabled, a recent step-up proof is required before approval can be submitted.
+4. On approval, the backend issues a short-lived authorization code (5-minute TTL, single-use, stored in Redis) and redirects the browser to the client's `redirect_uri` with `?code=…&state=…`.
+5. The client exchanges the code at `POST /oauth2/token` with `grant_type=authorization_code` and the PKCE `code_verifier`, receiving an access token, an Ed25519-signed ID token (when `openid` scope was requested), and — when `offline_access` scope was requested — a rotating opaque refresh token.
+
+**Refresh token grant (`offline_access` scope):**
+- Include `offline_access` in the authorization request scopes to receive a refresh token alongside the initial access token.
+- Exchange the refresh token at `POST /oauth2/token` with `grant_type=refresh_token` to receive a new access token and a **rotated** refresh token. The original token is atomically consumed and cannot be reused.
+- Scope may be downscoped per exchange; requesting scopes outside the original grant are silently dropped.
+
+**UserInfo, introspection, and revocation:**
+- `GET /oauth2/userinfo` — returns live profile claims (sub, email, name, locale, roles) for a Bearer access token.
+- `POST /oauth2/introspect` (RFC 7662) — returns `{"active":true,…}` with full claims for valid tokens, or `{"active":false}` for invalid or revoked ones. Requires client authentication.
+- `POST /oauth2/revoke` (RFC 7009) — immediately invalidates an access token (JTI written to Redis blocklist) or a refresh token (deleted from the store). Always returns 200 regardless of token validity.
+
+**RP-Initiated Logout (`/oauth2/end_session`):**
+- The client redirects to `GET /oauth2/end_session` (or `POST`) with an optional `id_token_hint`, `post_logout_redirect_uri`, and `state`.
+- The server revokes the user's current session tokens, clears all four session cookies (`access_token`, `refresh_token`, `csrf_token`, `at_exp`), and emits an audit event.
+- `post_logout_redirect_uri` is only honoured when accompanied by a valid `id_token_hint` whose `aud` identifies a registered client that has the URI in its `redirect_uris` list. All other cases fall back to the application login page, preventing open-redirect abuse.
+- Expired ID tokens are accepted as hints (per OIDC Session Management §5 — the hint is a client identifier, not an active credential).
 
 **Security properties:**
-- Only S256 PKCE is accepted (plain is rejected).
-- Authorization codes are single-use (atomically consumed via Redis `GETDEL`).
-- Access and ID tokens are signed with the same EdDSA key as internal tokens and can be verified using `/.well-known/jwks.json`.
-- The `userinfo` endpoint rejects tokens whose JTI appears in the Redis revocation blocklist.
-- OIDC client management (create / update / delete) requires the `admin` role and a step-up MFA challenge.
-- Creating a client returns the plaintext secret exactly once; subsequent reads only show its bcrypt hash.
+- Only S256 PKCE is accepted; plain is rejected. `code_verifier` must be 43–128 unreserved ASCII characters (RFC 7636 §4.1).
+- Authorization codes and refresh tokens are single-use (atomically consumed via Redis `GETDEL`).
+- `max_age` (OIDC Core §3.1.2.1) — if the session's `iat` is older than `max_age` seconds, re-authentication is forced. `max_age=0` always forces re-auth.
+- Access and ID tokens are signed with the same EdDSA key as internal tokens and verifiable via `/.well-known/jwks.json`.
+- All OIDC endpoints are rate-limited at 30 req/min per IP (token/authorize/revoke/introspect/end_session) and 100 req/min for userinfo.
+- All consent decisions, token issuances, exchanges, rotations, introspections, revocations, and logouts are written to the immutable audit log.
+- OIDC client management (create / update / delete / rotate secret) requires the `admin` role and a step-up MFA challenge.
+- Creating or rotating a client secret returns the plaintext value exactly once; subsequent reads only expose the bcrypt hash.
 
 ### 8. DPoP (Demonstrating Proof-of-Possession, RFC 9449)
 For machine-to-machine integrations, the backend enforces DPoP:

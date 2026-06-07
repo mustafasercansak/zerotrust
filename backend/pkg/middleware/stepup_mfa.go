@@ -122,6 +122,15 @@ func RequireRecentMFA(mfa auth.MFAChecker, rdb *redis.Client, window time.Durati
 	}
 }
 
+// HasRecentMFACookie reports whether this refresh-token session has an active
+// step-up proof in Redis. Returns false on any error or missing data.
+func HasRecentMFACookie(ctx context.Context, rdb *redis.Client, userID, refreshToken string) bool {
+	if rdb == nil || userID == "" || refreshToken == "" {
+		return false
+	}
+	return hasRecentMFA(ctx, rdb, userID, hashOpaqueToken(refreshToken))
+}
+
 // MarkRecentMFACookie marks the current refresh-token session as recently MFA-verified.
 func MarkRecentMFACookie(ctx context.Context, rdb *redis.Client, userID, refreshToken string, window time.Duration) error {
 	if rdb == nil {

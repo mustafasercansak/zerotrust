@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, OidcClient } from "@/lib/api";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import AutorenewIcon from "@mui/icons-material/Autorenew";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import EditIcon from "@mui/icons-material/Edit";
@@ -49,9 +50,7 @@ export default function OidcClientsSection() {
   // Secret Display State
   const [createdClient, setCreatedClient] = useState<OidcClient | null>(null);
 
-  useEffect(() => { loadClients(); }, []);
-
-  async function loadClients() {
+  const loadClients = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.admin.listOidcClients();
@@ -61,7 +60,9 @@ export default function OidcClientsSection() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [t]);
+
+  useEffect(() => { loadClients(); }, [loadClients]);
 
   async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
     try {
@@ -133,6 +134,17 @@ export default function OidcClientsSection() {
       toast.error(t(`oidc.errors.${code}`, { defaultValue: t("oidc.errors.internal_error") }));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRotate(client: OidcClient) {
+    if (!window.confirm(t("oidc.rotateConfirm", { name: client.name }))) return;
+    try {
+      const { client_secret } = await runWithStepUp(() => api.admin.rotateOidcClientSecret(client.id));
+      setCreatedClient({ ...client, client_secret });
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      toast.error(t(`oidc.errors.${code}`, { defaultValue: t("oidc.errors.internal_error") }));
     }
   }
 
@@ -244,13 +256,27 @@ export default function OidcClientsSection() {
     {
       field: "actions",
       headerName: t("oidc.actions", { defaultValue: "Actions" }),
-      width: 110,
+      width: 148,
       sortable: false,
       filterable: false,
       align: "right",
       headerAlign: "right",
       renderCell: (params: GridRenderCellParams<OidcClient>) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, height: "100%", justifyContent: "flex-end" }}>
+          <Tooltip title={t("oidc.rotate", { defaultValue: "Rotate Secret" })}>
+            <IconButton
+              size="small"
+              onClick={() => handleRotate(params.row)}
+              sx={{
+                border: "1px solid",
+                borderColor: "rgba(245,158,11,0.3)",
+                color: "warning.main",
+                "&:hover": { borderColor: "warning.main", bgcolor: "rgba(245,158,11,0.08)" },
+              }}
+            >
+              <AutorenewIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={t("oidc.editAction", { defaultValue: "Edit" })}>
             <IconButton
               size="small"

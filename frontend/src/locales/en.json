@@ -69,7 +69,23 @@
     },
     "usePasskey": "Use a passkey",
     "signInWithPasskey": "Sign in with a passkey",
-    "or": "or"
+    "or": "or",
+    "consent": {
+      "title": "Authorize Application",
+      "subtitle": "An application is requesting access to your account.",
+      "requestingAccess": "is requesting permission to access your profile data and authenticate you via ZeroTrust.",
+      "permissionsTitle": "Requested Permissions:",
+      "authorize": "Authorize",
+      "cancel": "Cancel",
+      "mfaPrompt": "MFA verification required. Enter your 6-digit code:",
+      "errorInternal": "Internal server error",
+      "scopes": {
+        "openid": "Verify your identity (OpenID)",
+        "profile": "Access your profile info (name, locale)",
+        "email": "View your email address",
+        "offline_access": "Stay signed in (offline access)"
+      }
+    }
   },
   "nav": {
     "dashboard": "Home",
@@ -215,7 +231,14 @@
     "anomalyTypes": {
       "new_device": "New device",
       "impossible_travel": "Impossible travel",
-      "unknown": "Unknown anomaly"
+      "unknown": "Unknown anomaly",
+      "oidc.consent_approved": "OAuth2 consent approved",
+      "oidc.consent_denied": "OAuth2 consent denied",
+      "oidc.token_issued": "OAuth2 token issued",
+      "oidc.token_exchange_failed": "OAuth2 token exchange failed",
+      "oidc.token_revoked": "OAuth2 token revoked",
+      "oidc.token_introspected": "OAuth2 token introspected",
+      "oidc.client_secret_rotated": "OIDC client secret rotated"
     },
     "locations": {
       "unknown": "Unknown location"

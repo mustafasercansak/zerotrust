@@ -62,24 +62,53 @@ func TestVerifyPKCE(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:      "plain rejected",
-			challenge: "my_verifier",
-			method:    "plain",
-			verifier:  "my_verifier",
-			wantErr:   true,
-		},
-		{
-			name:      "S256 match",
+			name:      "S256 match — RFC 7636 example",
 			challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 			method:    "S256",
 			verifier:  "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 			wantErr:   false,
 		},
 		{
-			name:      "S256 mismatch",
+			// 43 chars, valid charset, but wrong hash
+			name:      "S256 mismatch — correct length wrong hash",
 			challenge: "E9Melhoa2OwvFrGMTJguCHaoeK1t8URWbuGJSstw-cM",
 			method:    "S256",
-			verifier:  "wrong_verifier",
+			verifier:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			wantErr:   true,
+		},
+		{
+			name:      "plain rejected — unsupported method",
+			challenge: "my_verifier",
+			method:    "plain",
+			verifier:  "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+			wantErr:   true,
+		},
+		{
+			name:      "too short — below 43 chars",
+			challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+			method:    "S256",
+			verifier:  "short",
+			wantErr:   true,
+		},
+		{
+			name:      "too long — above 128 chars",
+			challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+			method:    "S256",
+			verifier:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			wantErr:   true,
+		},
+		{
+			name:      "invalid charset — contains space",
+			challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+			method:    "S256",
+			verifier:  "dBjftJeZ4CVP mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+			wantErr:   true,
+		},
+		{
+			name:      "invalid charset — contains equals sign",
+			challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+			method:    "S256",
+			verifier:  "dBjftJeZ4CVP=mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 			wantErr:   true,
 		},
 	}
@@ -161,14 +190,15 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 	})
 
 	codeStore := NewAuthCodeStore(rdb)
-	svc := NewService(nil, codeStore, userSvc, ks, "https://issuer.example.com")
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, codeStore, userSvc, ks, "https://issuer.example.com", refreshStore)
 
 	session := &AuthCodeSession{
 		Code:                "code-1",
 		UserID:              "u123",
 		ClientID:            "client-pkce",
 		RedirectURI:         "http://localhost/callback",
-		Scopes:              []string{"openid", "profile", "email"},
+		Scopes:              []string{"openid", "profile", "email", "offline_access"},
 		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 		CodeChallengeMethod: "S256",
 		AuthTime:            time.Now(),
@@ -209,5 +239,212 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 	}
 	if claims["email"] != "user@example.com" {
 		t.Errorf("email claim = %v, want user@example.com", claims["email"])
+	}
+
+	// ExchangeCode must issue a refresh token when the store is configured
+	if resp.RefreshToken == "" {
+		t.Errorf("expected refresh_token to be non-empty")
+	}
+}
+
+func TestRefreshTokenStore(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	store := NewRefreshTokenStore(rdb)
+	ctx := context.Background()
+
+	sess := &OIDCRefreshSession{
+		UserID:   "u1",
+		ClientID: "c1",
+		Scopes:   []string{"openid", "profile"},
+		AuthTime: time.Now().Truncate(time.Second),
+	}
+
+	token, err := store.Save(ctx, sess)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if len(token) < 10 {
+		t.Fatalf("token too short: %q", token)
+	}
+
+	got, err := store.GetAndConsume(ctx, token)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.UserID != "u1" || got.ClientID != "c1" {
+		t.Errorf("got %+v, want u1/c1", got)
+	}
+
+	// Single-use: second fetch must fail
+	_, err = store.GetAndConsume(ctx, token)
+	if err != ErrRefreshTokenNotFound {
+		t.Errorf("expected ErrRefreshTokenNotFound on reuse, got %v", err)
+	}
+}
+
+func TestExchangeRefreshToken(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	if err != nil {
+		t.Fatalf("keystore: %v", err)
+	}
+
+	u := &user.User{ID: "u99", Email: "refresh@example.com", Locale: "en"}
+	userSvc := user.NewService(&mockUserReader{user: u})
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, nil, userSvc, ks, "https://issuer.example.com", refreshStore)
+
+	ctx := context.Background()
+	origScopes := []string{"openid", "profile", "email"}
+	authTime := time.Now().Truncate(time.Second)
+
+	origToken, err := refreshStore.Save(ctx, &OIDCRefreshSession{
+		UserID:   u.ID,
+		ClientID: "client-1",
+		Scopes:   origScopes,
+		AuthTime: authTime,
+	})
+	if err != nil {
+		t.Fatalf("seed refresh token: %v", err)
+	}
+
+	// Successful exchange
+	resp, err := svc.ExchangeRefreshToken(ctx, origToken, "client-1", "", nil)
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if resp.AccessToken == "" {
+		t.Error("expected non-empty access_token")
+	}
+	if resp.RefreshToken == "" {
+		t.Error("expected rotated refresh_token")
+	}
+	if resp.RefreshToken == origToken {
+		t.Error("rotated token must differ from original")
+	}
+	if resp.Scope != "openid profile email" {
+		t.Errorf("scope = %q, want openid profile email", resp.Scope)
+	}
+
+	// Original token must be consumed (single-use)
+	_, err = svc.ExchangeRefreshToken(ctx, origToken, "client-1", "", nil)
+	if err != ErrInvalidGrant {
+		t.Errorf("expected ErrInvalidGrant on token reuse, got %v", err)
+	}
+
+	// Scope downscoping
+	downscopedToken, _ := refreshStore.Save(ctx, &OIDCRefreshSession{
+		UserID:   u.ID,
+		ClientID: "client-1",
+		Scopes:   origScopes,
+		AuthTime: authTime,
+	})
+	resp2, err := svc.ExchangeRefreshToken(ctx, downscopedToken, "client-1", "", []string{"openid"})
+	if err != nil {
+		t.Fatalf("downscoped exchange: %v", err)
+	}
+	if resp2.Scope != "openid" {
+		t.Errorf("downscoped scope = %q, want openid", resp2.Scope)
+	}
+
+	// Wrong client_id rejected
+	wrongToken, _ := refreshStore.Save(ctx, &OIDCRefreshSession{
+		UserID:   u.ID,
+		ClientID: "client-1",
+		Scopes:   origScopes,
+		AuthTime: authTime,
+	})
+	_, err = svc.ExchangeRefreshToken(ctx, wrongToken, "other-client", "", nil)
+	if err != ErrInvalidGrant {
+		t.Errorf("expected ErrInvalidGrant for wrong client, got %v", err)
+	}
+}
+
+func TestRevokeRefreshToken(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, nil, user.NewService(&mockUserReader{}), ks, "https://issuer.example.com", refreshStore)
+	ctx := context.Background()
+
+	sess := &OIDCRefreshSession{UserID: "u1", ClientID: "c1", Scopes: []string{"openid", "offline_access"}, AuthTime: time.Now()}
+	token, _ := refreshStore.Save(ctx, sess)
+
+	// Revoke
+	svc.RevokeRefreshToken(ctx, token)
+
+	// Token must be unusable after revocation
+	_, err = refreshStore.GetAndConsume(ctx, token)
+	if err != ErrRefreshTokenNotFound {
+		t.Errorf("expected ErrRefreshTokenNotFound after revocation, got %v", err)
+	}
+}
+
+func TestHasScope(t *testing.T) {
+	tests := []struct {
+		scopes []string
+		target string
+		want   bool
+	}{
+		{[]string{"openid", "offline_access"}, "offline_access", true},
+		{[]string{"openid", "profile"}, "offline_access", false},
+		{[]string{}, "offline_access", false},
+		{[]string{"offline_access"}, "openid", false},
+	}
+	for _, tt := range tests {
+		if got := hasScope(tt.scopes, tt.target); got != tt.want {
+			t.Errorf("hasScope(%v, %q) = %v, want %v", tt.scopes, tt.target, got, tt.want)
+		}
+	}
+}
+
+func TestExchangeCode_NoRefreshWithoutOfflineAccess(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	u := &user.User{ID: "u1", Email: "u@example.com", Locale: "en"}
+	codeStore := NewAuthCodeStore(rdb)
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, codeStore, user.NewService(&mockUserReader{user: u}), ks, "https://issuer.example.com", refreshStore)
+
+	// Scopes without offline_access → no refresh token
+	session := &AuthCodeSession{
+		Code: "code-no-offline", UserID: u.ID, ClientID: "c1",
+		RedirectURI: "http://localhost/cb", Scopes: []string{"openid", "profile"},
+		CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256",
+		AuthTime: time.Now(),
+	}
+	codeStore.Save(context.Background(), session)
+
+	resp, err := svc.ExchangeCode(context.Background(), "code-no-offline", "c1", "", "http://localhost/cb", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if resp.RefreshToken != "" {
+		t.Errorf("expected no refresh_token without offline_access, got %q", resp.RefreshToken)
 	}
 }

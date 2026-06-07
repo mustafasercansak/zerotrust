@@ -69,7 +69,23 @@
     },
     "usePasskey": "Geçiş anahtarı kullan",
     "signInWithPasskey": "Geçiş anahtarıyla giriş yap",
-    "or": "veya"
+    "or": "veya",
+    "consent": {
+      "title": "Uygulamayı Yetkilendir",
+      "subtitle": "Bir uygulama hesabınıza erişim talep ediyor.",
+      "requestingAccess": "profil verilerinize erişmek ve sizi ZeroTrust aracılığıyla doğrulamak için izin istiyor.",
+      "permissionsTitle": "İstenen İzinler:",
+      "authorize": "Yetkilendir",
+      "cancel": "İptal",
+      "mfaPrompt": "MFA doğrulaması gerekli. 6 haneli kodunuzu girin:",
+      "errorInternal": "Sunucu hatası",
+      "scopes": {
+        "openid": "Kimliğinizi doğrulayın (OpenID)",
+        "profile": "Profil bilgilerinize erişin (ad, dil)",
+        "email": "E-posta adresinizi görüntüleyin",
+        "offline_access": "Oturumda kalın (çevrimdışı erişim)"
+      }
+    }
   },
   "nav": {
     "dashboard": "Ana Sayfa",
@@ -215,7 +231,14 @@
     "anomalyTypes": {
       "new_device": "Yeni cihaz",
       "impossible_travel": "Olanaksız seyahat",
-      "unknown": "Bilinmeyen anormallik"
+      "unknown": "Bilinmeyen anormallik",
+      "oidc.consent_approved": "OAuth2 onayı verildi",
+      "oidc.consent_denied": "OAuth2 onayı reddedildi",
+      "oidc.token_issued": "OAuth2 token oluşturuldu",
+      "oidc.token_exchange_failed": "OAuth2 token değişimi başarısız",
+      "oidc.token_revoked": "OAuth2 token iptal edildi",
+      "oidc.token_introspected": "OAuth2 token sorgulandı",
+      "oidc.client_secret_rotated": "OIDC istemci secret'ı yenilendi"
     },
     "locations": {
       "unknown": "Bilinmeyen konum"

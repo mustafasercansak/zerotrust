@@ -565,5 +565,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
+
+    rotateOidcClientSecret: (id: string) =>
+      request<{ client_secret: string }>(`/api/v1/admin/oidc/clients/${id}/rotate`, {
+        method: "POST",
+      }),
   },
 };

@@ -3,12 +3,14 @@ package mfa
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zerotrust/backend/internal/auth"
@@ -252,6 +254,31 @@ func TestMFAHandlerSetup_InternalError(t *testing.T) {
 	h.Setup(rr, req)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestMFAHandlerStepUp_Success(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	h := NewHandler(&mockMFAService{validateOK: true}, rdb, time.Minute)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/step-up", bytes.NewBufferString(`{"code":"123456"}`)))
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "some-refresh-token"})
+	rr := httptest.NewRecorder()
+
+	h.StepUp(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp map[string]bool
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil || !resp["ok"] {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
 	}
 }
 

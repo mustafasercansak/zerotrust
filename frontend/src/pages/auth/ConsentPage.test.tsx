@@ -95,10 +95,10 @@ describe("ConsentPage", () => {
 
     const html = runRender();
     expect(html).toContain("test-client");
-    expect(html).toContain("Verify your identity");
-    expect(html).toContain("profile info");
-    expect(html).toContain("email address");
-    expect(html).toContain("custom_scope");
+    expect(html).toContain("consent.scopes.openid");
+    expect(html).toContain("consent.scopes.profile");
+    expect(html).toContain("consent.scopes.email");
+    expect(html).toContain("consent.scopes.custom_scope");
   });
 
   it("shows resolved client display name when clientName state is populated", () => {
@@ -182,7 +182,7 @@ describe("ConsentPage", () => {
     runRender();
 
     await capturedButtonClicks[0]();
-    expect(toast.error).toHaveBeenCalledWith("Error: invalid_request");
+    expect(toast.error).toHaveBeenCalledWith("errors.invalid_request");
   });
 
   it("handles generic error during submission", async () => {
@@ -192,6 +192,32 @@ describe("ConsentPage", () => {
     runRender();
 
     await capturedButtonClicks[0]();
-    expect(toast.error).toHaveBeenCalledWith("Internal server error");
+    expect(toast.error).toHaveBeenCalledWith("consent.errorInternal");
+  });
+
+  it("performs MFA step-up when consent returns 403 mfa_required", async () => {
+    mockSearchParams.set("client_id", "test-client");
+    mockSearchParams.set("redirect_uri", "http://localhost/cb");
+    mockSearchParams.set("scope", "openid");
+
+    vi.stubGlobal("window", {
+      location: { href: "" },
+      prompt: vi.fn().mockReturnValue("123456"),
+    });
+
+    const submitConsentSpy = vi.spyOn(api, "submitConsent")
+      .mockRejectedValueOnce(new ApiError("mfa_required", undefined, 403))
+      .mockResolvedValueOnce({ redirect_url: "http://localhost/cb?code=stepped" });
+
+    const mfaStepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({ ok: true });
+
+    runRender();
+
+    await capturedButtonClicks[0]();
+
+    expect(window.prompt).toHaveBeenCalled();
+    expect(mfaStepUpSpy).toHaveBeenCalledWith("123456");
+    expect(submitConsentSpy).toHaveBeenCalledTimes(2);
+    expect(window.location.href).toBe("http://localhost/cb?code=stepped");
   });
 });

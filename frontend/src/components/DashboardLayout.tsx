@@ -124,8 +124,21 @@ export default function DashboardLayout() {
             width: 228,
           }}
         >
-          <Box sx={{ px: 2.5, py: 2.5 }}>
-            <Typography sx={{ fontWeight: 700, letterSpacing: 0.2 }}>{tCommon("appName")}</Typography>
+          <Box sx={{ px: 2.5, py: 2.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Box
+              component="img"
+              src="/logo.png"
+              alt="ZeroTrust Logo"
+              sx={{
+                width: 32,
+                height: 32,
+                objectFit: "contain",
+                borderRadius: "4px",
+              }}
+            />
+            <Typography sx={{ fontWeight: 700, letterSpacing: 0.2, fontSize: "1.1rem" }}>
+              {tCommon("appName")}
+            </Typography>
           </Box>
           <Divider />
 

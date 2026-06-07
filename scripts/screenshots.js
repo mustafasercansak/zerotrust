@@ -7,6 +7,8 @@
  *
  * Usage:
  *   node scripts/screenshots.js [--url http://localhost:3000] [--email admin@company.com] [--password <pass>]
+ *                               [--totp-secret <base32>]   # TOTP secret to auto-generate a code when MFA is required
+ *                               [--totp-code   <6digits>]  # or supply the code directly (e.g. from your authenticator app)
  *
  * Or via Makefile:
  *   make screenshots
@@ -36,10 +38,12 @@ function getArg(flag, def) {
   return i !== -1 && args[i + 1] ? args[i + 1] : def;
 }
 
-const BASE_URL = getArg("--url", "http://localhost:3000");
-const EMAIL    = getArg("--email", process.env.ADMIN_EMAIL || "admin@company.com");
-const PASSWORD = getArg("--password", process.env.ADMIN_PASSWORD || "");
-const OUT_DIR  = path.resolve(__dirname, "..", "docs", "images");
+const BASE_URL    = getArg("--url", "http://localhost:3000");
+const EMAIL       = getArg("--email", process.env.ADMIN_EMAIL || "admin@company.com");
+const PASSWORD    = getArg("--password", process.env.ADMIN_PASSWORD || "");
+const TOTP_SECRET = getArg("--totp-secret", process.env.TOTP_SECRET || "");
+const TOTP_CODE   = getArg("--totp-code", "");
+const OUT_DIR     = path.resolve(__dirname, "..", "docs", "images");
 
 if (!PASSWORD) {
   console.error("❌  Provide admin password via --password <pass> or ADMIN_PASSWORD env var.");
@@ -47,6 +51,40 @@ if (!PASSWORD) {
 }
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
+
+// ── TOTP (RFC 6238 / HOTP RFC 4226) ─────────────────────────────────────────
+const crypto = require("crypto");
+
+function _base32Decode(input) {
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = input.toUpperCase().replace(/[\s=]+/g, "");
+  let bits = 0, val = 0;
+  const bytes = [];
+  for (const ch of clean) {
+    const idx = CHARS.indexOf(ch);
+    if (idx < 0) continue;
+    val = (val << 5) | idx;
+    bits += 5;
+    if (bits >= 8) { bytes.push((val >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  return Buffer.from(bytes);
+}
+
+function generateTOTP(base32Secret, digits = 6, period = 30) {
+  const key = _base32Decode(base32Secret);
+  const counter = Math.floor(Date.now() / 1000 / period);
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(counter));
+  const digest = crypto.createHmac("sha1", key).update(buf).digest();
+  const offset = digest[digest.length - 1] & 0x0f;
+  const code = (
+    ((digest[offset]     & 0x7f) << 24) |
+    ((digest[offset + 1] & 0xff) << 16) |
+    ((digest[offset + 2] & 0xff) << 8)  |
+     (digest[offset + 3] & 0xff)
+  ) % (10 ** digits);
+  return String(code).padStart(digits, "0");
+}
 
 // ── Pages to screenshot ─────────────────────────────────────────────────────
 const PAGES = [
@@ -99,13 +137,67 @@ const PAGES = [
     console.log(`  ✓ ${loginEntry.file}`);
   }
 
+  // Intercept the login API response to surface errors early
+  let loginApiStatus = 0;
+  let loginApiBody   = "";
+  page.on("response", async (res) => {
+    if (res.url().includes("/api/v1/auth/login") && res.request().method() === "POST") {
+      loginApiStatus = res.status();
+      loginApiBody   = await res.text().catch(() => "");
+    }
+  });
+
   await page.fill('input[type="email"]', EMAIL);
   await page.fill('input[type="password"]', PASSWORD);
   await page.click('button[type="submit"]');
-  try {
-    await page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 15000 });
-  } catch (err) {
-    console.error(`\n❌ Login timed out. Check that the admin password is correct and no forced MFA screen interrupted the flow.`);
+  // Brief pause to capture any error toast before it fades
+  await page.waitForTimeout(1500);
+  if (page.url().includes("/auth/login")) {
+    await page.screenshot({ path: path.join(OUT_DIR, "_submit_debug.png") });
+  }
+
+  // Race between reaching /dashboard (no MFA) and the TOTP input appearing (MFA required).
+  // isVisible() is a point-in-time snapshot; waitFor() polls until the element is in the DOM.
+  const MFA_SELECTOR = 'input[placeholder="000000 or xxxx-xxxx-xxxx"]';
+  let loginStage = "unknown";
+  await Promise.race([
+    page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 15000 })
+      .then(() => { loginStage = "dashboard"; }).catch(() => {}),
+    page.waitForSelector(MFA_SELECTOR, { state: "visible", timeout: 15000 })
+      .then(() => { loginStage = "mfa"; }).catch(() => {}),
+  ]);
+
+  if (loginStage === "dashboard") {
+    // no MFA — already there
+  } else if (loginStage === "mfa") {
+    let code = TOTP_CODE;
+    if (!code && TOTP_SECRET) code = generateTOTP(TOTP_SECRET);
+    if (!code) {
+      console.error(`\n❌ MFA challenge detected. Re-run with --totp-code <6-digit-code> or --totp-secret <base32-secret>.`);
+      process.exit(1);
+    }
+    console.log(`  ↳ MFA challenge — submitting TOTP code`);
+    await page.fill(MFA_SELECTOR, code);
+    await page.click('button[type="submit"]');
+    try {
+      await page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 15000 });
+      loginStage = "dashboard";
+    } catch (_) {
+      const debugPath = path.join(OUT_DIR, "_mfa_debug.png");
+      await page.screenshot({ path: debugPath });
+      console.error(`\n❌ MFA verification failed (wrong code or timeout). Debug screenshot: ${debugPath}`);
+      process.exit(1);
+    }
+  } else {
+    const debugPath = path.join(OUT_DIR, "_login_debug.png");
+    await page.screenshot({ path: debugPath });
+    console.error(`\n❌ Login failed.`);
+    if (loginApiStatus) {
+      console.error(`   API response: HTTP ${loginApiStatus}  ${loginApiBody.slice(0, 200)}`);
+    } else {
+      console.error(`   No login API response captured — the form may not have submitted.`);
+    }
+    console.error(`   Debug screenshot: ${debugPath}`);
     process.exit(1);
   }
   await page.waitForTimeout(1500);
@@ -198,7 +290,7 @@ function generateDocs() {
       heading: "## OIDC Identity Provider",
       image: "images/oidc_clients.png",
       caption: "Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider with roles/groups claims.",
-      description: "ZeroTrust implements the Authorization Code flow with PKCE (S256). Registered clients receive an authorization code on user consent, exchange it for an Ed25519-signed ID token and access token, and can query `/oauth2/userinfo` for live profile claims. The discovery document at `/.well-known/openid-configuration` advertises all supported endpoints, scopes, and signing algorithms.",
+      description: "ZeroTrust implements the Authorization Code flow with PKCE (S256, RFC 7636). Registered clients receive an authorization code on user consent, exchange it for an Ed25519-signed ID token and access token, and use the `refresh_token` grant (RFC 6749 §6) with `offline_access` scope to obtain long-lived rotating refresh tokens. Tokens can be introspected via `POST /oauth2/introspect` (RFC 7662) and revoked via `POST /oauth2/revoke` (RFC 7009). The `max_age` parameter (OIDC Core §3.1.2.1) enforces re-authentication when a session exceeds a client-specified age. Live profile claims are available at `/oauth2/userinfo`. All consent decisions, token exchanges, rotations, introspections, and revocations are written to the audit log. The discovery document at `/.well-known/openid-configuration` advertises all supported endpoints, scopes, and signing algorithms.",
     },
     {
       heading: "## Settings",

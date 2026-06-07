@@ -237,6 +237,24 @@ describe("OidcClientsSection", () => {
     });
   });
 
+  it("shows rotated secret in the existing secret dialog", () => {
+    stateStore[1] = false;
+    // Pre-populate createdClient (idx 12) as handleRotate would after a successful rotation
+    stateStore[12] = {
+      id: "c1",
+      client_id: "rotate-client",
+      client_secret: "new-rotated-secret-xyz",
+      name: "Rotate Test",
+      redirect_uris: [],
+      allowed_scopes: ["openid"],
+      created_at: "2026-06-06T12:00:00Z",
+    };
+
+    const html = runRender();
+    expect(html).toContain("new-rotated-secret-xyz");
+    expect(html).toContain("rotate-client");
+  });
+
   it("handles copy to clipboard", () => {
     stateStore[1] = false;
     stateStore[12] = {

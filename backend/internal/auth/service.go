@@ -706,6 +706,16 @@ func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string
 }
 
 // Logout revokes the session and blocklists the access token JTI.
+// RevokeAccessToken immediately blocks a token's JTI in Redis so it is
+// rejected on all subsequent requests. Called by the OAuth2 revocation
+// endpoint (RFC 7009). Expired or unparseable tokens are silently ignored
+// per the spec — the caller always gets a 200.
+func (s *Service) RevokeAccessToken(ctx context.Context, tokenStr string) {
+	if claims, err := ValidateAccessToken(s.ks, tokenStr); err == nil {
+		s.revokeJTI(ctx, claims.ID, time.Until(claims.ExpiresAt.Time))
+	}
+}
+
 func (s *Service) Logout(ctx context.Context, refreshToken, accessToken string) error {
 	if refreshToken != "" {
 		s.sessions.Revoke(ctx, hashToken(refreshToken))

@@ -298,8 +298,9 @@ func run(ctx context.Context, cfg config) error {
 
 	oidcRepo := oidc.NewClientRepository(db)
 	oidcCodeStore := oidc.NewAuthCodeStore(rdb)
-	oidcSvc := oidc.NewService(oidcRepo, oidcCodeStore, userSvc, ks, cfg.OIDCIssuerURL)
-	oidcHandler := oidc.NewHandler(oidcSvc, oidcRepo, userSvc, authSvc, ks, cfg.OIDCIssuerURL, cfg.PublicAppURL)
+	oidcRefreshStore := oidc.NewRefreshTokenStore(rdb)
+	oidcSvc := oidc.NewService(oidcRepo, oidcCodeStore, userSvc, ks, cfg.OIDCIssuerURL, oidcRefreshStore)
+	oidcHandler := oidc.NewHandler(oidcSvc, oidcRepo, userSvc, authSvc, ks, cfg.OIDCIssuerURL, cfg.PublicAppURL, auditRepo, mfaSvc, rdb)
 
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
@@ -346,9 +347,13 @@ func run(ctx context.Context, cfg config) error {
 	})
 
 	r.Get("/.well-known/openid-configuration", oidcHandler.Discovery)
-	r.Get("/oauth2/authorize", oidcHandler.Authorize)
-	r.Post("/oauth2/token", oidcHandler.Token)
-	r.Get("/oauth2/userinfo", oidcHandler.UserInfo)
+	r.With(tokenRL.Middleware()).Get("/oauth2/authorize", oidcHandler.Authorize)
+	r.With(tokenRL.Middleware()).Post("/oauth2/token", oidcHandler.Token)
+	r.With(protectedRL.Middleware()).Get("/oauth2/userinfo", oidcHandler.UserInfo)
+	r.With(tokenRL.Middleware()).Post("/oauth2/revoke", oidcHandler.Revoke)
+	r.With(tokenRL.Middleware()).Post("/oauth2/introspect", oidcHandler.Introspect)
+	r.With(tokenRL.Middleware()).Get("/oauth2/end_session", oidcHandler.EndSession)
+	r.With(tokenRL.Middleware()).Post("/oauth2/end_session", oidcHandler.EndSession)
 	r.Get("/oauth2/clients/{client_id}", oidcHandler.GetPublicClient)
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -368,7 +373,7 @@ func run(ctx context.Context, cfg config) error {
 		r.With(publicAudit).Post("/auth/register", authHandler.Register)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
 		r.With(publicAudit).Post("/auth/reset-password", authHandler.ResetPassword)
-		r.Post("/oauth2/consent", oidcHandler.Consent)
+		r.With(protectedRL.Middleware()).Post("/oauth2/consent", oidcHandler.Consent)
 
 		// SSE stream — auth handled inside handler via cookie (EventSource sends cookies automatically)
 		r.With(publicAudit).Get("/admin/service-accounts/events", saHandler.Events)
@@ -613,6 +618,7 @@ func run(ctx context.Context, cfg config) error {
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Post("/admin/oidc/clients", oidcHandler.CreateClient)
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Put("/admin/oidc/clients/{id}", oidcHandler.UpdateClient)
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Delete("/admin/oidc/clients/{id}", oidcHandler.DeleteClient)
+			r.With(authmw.RequireRole("admin"), stepUpMFA).Post("/admin/oidc/clients/{id}/rotate", oidcHandler.RotateClientSecret)
 
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)

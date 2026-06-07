@@ -24,25 +24,28 @@ var (
 )
 
 type Service struct {
-	clientRepo *ClientRepository
-	codeStore  *AuthCodeStore
-	userSvc    *user.Service
-	ks         *auth.KeyStore
-	issuer     string
+	clientRepo   *ClientRepository
+	codeStore    *AuthCodeStore
+	refreshStore *RefreshTokenStore
+	userSvc      *user.Service
+	ks           *auth.KeyStore
+	issuer       string
 }
 
-func NewService(clientRepo *ClientRepository, codeStore *AuthCodeStore, userSvc *user.Service, ks *auth.KeyStore, issuer string) *Service {
+func NewService(clientRepo *ClientRepository, codeStore *AuthCodeStore, userSvc *user.Service, ks *auth.KeyStore, issuer string, refreshStore *RefreshTokenStore) *Service {
 	return &Service{
-		clientRepo: clientRepo,
-		codeStore:  codeStore,
-		userSvc:    userSvc,
-		ks:         ks,
-		issuer:     issuer,
+		clientRepo:   clientRepo,
+		codeStore:    codeStore,
+		refreshStore: refreshStore,
+		userSvc:      userSvc,
+		ks:           ks,
+		issuer:       issuer,
 	}
 }
 
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 	IDToken      string `json:"id_token,omitempty"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int64  `json:"expires_in"`
@@ -132,7 +135,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 		Email:       u.Email,
 		Locale:      u.Locale,
 		Roles:       u.Roles,
-		Permissions: []string{}, // Add permissions if needed
+		Permissions: []string{}, // intentionally empty: OIDC access tokens are issued to external clients and must not carry internal RBAC permissions
 		SubType:     auth.SubTypeUser,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,
@@ -197,12 +200,116 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 		}
 	}
 
-	return &TokenResponse{
+	resp := &TokenResponse{
 		AccessToken: accessTokenStr,
 		IDToken:     idTokenStr,
 		TokenType:   "Bearer",
 		ExpiresIn:   int64(accessTTL.Seconds()),
 		Scope:       strings.Join(session.Scopes, " "),
+	}
+
+	if s.refreshStore != nil && hasScope(session.Scopes, "offline_access") {
+		rt, rtErr := s.refreshStore.Save(ctx, &OIDCRefreshSession{
+			UserID:   u.ID,
+			ClientID: clientID,
+			Scopes:   session.Scopes,
+			AuthTime: session.AuthTime,
+		})
+		if rtErr != nil {
+			return nil, rtErr
+		}
+		resp.RefreshToken = rt
+	}
+
+	return resp, nil
+}
+
+// ExchangeRefreshToken exchanges a refresh token for a new access token and
+// rotated refresh token. Scope may be nil to reuse the original grant scopes,
+// or a non-empty subset to downscope.
+func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string, requestedScopes []string) (*TokenResponse, error) {
+	if s.refreshStore == nil {
+		return nil, errors.New("refresh_token_not_supported")
+	}
+
+	sess, err := s.refreshStore.GetAndConsume(ctx, refreshToken)
+	if err != nil {
+		return nil, ErrInvalidGrant
+	}
+
+	if sess.ClientID != clientID {
+		return nil, ErrInvalidGrant
+	}
+
+	if clientSecret != "" {
+		if _, err := s.clientRepo.AuthenticateClient(ctx, clientID, clientSecret); err != nil {
+			return nil, ErrInvalidGrant
+		}
+	}
+
+	// Use requested scopes if they are a subset of the original grant; otherwise
+	// fall back to the original scopes.
+	scopes := sess.Scopes
+	if len(requestedScopes) > 0 {
+		allowed := make(map[string]bool, len(sess.Scopes))
+		for _, s := range sess.Scopes {
+			allowed[s] = true
+		}
+		valid := make([]string, 0, len(requestedScopes))
+		for _, rs := range requestedScopes {
+			if allowed[rs] {
+				valid = append(valid, rs)
+			}
+		}
+		if len(valid) > 0 {
+			scopes = valid
+		}
+	}
+
+	u, err := s.userSvc.FindByID(ctx, sess.UserID)
+	if err != nil {
+		return nil, ErrInvalidGrant
+	}
+
+	now := time.Now()
+	accessTTL := 1 * time.Hour
+	accessClaims := auth.Claims{
+		UserID:      u.ID,
+		Email:       u.Email,
+		Locale:      u.Locale,
+		Roles:       u.Roles,
+		Permissions: []string{},
+		SubType:     auth.SubTypeUser,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.issuer,
+			Subject:   u.ID,
+			Audience:  jwt.ClaimStrings{clientID},
+			ExpiresAt: jwt.NewNumericDate(now.Add(accessTTL)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ID:        uuid.NewString(),
+		},
+	}
+	accessTokenStr, err := s.signClaims(accessClaims)
+	if err != nil {
+		return nil, err
+	}
+
+	newRT, err := s.refreshStore.Save(ctx, &OIDCRefreshSession{
+		UserID:   u.ID,
+		ClientID: clientID,
+		Scopes:   scopes,
+		AuthTime: sess.AuthTime,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &TokenResponse{
+		AccessToken:  accessTokenStr,
+		RefreshToken: newRT,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(accessTTL.Seconds()),
+		Scope:        strings.Join(scopes, " "),
 	}, nil
 }
 
@@ -213,8 +320,15 @@ func (s *Service) signClaims(claims auth.Claims) (string, error) {
 }
 
 func verifyPKCE(challenge, method, verifier string) error {
-	if verifier == "" {
-		return errors.New("empty verifier")
+	// RFC 7636 §4.1: verifier must be 43–128 unreserved ASCII chars.
+	if l := len(verifier); l < 43 || l > 128 {
+		return fmt.Errorf("code_verifier length %d not in 43–128 range", l)
+	}
+	for _, c := range verifier {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '.' || c == '_' || c == '~') {
+			return fmt.Errorf("code_verifier contains invalid character %q", c)
+		}
 	}
 
 	switch method {
@@ -231,4 +345,24 @@ func verifyPKCE(challenge, method, verifier string) error {
 	}
 
 	return ErrCodeVerifierFailed
+}
+
+func hasScope(scopes []string, target string) bool {
+	for _, s := range scopes {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// RevokeRefreshToken deletes an OIDC refresh token from the store so it cannot
+// be exchanged again. Per RFC 7009 the caller always receives 200; errors are
+// swallowed here.
+func (s *Service) RevokeRefreshToken(ctx context.Context, token string) {
+	if s.refreshStore == nil {
+		return
+	}
+	// GetAndConsume atomically deletes; we discard the returned session.
+	s.refreshStore.GetAndConsume(ctx, token) //nolint:errcheck
 }

@@ -23,7 +23,19 @@ export function AuthPage({ title, subtitle, children }: AuthPageProps) {
       }}
     >
       <Box sx={{ maxWidth: 400, width: "100%" }}>
-        <Box sx={{ mb: 3, textAlign: "center" }}>
+        <Box sx={{ mb: 3, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Box
+            component="img"
+            src="/logo.png"
+            alt="ZeroTrust Logo"
+            sx={{
+              width: 72,
+              height: 72,
+              objectFit: "contain",
+              mb: 2,
+              borderRadius: "8px",
+            }}
+          />
           <Typography variant="h5" sx={{ fontWeight: 700 }}>{title}</Typography>
           {subtitle && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>

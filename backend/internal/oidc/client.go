@@ -2,6 +2,8 @@ package oidc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -138,6 +140,28 @@ func (r *ClientRepository) Delete(ctx context.Context, id string) error {
 		return ErrClientNotFound
 	}
 	return nil
+}
+
+// RotateSecret generates a new random client secret, stores its bcrypt hash, and
+// returns the plaintext secret (shown once).
+func (r *ClientRepository) RotateSecret(ctx context.Context, id string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	secret := hex.EncodeToString(raw)
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), 12)
+	if err != nil {
+		return "", err
+	}
+	tag, err := r.db.Exec(ctx, `UPDATE oauth2_clients SET client_secret_hash = $1, updated_at = NOW() WHERE id = $2`, string(hash), id)
+	if err != nil {
+		return "", err
+	}
+	if tag.RowsAffected() == 0 {
+		return "", ErrClientNotFound
+	}
+	return secret, nil
 }
 
 // Update modifies mutable fields of an OIDC client by UUID
