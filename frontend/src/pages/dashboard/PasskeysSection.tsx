@@ -81,7 +81,35 @@ export default function PasskeysSection() {
   return (
     <Paper variant="outlined" sx={{ display: "grid", gap: 2, px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider" }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Fingerprint fontSize="small" color="primary" />
+        <Box sx={{ position: "relative", display: "inline-flex", mr: 0.5 }}>
+          {busy && (
+            <Box
+              sx={{
+                position: "absolute",
+                inset: -6,
+                borderRadius: "50%",
+                border: "2px solid #6366f1",
+                animation: "spinPulse 1.5s linear infinite",
+                "@keyframes spinPulse": {
+                  "0%": { transform: "rotate(0deg) scale(0.9)", opacity: 0.2 },
+                  "50%": { transform: "rotate(180deg) scale(1.1)", opacity: 0.8 },
+                  "100%": { transform: "rotate(360deg) scale(0.9)", opacity: 0.2 },
+                }
+              }}
+            />
+          )}
+          <Fingerprint
+            fontSize="small"
+            color={busy ? "disabled" : "primary"}
+            sx={{
+              animation: busy ? "pulseScale 1s ease-in-out infinite alternate" : "none",
+              "@keyframes pulseScale": {
+                "0%": { transform: "scale(0.95)" },
+                "100%": { transform: "scale(1.15)" },
+              }
+            }}
+          />
+        </Box>
         <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }}>
           {t("passkeys.title")}
         </Typography>

@@ -589,18 +589,62 @@ export default function ServiceAccountsPage() {
       </Dialog>
 
       <Dialog open={!!newSecret} onClose={() => setNewSecret(null)} fullWidth maxWidth="sm">
-        <DialogTitle>{t("secretTitle")}</DialogTitle>
-        <DialogContent sx={{ display: "grid", gap: 2 }}>
-          <DialogContentText color="warning.main">{t("secretWarning")}</DialogContentText>
-          <Box>
-            <Typography variant="caption" color="text.secondary">{t("secretLabel")}</Typography>
-            <Box sx={{ alignItems: "center", bgcolor: "background.default", border: 1, borderColor: "divider", borderRadius: 1,
-              color: "success.main", display: "flex", fontFamily: "monospace", gap: 1, mt: 0.5, p: 1.5 }}>
-              <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere", fontFamily: "monospace" }}>
+        <DialogTitle sx={{ fontWeight: 750 }}>{t("secretTitle")}</DialogTitle>
+        <DialogContent sx={{ display: "grid", gap: 3, pt: 1 }}>
+          <DialogContentText color="warning.main" sx={{ fontWeight: 500, fontSize: "0.875rem", display: "flex", gap: 1, alignItems: "flex-start", bgcolor: "rgba(245, 158, 11, 0.04)", border: "1px solid rgba(245, 158, 11, 0.15)", p: 2, borderRadius: 2 }}>
+            ⚠️ {t("secretWarning")}
+          </DialogContentText>
+          <Box
+            sx={{
+              border: "1px solid rgba(99, 102, 241, 0.25)",
+              borderRadius: 2.5,
+              p: 3,
+              bgcolor: "rgba(99, 102, 241, 0.04)",
+              boxShadow: "0 8px 32px 0 rgba(99, 102, 241, 0.06)",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #4f46e5, #818cf8)" }} />
+            
+            <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.5, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+              <Key fontSize="inherit" color="primary" /> {t("secretLabel")}
+            </Typography>
+
+            <Box
+              sx={{
+                alignItems: "center",
+                bgcolor: "#030712",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 1.5,
+                color: "success.main",
+                display: "flex",
+                fontFamily: "monospace",
+                gap: 1.5,
+                p: 2,
+                transition: "all 0.2s ease",
+                "&:hover": {
+                  borderColor: "rgba(99, 102, 241, 0.3)",
+                }
+              }}
+            >
+              <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere", fontFamily: "monospace", fontWeight: 700, fontSize: "0.95rem", letterSpacing: "0.02em" }}>
                 {newSecret?.client_secret}
               </Typography>
               <Tooltip title="Copy">
-                <IconButton size="small" onClick={handleCopy}>
+                <IconButton
+                  size="small"
+                  onClick={handleCopy}
+                  sx={{
+                    bgcolor: "rgba(255, 255, 255, 0.03)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    transition: "all 0.2s",
+                    "&:hover": {
+                      bgcolor: "rgba(255, 255, 255, 0.08)",
+                      borderColor: "rgba(255, 255, 255, 0.2)",
+                    }
+                  }}
+                >
                   {copied ? <Check color="success" fontSize="small" /> : <ContentCopy fontSize="small" />}
                 </IconButton>
               </Tooltip>
@@ -608,7 +652,7 @@ export default function ServiceAccountsPage() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3 }}>
-          <Button variant="contained" fullWidth onClick={() => setNewSecret(null)}>{t("done")}</Button>
+          <Button variant="contained" fullWidth onClick={() => setNewSecret(null)} sx={{ py: 1.25, fontWeight: 700, borderRadius: 2 }}>{t("done")}</Button>
         </DialogActions>
       </Dialog>
     </>
