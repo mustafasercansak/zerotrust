@@ -12,6 +12,7 @@ import {
   type GridSortModel,
   type GridValidRowModel,
 } from "@mui/x-data-grid";
+import { getMuiDataGridLocale } from "@/lib/localeUtils";
 import { DashboardPage } from "./DashboardPage";
 import type { PageParams, PagedResult } from "@/lib/api";
 
@@ -56,7 +57,15 @@ export function ResourceTablePage<T extends GridValidRowModel>({
   eventSourceUrl,
   rowHeight,
 }: ResourceTablePageProps<T>) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+
+  const muiLocale = getMuiDataGridLocale(i18n?.language);
+  const localeText = useMemo(() => {
+    return {
+      ...muiLocale.components.MuiDataGrid.defaultProps.localeText,
+      noRowsLabel: emptyMessage ?? "—",
+    };
+  }, [muiLocale, emptyMessage]);
 
   const [rows, setRows] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
@@ -210,7 +219,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
           }}
           pageSizeOptions={pageSizeOptions}
           disableRowSelectionOnClick
-          localeText={{ noRowsLabel: emptyMessage ?? "—" }}
+          localeText={localeText}
           sx={{
             borderColor: "divider",
             bgcolor: "background.paper",

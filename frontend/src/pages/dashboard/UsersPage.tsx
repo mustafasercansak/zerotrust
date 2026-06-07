@@ -4,6 +4,7 @@ import { api, ApiError, type PageParams, type Session, type UserData } from "@/l
 import { formatDate, formatDateTime } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
+import { requiredValidator } from "@/lib/validation";
 import { toast } from "sonner";
 import Alert from "@mui/material/Alert";
 import Avatar from "@mui/material/Avatar";
@@ -455,11 +456,7 @@ export default function UsersPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(email.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(email, tCommon("validation.required"))}
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField label={t("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
@@ -472,11 +469,7 @@ export default function UsersPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(password.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(password, tCommon("validation.required"))}
             />
             <Stack direction="row" spacing={1}>
               {AVAILABLE_ROLES.map((role) => (

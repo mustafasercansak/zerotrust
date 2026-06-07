@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, type PageParams, type ServiceAccount, type ServiceAccountCreated, type ServiceProbeResult, type ServiceTokenResponse } from "@/lib/api";
+import { requiredValidator } from "@/lib/validation";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
@@ -421,11 +422,7 @@ export default function ServiceAccountsPage() {
               onChange={(e) => setName(e.target.value)}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(name.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(name, tCommon("validation.required"))}
             />
             <ScopeSelector selected={selectedScopes} onToggle={toggleScope} />
             <TextField label={`${t("expiresAt")} (${t("noExpiry")})`} type="date" value={expiresAt}
@@ -449,11 +446,7 @@ export default function ServiceAccountsPage() {
               onChange={(e) => setEditName(e.target.value)}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(editName.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(editName, tCommon("validation.required"))}
             />
             <TextField
               label={t("clientId")}

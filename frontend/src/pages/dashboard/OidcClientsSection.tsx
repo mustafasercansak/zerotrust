@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, OidcClient } from "@/lib/api";
+import { requiredValidator } from "@/lib/validation";
 import { toast } from "sonner";
 import {
   DataGrid,
@@ -8,6 +9,7 @@ import {
   GridRenderCellParams,
   GridToolbar,
 } from "@mui/x-data-grid";
+import { getMuiDataGridLocale } from "@/lib/localeUtils";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -31,8 +33,10 @@ import { SecretDisplayCard } from "@/components/SecretDisplayCard";
 
 
 export default function OidcClientsSection() {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
   const { t: tCommon } = useTranslation("common");
+  const muiLocale = getMuiDataGridLocale(i18n?.language);
+  const localeText = muiLocale.components.MuiDataGrid.defaultProps.localeText;
   const [clients, setClients] = useState<OidcClient[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -360,6 +364,7 @@ export default function OidcClientsSection() {
             },
           }}
           disableRowSelectionOnClick
+          localeText={localeText}
           sx={{
             border: "none",
             flex: 1,
@@ -425,11 +430,7 @@ export default function OidcClientsSection() {
               placeholder={t("oidc.namePlaceholder")}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(name.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(name, tCommon("validation.required"))}
             />
             <TextField
               label={t("oidc.clientId")}
@@ -438,11 +439,7 @@ export default function OidcClientsSection() {
               placeholder={t("oidc.clientIdPlaceholder")}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(clientIdInput.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(clientIdInput, tCommon("validation.required"))}
             />
             <TextField
               label={t("oidc.redirectUris")}
@@ -451,11 +448,7 @@ export default function OidcClientsSection() {
               placeholder="http://localhost:3000/callback, https://myapp.com/callback"
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(redirectUris.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(redirectUris, tCommon("validation.required"))}
             />
             <TextField
               label={t("oidc.allowedScopes")}
@@ -464,11 +457,7 @@ export default function OidcClientsSection() {
               placeholder="openid profile email"
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(allowedScopes.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(allowedScopes, tCommon("validation.required"))}
             />
           </DialogContent>
           <DialogActions>
@@ -517,11 +506,7 @@ export default function OidcClientsSection() {
               onChange={(e) => setEditName(e.target.value)}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(editName.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(editName, tCommon("validation.required"))}
             />
             <TextField
               label={t("oidc.redirectUris")}
@@ -529,11 +514,7 @@ export default function OidcClientsSection() {
               onChange={(e) => setEditRedirectUris(e.target.value)}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(editRedirectUris.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(editRedirectUris, tCommon("validation.required"))}
             />
             <TextField
               label={t("oidc.allowedScopes")}
@@ -541,11 +522,7 @@ export default function OidcClientsSection() {
               onChange={(e) => setEditAllowedScopes(e.target.value)}
               required
               fullWidth
-              inputRef={(el: HTMLInputElement | null) => {
-                if (el) {
-                  el.setCustomValidity(editAllowedScopes.trim() ? "" : tCommon("validation.required"));
-                }
-              }}
+              inputRef={requiredValidator(editAllowedScopes, tCommon("validation.required"))}
             />
           </DialogContent>
           <DialogActions>
