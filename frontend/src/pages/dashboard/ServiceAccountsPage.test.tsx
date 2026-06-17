@@ -721,12 +721,12 @@ describe("ServiceAccountsPage page component", () => {
 
     expect(capturedInputs[1]).toBeDefined();
     capturedInputs[1]({ target: { value: "users" } });
-    expect(stateStore[15]).toBe("users");
+    expect(stateStore[14]).toBe("users");
 
     const done = capturedButtonClicks[capturedButtonClicks.length - 1];
     expect(done).toBeDefined();
     done();
-    expect(stateStore[13]).toBeNull();
+    expect(stateStore[12]).toBeNull();
   });
 
   it("toggles edit scopes and skips update when the edit name is blank", async () => {
@@ -770,7 +770,7 @@ describe("ServiceAccountsPage page component", () => {
 
     expect(capturedInputs[1]).toBeDefined();
     capturedInputs[1]({ target: { value: "2026-12-24" } });
-    expect(stateStore[10]).toBe("2026-12-24");
+    expect(stateStore[9]).toBe("2026-12-24");
 
     await capturedSubmits[0]({ preventDefault: vi.fn() });
     expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
@@ -778,7 +778,7 @@ describe("ServiceAccountsPage page component", () => {
     runRender();
     expect(capturedButtonClicks[1]).toBeDefined();
     capturedButtonClicks[1](); // cancel edit dialog
-    expect(stateStore[7]).toBeNull();
+    expect(stateStore[6]).toBeNull();
   });
 
   it("clears probe result and shows an internal error when probing fails", async () => {
@@ -809,7 +809,7 @@ describe("ServiceAccountsPage page component", () => {
 
     await capturedButtonClicks[2]();
 
-    expect(stateStore[18]).toBeNull();
+    expect(stateStore[17]).toBeNull();
     expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
   });
 
@@ -842,14 +842,14 @@ describe("ServiceAccountsPage page component", () => {
     runRender();
     expect(capturedDialogCloses[0]).toBeDefined();
     capturedDialogCloses[0]();
-    expect(stateStore[7]).toBeNull();
+    expect(stateStore[6]).toBeNull();
     runRender();
 
     capturedIconButtonClicks[0](); // open test
     runRender();
     expect(capturedDialogCloses[0]).toBeDefined();
     capturedDialogCloses[0]();
-    expect(stateStore[13]).toBeNull();
+    expect(stateStore[12]).toBeNull();
     runRender();
 
     await capturedIconButtonClicks[2](); // rotate to open secret dialog
@@ -906,27 +906,27 @@ describe("ServiceAccountsPage page component", () => {
     await Promise.resolve();
 
     stateStore[0] = true;
-    stateStore[6] = true;
+    stateStore[5] = true;
     expect(runRender()).toContain("creating");
 
     stateStore[0] = false;
-    stateStore[7] = getMockAccounts().data[0];
-    stateStore[8] = "Service 1";
-    stateStore[9] = ["users:read"];
-    stateStore[10] = "2020-01-01";
-    stateStore[11] = false;
-    stateStore[12] = true;
+    stateStore[6] = getMockAccounts().data[0];
+    stateStore[7] = "Service 1";
+    stateStore[8] = ["users:read"];
+    stateStore[9] = "2020-01-01";
+    stateStore[10] = false;
+    stateStore[11] = true;
     expect(runRender()).toContain("saving");
 
-    stateStore[7] = null;
-    stateStore[12] = false;
-    stateStore[13] = getMockAccounts().data[1];
-    stateStore[14] = "secret";
-    stateStore[16] = { access_token: "token", token_type: "Bearer", expires_in: 60 };
-    stateStore[17] = { sub: "service", scopes: ["users:read"], exp: 1780000000 };
-    stateStore[18] = { ok: true, status: 200, statusText: "OK", body: { ok: true } };
+    stateStore[6] = null;
+    stateStore[11] = false;
+    stateStore[12] = getMockAccounts().data[1];
+    stateStore[13] = "secret";
+    stateStore[15] = { access_token: "token", token_type: "Bearer", expires_in: 60 };
+    stateStore[16] = { sub: "service", scopes: ["users:read"], exp: 1780000000 };
+    stateStore[17] = { ok: true, status: 200, statusText: "OK", body: { ok: true } };
+    stateStore[18] = true;
     stateStore[19] = true;
-    stateStore[20] = true;
     let html = runRender();
     expect(html).toContain("inactive");
     expect(html).toContain("users:read");
@@ -993,8 +993,8 @@ describe("ServiceAccountsPage page component", () => {
     runRender();
 
     capturedIconButtonClicks[5](); // row 2 edit
-    expect(stateStore[10]).toBe("");
-    stateStore[15] = "unknown";
+    expect(stateStore[9]).toBe("");
+    stateStore[14] = "unknown";
     html = runRender();
     expect(html).toContain("client-2");
     expect(html).not.toContain("errors.internal_error");
@@ -1025,12 +1025,12 @@ describe("ServiceAccountsPage page component", () => {
     capturedIconButtonClicks[1](); // open edit
     runRender();
     capturedInputs[0]({ target: { value: "Edit Failure" } });
-    stateStore[10] = "";
+    stateStore[9] = "";
     runRender();
     await capturedSubmits[0]({ preventDefault: vi.fn() });
     expect(toast.error).toHaveBeenLastCalledWith("errors.edit_error");
 
-    stateStore[7] = null;
+    stateStore[6] = null;
     runRender();
     capturedIconButtonClicks[0](); // open test
     runRender();
@@ -1076,10 +1076,10 @@ describe("ServiceAccountsPage page component", () => {
     await Promise.resolve();
     runRender();
 
-    stateStore[13] = getMockAccounts().data[0];
-    stateStore[15] = "missing";
-    stateStore[16] = { access_token: "fallback-token", token_type: "Bearer", expires_in: 60 };
-    stateStore[17] = { scopes: [] };
+    stateStore[12] = getMockAccounts().data[0];
+    stateStore[14] = "missing";
+    stateStore[15] = { access_token: "fallback-token", token_type: "Bearer", expires_in: 60 };
+    stateStore[16] = { scopes: [] };
     const html = runRender();
     expect(html).not.toContain("errors.internal_error");
 
