@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/internal/webauthn"
 )
 
 func TestQueryInt(t *testing.T) {
@@ -97,6 +98,8 @@ type mockUserManager struct {
 	updateProfileErr   error
 	setRolesErr        error
 	setActiveErr       error
+	findByIDUser       *user.User
+	findByIDErr        error
 	lastListParams     user.ListParams
 	lastSetRolesID     string
 	lastSetRoles       []string
@@ -136,6 +139,13 @@ func (m *mockUserManager) SetActive(_ context.Context, userID string, active boo
 	m.lastSetActiveID = userID
 	m.lastSetActiveValue = active
 	return m.setActiveErr
+}
+
+func (m *mockUserManager) FindByID(_ context.Context, id string) (*user.User, error) {
+	if m.findByIDErr != nil {
+		return nil, m.findByIDErr
+	}
+	return m.findByIDUser, nil
 }
 
 type mockSessionManagerUnit struct {
@@ -200,7 +210,7 @@ func TestListUsersWithMockService(t *testing.T) {
 			Total:          1,
 		},
 	}
-	h := NewHandler(mgr, nil)
+	h := NewHandler(mgr, nil, nil, nil)
 
 	req, _ := http.NewRequest("GET", "/api/v1/admin/users?limit=9&offset=2&sort_by=email&sort_dir=asc&email=one&status=active", nil)
 	rr := httptest.NewRecorder()
@@ -243,7 +253,7 @@ func TestCreateUserWithMockService_ErrorMapping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := &mockUserManager{registerErr: tt.err}
-			h := NewHandler(mgr, nil)
+			h := NewHandler(mgr, nil, nil, nil)
 
 			body := `{"email":"mock@example.com","password":"Password1!","roles":["admin"]}`
 			req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
@@ -261,7 +271,7 @@ func TestCreateUserWithMockService_ErrorMapping(t *testing.T) {
 func TestSetStatusWithMockService_RevokesOnDeactivate(t *testing.T) {
 	mgr := &mockUserManager{}
 	sessions := &mockSessionManagerUnit{}
-	h := NewHandler(mgr, sessions)
+	h := NewHandler(mgr, sessions, nil, nil)
 
 	req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/status", bytes.NewBufferString(`{"is_active":false}`))
 	req = withURLParam(req, "id", "u1")
@@ -282,7 +292,7 @@ func TestSetStatusWithMockService_RevokesOnDeactivate(t *testing.T) {
 
 func TestSetStatusWithMockService_NotFound(t *testing.T) {
 	mgr := &mockUserManager{setActiveErr: user.ErrNotFound}
-	h := NewHandler(mgr, nil)
+	h := NewHandler(mgr, nil, nil, nil)
 
 	req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/status", bytes.NewBufferString(`{"is_active":true}`))
 	req = withURLParam(req, "id", "u1")
@@ -297,7 +307,7 @@ func TestSetStatusWithMockService_NotFound(t *testing.T) {
 
 func TestUpdateRolesWithMockService(t *testing.T) {
 	t.Run("invalid request", func(t *testing.T) {
-		h := NewHandler(&mockUserManager{}, nil)
+		h := NewHandler(&mockUserManager{}, nil, nil, nil)
 		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString("{bad"))
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -309,7 +319,7 @@ func TestUpdateRolesWithMockService(t *testing.T) {
 
 	t.Run("unknown role", func(t *testing.T) {
 		mgr := &mockUserManager{setRolesErr: user.ErrUnknownRole}
-		h := NewHandler(mgr, nil)
+		h := NewHandler(mgr, nil, nil, nil)
 		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin"]}`))
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -321,7 +331,7 @@ func TestUpdateRolesWithMockService(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mgr := &mockUserManager{}
-		h := NewHandler(mgr, nil)
+		h := NewHandler(mgr, nil, nil, nil)
 		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin","viewer"]}`))
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -337,7 +347,7 @@ func TestUpdateRolesWithMockService(t *testing.T) {
 
 func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 	t.Run("list sessions unavailable", func(t *testing.T) {
-		h := NewHandler(&mockUserManager{}, nil)
+		h := NewHandler(&mockUserManager{}, nil, nil, nil)
 		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -349,7 +359,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("list sessions success", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{listResp: []session.SessionInfo{{ID: "s1"}}}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -364,7 +374,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("list sessions error", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{listErr: errors.New("boom")}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("GET", "/api/v1/admin/users/u1/sessions", nil)
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -376,7 +386,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("revoke all success", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions", nil)
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -391,7 +401,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("revoke all error", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{revokeAllErr: errors.New("boom")}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions", nil)
 		req = withURLParam(req, "id", "u1")
 		rr := httptest.NewRecorder()
@@ -403,7 +413,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("revoke one success", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions/s1", nil)
 		req = withURLParam(req, "id", "u1")
 		req = withURLParam(req, "sessionId", "s1")
@@ -419,7 +429,7 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 
 	t.Run("revoke one error", func(t *testing.T) {
 		sessions := &mockSessionManagerUnit{revokeByIDErr: errors.New("boom")}
-		h := NewHandler(&mockUserManager{}, sessions)
+		h := NewHandler(&mockUserManager{}, sessions, nil, nil)
 		req, _ := http.NewRequest("DELETE", "/api/v1/admin/users/u1/sessions/s1", nil)
 		req = withURLParam(req, "id", "u1")
 		req = withURLParam(req, "sessionId", "s1")
@@ -427,6 +437,119 @@ func TestAdminSessionEndpointsWithMockService(t *testing.T) {
 		h.RevokeUserSession(rr, req)
 		if rr.Code != http.StatusInternalServerError {
 			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
+		}
+	})
+}
+
+// ── mocks for GetUserMfa ──────────────────────────────────────────────────────
+
+type mockMfaRepo struct {
+	enabled bool
+	err     error
+}
+
+func (m *mockMfaRepo) IsEnabledForUser(_ context.Context, _ string) (bool, error) {
+	return m.enabled, m.err
+}
+
+type mockWebAuthnRepo struct {
+	creds []webauthn.CredentialMeta
+	err   error
+}
+
+func (m *mockWebAuthnRepo) ListMeta(_ context.Context, _ string) ([]webauthn.CredentialMeta, error) {
+	return m.creds, m.err
+}
+
+func TestGetUserMfa(t *testing.T) {
+	existingUser := &user.User{ID: "u1", Email: "u@example.com"}
+
+	t.Run("user not found returns 404", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDErr: user.ErrNotFound}
+		h := NewHandler(mgr, nil, nil, nil)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status=%d want=404", rr.Code)
+		}
+	})
+
+	t.Run("user lookup DB error returns 500", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDErr: errors.New("db down")}
+		h := NewHandler(mgr, nil, nil, nil)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=500", rr.Code)
+		}
+	})
+
+	t.Run("no mfa repos returns defaults", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDUser: existingUser}
+		h := NewHandler(mgr, nil, nil, nil)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=200", rr.Code)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body["totp_enabled"] != false {
+			t.Fatalf("totp_enabled=%v want=false", body["totp_enabled"])
+		}
+	})
+
+	t.Run("totp enabled propagates", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDUser: existingUser}
+		mfa := &mockMfaRepo{enabled: true}
+		h := NewHandler(mgr, nil, nil, mfa)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=200", rr.Code)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body["totp_enabled"] != true {
+			t.Fatalf("totp_enabled=%v want=true", body["totp_enabled"])
+		}
+	})
+
+	t.Run("mfa DB error returns 500", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDUser: existingUser}
+		mfa := &mockMfaRepo{err: errors.New("db error")}
+		h := NewHandler(mgr, nil, nil, mfa)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=500", rr.Code)
+		}
+	})
+
+	t.Run("webauthn error returns 500", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDUser: existingUser}
+		wa := &mockWebAuthnRepo{err: errors.New("db error")}
+		h := NewHandler(mgr, nil, wa, nil)
+		req, _ := http.NewRequest("GET", "/", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.GetUserMfa(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=500", rr.Code)
 		}
 	})
 }

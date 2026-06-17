@@ -27,6 +27,10 @@ function MetricCard({ label, value, accent }: { label: string; value: number; ac
 
 function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] }) {
   const { t, i18n } = useTranslation("securityDashboard");
+  const [showSuccess, setShowSuccess] = useState(true);
+  const [showFailure, setShowFailure] = useState(true);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
   const width = 900;
   const height = 230;
   const padding = { top: 20, right: 20, bottom: 42, left: 36 };
@@ -58,22 +62,83 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   const failureLine = getBezierPath(failurePts);
   const failureFill = getBezierAreaPath(failurePts, padding.top + chartHeight);
 
+  const activePoint = hoverIdx !== null ? data[hoverIdx] : null;
+
   return (
-    <Paper variant="outlined" sx={{ p: 2.5, gridColumn: { lg: "span 2" } }}>
+    <Paper variant="outlined" sx={{ p: 2.5, gridColumn: { lg: "span 2" }, position: "relative" }}>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t("activityTitle")}</Typography>
         <Box sx={{ display: "flex", gap: 2 }}>
           {[
-            ["#22c55e", t("successful")],
-            ["#f43f5e", t("failed")],
-          ].map(([color, label]) => (
-            <Box key={label} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            { color: "#22c55e", label: t("successful"), visible: showSuccess, set: setShowSuccess },
+            { color: "#f43f5e", label: t("failed"), visible: showFailure, set: setShowFailure },
+          ].map(({ color, label, visible, set }) => (
+            <Box
+              key={label}
+              onClick={() => set(!visible)}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.75,
+                cursor: "pointer",
+                userSelect: "none",
+                opacity: visible ? 1 : 0.4,
+                transition: "opacity 0.2s",
+                "&:hover": { opacity: 0.8 },
+              }}
+            >
               <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: color }} />
-              <Typography variant="caption" color="text.secondary">{label}</Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ textDecoration: visible ? "none" : "line-through" }}
+              >
+                {label}
+              </Typography>
             </Box>
           ))}
         </Box>
       </Box>
+
+      {hoverIdx !== null && activePoint && (
+        <Box
+          sx={{
+            position: "absolute",
+            top: padding.top + 30,
+            left: `clamp(10px, calc(${((points[hoverIdx].x / width) * 100).toFixed(1)}% - 65px), calc(100% - 140px))`,
+            bgcolor: "rgba(15, 23, 42, 0.95)",
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 1.5,
+            boxShadow: 4,
+            color: "#fff",
+            display: "grid",
+            gap: 0.5,
+            p: 1.25,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          <Typography variant="caption" sx={{ fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>
+            {formatBucket(activePoint.bucket)}
+          </Typography>
+          {showSuccess && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "#22c55e" }} />
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)" }}>{t("successful")}:</Typography>
+              <Typography variant="caption" sx={{ fontWeight: 700, ml: "auto" }}>{activePoint.success}</Typography>
+            </Box>
+          )}
+          {showFailure && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "#f43f5e" }} />
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)" }}>{t("failed")}:</Typography>
+              <Typography variant="caption" sx={{ fontWeight: 700, ml: "auto" }}>{activePoint.failure}</Typography>
+            </Box>
+          )}
+        </Box>
+      )}
+
       <Box sx={{ overflowX: "auto" }}>
         <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ minWidth: 620, display: "block" }} role="img" aria-label={t("activityTitle")}>
           <defs>
@@ -108,18 +173,53 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
             );
           })}
 
-          {successFill && <path d={successFill} fill="url(#successGradient)" />}
-          {failureFill && <path d={failureFill} fill="url(#failureGradient)" />}
+          {hoverIdx !== null && (
+            <line
+              x1={points[hoverIdx].x}
+              y1={padding.top}
+              x2={points[hoverIdx].x}
+              y2={padding.top + chartHeight}
+              stroke="currentColor"
+              opacity="0.15"
+              strokeWidth="1.5"
+            />
+          )}
 
-          {successLine && <path d={successLine} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
-          {failureLine && <path d={failureLine} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {showSuccess && successFill && <path d={successFill} fill="url(#successGradient)" />}
+          {showFailure && failureFill && <path d={failureFill} fill="url(#failureGradient)" />}
 
-          {points.map((p) => (
-            <g key={p.bucket}>
-              <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#22c55e" stroke="#0b1120" strokeWidth="1.5" />
-              <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#0b1120" strokeWidth="1.5" />
-            </g>
-          ))}
+          {showSuccess && successLine && <path d={successLine} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {showFailure && failureLine && <path d={failureLine} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+
+          {points.map((p, idx) => {
+            const isHovered = hoverIdx === idx;
+            return (
+              <g key={p.bucket}>
+                {showSuccess && (
+                  <circle
+                    cx={p.x}
+                    cy={p.ySuccess}
+                    r={isHovered ? 6 : 3.5}
+                    fill="#22c55e"
+                    stroke="#0b1120"
+                    strokeWidth={isHovered ? 2.5 : 1.5}
+                    style={{ transition: "r 0.15s ease, stroke-width 0.15s ease" }}
+                  />
+                )}
+                {showFailure && (
+                  <circle
+                    cx={p.x}
+                    cy={p.yFailure}
+                    r={isHovered ? 6 : 3.5}
+                    fill="#f43f5e"
+                    stroke="#0b1120"
+                    strokeWidth={isHovered ? 2.5 : 1.5}
+                    style={{ transition: "r 0.15s ease, stroke-width 0.15s ease" }}
+                  />
+                )}
+              </g>
+            );
+          })}
 
           {points.map((p, index) => (
             index % labelEvery === 0 ? (
@@ -127,6 +227,21 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
                 {formatBucket(p.bucket)}
               </text>
             ) : null
+          ))}
+
+          {points.map((p, idx) => (
+            <rect
+              key={`hover-trigger-${idx}`}
+              x={p.x - groupWidth / 2}
+              y={padding.top}
+              width={groupWidth}
+              height={chartHeight}
+              fill="transparent"
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHoverIdx(idx)}
+              onMouseMove={() => setHoverIdx(idx)}
+              onMouseLeave={() => setHoverIdx(null)}
+            />
           ))}
         </svg>
       </Box>

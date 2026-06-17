@@ -94,6 +94,19 @@ func (r *Repository) IsEnabled(ctx context.Context, userID string) bool {
 	return err == nil && rec.EnabledAt != nil
 }
 
+// IsEnabledForUser is like IsEnabled but surfaces unexpected DB errors.
+// ErrNotFound (no MFA row) is treated as disabled, not an error.
+func (r *Repository) IsEnabledForUser(ctx context.Context, userID string) (bool, error) {
+	rec, err := r.find(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return rec.EnabledAt != nil, nil
+}
+
 // SecretEnc returns the active encrypted TOTP secret, or ErrNotFound.
 func (r *Repository) SecretEnc(ctx context.Context, userID string) (string, error) {
 	rec, err := r.find(ctx, userID)

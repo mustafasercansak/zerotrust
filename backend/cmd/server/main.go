@@ -208,11 +208,12 @@ func run(ctx context.Context, cfg config) error {
 	auditHandler := audit.NewHandler(auditRepo)
 
 	// MFA
+	var mfaRepo *mfa.Repository
 	var mfaSvc *mfa.Service
 	var mfaHandler *mfa.Handler
 	const stepUpMFAWindow = 10 * time.Minute
 	if cfg.MFAEnabled {
-		mfaRepo := mfa.NewRepository(db)
+		mfaRepo = mfa.NewRepository(db)
 		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb)
 		mfaHandler = mfa.NewHandler(mfaSvc, rdb, stepUpMFAWindow)
 		slog.Info("MFA enabled")
@@ -304,7 +305,7 @@ func run(ctx context.Context, cfg config) error {
 
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
-	adminHandler := admin.NewHandler(userSvc, sessionRepo)
+	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepo)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -606,6 +607,7 @@ func run(ctx context.Context, cfg config) error {
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)
+			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/mfa", adminHandler.GetUserMfa)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions/{sessionId}", adminHandler.RevokeUserSession)
 

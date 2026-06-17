@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, ApiError, type PageParams, type Session, type UserData } from "@/lib/api";
+import { api, ApiError, type AuditEntry, type PageParams, type Session, type UserData, type UserMfaInfo } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dateUtils";
+import { formatSessionDevice } from "@/lib/sessionUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
+import { SessionCard } from "@/components/SessionCard";
+import { AuditEntryCard } from "@/components/AuditEntryCard";
 import { requiredValidator } from "@/lib/validation";
 import { toast } from "sonner";
 import Alert from "@mui/material/Alert";
@@ -17,32 +20,32 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
+import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
+import LinearProgress from "@mui/material/LinearProgress";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
+import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import CloseIcon from "@mui/icons-material/Close";
+import DevicesIcon from "@mui/icons-material/Devices";
+import HistoryIcon from "@mui/icons-material/History";
+import LockIcon from "@mui/icons-material/Lock";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
-import type { GridColDef } from "@mui/x-data-grid";
+import PersonIcon from "@mui/icons-material/Person";
+import SecurityIcon from "@mui/icons-material/Security";
+import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
 
 const AVAILABLE_ROLES = ["admin", "user"];
 const DEFAULT_MAX_SESSIONS = 5;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-function sessionDeviceLabel(s: Session): string {
-  const { browser, browser_version: bv, os, os_version: ov, architecture: arch } = s.device_info ?? {};
-  const major = bv?.split(".")?.[0];
-  const browserStr = major ? `${browser} ${major}` : browser;
-  const osStr = [ov ? `${os} ${ov}` : os, arch].filter(Boolean).join(" ");
-  if (browserStr && osStr) return `${browserStr} — ${osStr}`;
-  return browserStr || osStr || "Unknown device";
-}
 
 function sessionCountColor(count: number, maxSessions: number): ChipProps["color"] {
   const ratio = count / Math.max(maxSessions, 1);
@@ -181,7 +184,7 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
                   <ListItemText
                     primary={
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <Typography variant="body2">{sessionDeviceLabel(s)}</Typography>
+                        <Typography variant="body2">{formatSessionDevice(s)}</Typography>
                         {s.is_current && <Chip label="current" size="small" color="primary" />}
                       </Box>
                     }
@@ -223,6 +226,300 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
   );
 }
 
+// ── User Profile Drawer ───────────────────────────────────────────────────────
+
+interface DrawerSection {
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+}
+
+interface UserProfileDrawerProps {
+  user: UserData;
+  onClose: () => void;
+  onRevoke: (userId: string, sessionId: string) => Promise<void>;
+  onRevokeAll: (userId: string) => Promise<void>;
+  onStatusChange: (userId: string, active: boolean) => Promise<void>;
+  isSelf: boolean;
+}
+
+function UserProfileDrawer({
+  user, onClose, onRevoke, onRevokeAll, onStatusChange, isSelf,
+}: UserProfileDrawerProps) {
+  const { t } = useTranslation("admin");
+  const { i18n } = useTranslation();
+  const [activeSection, setActiveSection] = useState<string>("profile");
+
+  const [sessions, setSessions] = useState<Session[] | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  const [audit, setAudit] = useState<AuditEntry[] | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const [mfa, setMfa] = useState<UserMfaInfo | null>(null);
+  const [mfaLoading, setMfaLoading] = useState(false);
+
+  // Load data for each section on demand
+  useEffect(() => {
+    if (activeSection === "sessions" && sessions === null && !sessionsLoading) {
+      setSessionsLoading(true);
+      api.admin.listUserSessions(user.id)
+        .then(setSessions)
+        .catch(() => setSessions([]))
+        .finally(() => setSessionsLoading(false));
+    }
+  }, [activeSection, user.id, sessions, sessionsLoading]);
+
+  useEffect(() => {
+    if (activeSection === "audit" && audit === null && !auditLoading) {
+      setAuditLoading(true);
+      api.listAuditLog({ page: 0, pageSize: 10, filters: { user_id: user.id } })
+        .then((res) => setAudit(res.data))
+        .catch(() => setAudit([]))
+        .finally(() => setAuditLoading(false));
+    }
+  }, [activeSection, user.id, audit, auditLoading]);
+
+  useEffect(() => {
+    if (activeSection === "mfa" && mfa === null && !mfaLoading) {
+      setMfaLoading(true);
+      api.admin.listUserMfa(user.id)
+        .then(setMfa)
+        .catch(() => setMfa({ totp_enabled: false, webauthn_credentials: [] }))
+        .finally(() => setMfaLoading(false));
+    }
+  }, [activeSection, user.id, mfa, mfaLoading]);
+
+  const sections: DrawerSection[] = [
+    { key: "profile", icon: <PersonIcon fontSize="small" />, label: t("drawerProfile") },
+    { key: "sessions", icon: <DevicesIcon fontSize="small" />, label: t("drawerSessions") },
+    { key: "audit", icon: <HistoryIcon fontSize="small" />, label: t("drawerAudit") },
+    { key: "mfa", icon: <SecurityIcon fontSize="small" />, label: t("drawerMfa") },
+  ];
+
+  const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email;
+  const initials = user.first_name?.[0]
+    ? `${user.first_name[0]}${user.last_name?.[0] ?? ""}`.toUpperCase()
+    : user.email.slice(0, 2).toUpperCase();
+
+  return (
+    <Drawer
+      anchor="right"
+      open
+      onClose={onClose}
+      slotProps={{ paper: { sx: { width: { xs: "100vw", sm: 460 }, display: "flex", flexDirection: "column" } } }}
+    >
+      {/* Header */}
+      <Box sx={{ p: 2.5, display: "flex", alignItems: "flex-start", gap: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Avatar
+          src={user.has_avatar ? `/api/v1/users/${user.id}/avatar` : undefined}
+          sx={{ width: 52, height: 52, fontSize: 18, fontWeight: 700 }}
+        >
+          {initials}
+        </Avatar>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }} noWrap>{name}</Typography>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>{user.email}</Typography>
+          <Box sx={{ display: "flex", gap: 0.75, mt: 0.75, flexWrap: "wrap" }}>
+            <Chip
+              size="small"
+              color={user.is_active ? "success" : "error"}
+              label={user.is_active ? t("active") : t("inactive")}
+            />
+            {user.roles.map((r) => (
+              <Chip key={r} size="small" color="primary" label={r} />
+            ))}
+          </Box>
+        </Box>
+        <IconButton onClick={onClose} size="small" sx={{ mt: -0.5 }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      {/* Section nav tabs */}
+      <Box sx={{ display: "flex", borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
+        {sections.map((sec) => (
+          <Tooltip key={sec.key} title={sec.label}>
+            <Box
+              onClick={() => setActiveSection(sec.key)}
+              sx={{
+                alignItems: "center",
+                cursor: "pointer",
+                display: "flex",
+                flex: 1,
+                flexDirection: "column",
+                gap: 0.5,
+                py: 1.25,
+                borderBottom: 2,
+                borderColor: activeSection === sec.key ? "primary.main" : "transparent",
+                color: activeSection === sec.key ? "primary.main" : "text.secondary",
+                transition: "all 0.15s",
+                "&:hover": { color: "primary.main", bgcolor: "action.hover" },
+              }}
+            >
+              {sec.icon}
+              <Typography variant="caption" sx={{ lineHeight: 1, fontSize: 10, fontWeight: activeSection === sec.key ? 700 : 400 }}>
+                {sec.label}
+              </Typography>
+            </Box>
+          </Tooltip>
+        ))}
+      </Box>
+
+      {/* Content */}
+      <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+        {/* Profile */}
+        {activeSection === "profile" && (
+          <Box sx={{ display: "grid", gap: 2 }}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                {t("accountInfo")}
+              </Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 1, mt: 1.5 }}>
+                {[
+                  { label: t("user"), value: name },
+                  { label: t("email"), value: user.email },
+                  { label: t("createdAt"), value: formatDate(user.created_at, i18n.language) },
+                  { label: t("locale"), value: user.locale?.toUpperCase() || "—" },
+                ].map(({ label, value }) => (
+                  <React.Fragment key={label}>
+                    <Typography variant="body2" color="text.secondary">{label}</Typography>
+                    <Typography variant="body2" noWrap title={value}>{value}</Typography>
+                  </React.Fragment>
+                ))}
+              </Box>
+            </Paper>
+            {!isSelf && (
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color={user.is_active ? "error" : "success"}
+                  onClick={() => onStatusChange(user.id, !user.is_active)}
+                >
+                  {user.is_active ? t("deactivate") : t("activate")}
+                </Button>
+                {user.active_sessions > 0 && (
+                  <Button size="small" variant="outlined" color="warning" onClick={() => onRevokeAll(user.id)}>
+                    {t("revokeAllSessions")}
+                  </Button>
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* Sessions */}
+        {activeSection === "sessions" && (
+          <Box>
+            {sessionsLoading && <LinearProgress sx={{ mb: 2 }} />}
+            {!sessionsLoading && sessions?.length === 0 && (
+              <Typography variant="body2" color="text.secondary">{t("noSessionsFound")}</Typography>
+            )}
+            {sessions && sessions.length > 0 && (
+              <Box sx={{ display: "grid", gap: 1.5 }}>
+                {sessions.map((s) => (
+                  <SessionCard
+                    key={s.id}
+                    session={s}
+                    locale={i18n.language}
+                    onRevoke={async (sess) => {
+                      try {
+                        await onRevoke(user.id, sess.id);
+                        setSessions((prev) => prev!.filter((x) => x.id !== sess.id));
+                      } catch { /* handled by caller */ }
+                    }}
+                  />
+                ))}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* Audit log */}
+        {activeSection === "audit" && (
+          <Box>
+            {auditLoading && <LinearProgress sx={{ mb: 2 }} />}
+            {!auditLoading && audit?.length === 0 && (
+              <Typography variant="body2" color="text.secondary">{t("noAuditEntries")}</Typography>
+            )}
+            {audit && audit.length > 0 && (
+              <Box sx={{ display: "grid", gap: 1 }}>
+                {audit.map((entry) => (
+                  <AuditEntryCard
+                    key={entry.id}
+                    entry={entry}
+                    locale={i18n.language}
+                  />
+                ))}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* MFA */}
+        {activeSection === "mfa" && (
+          <Box sx={{ display: "grid", gap: 2 }}>
+            {mfaLoading && <LinearProgress />}
+            {mfa && (
+              <>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                    <LockIcon color={mfa.totp_enabled ? "success" : "disabled"} />
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("totpLabel")}</Typography>
+                      <Typography variant="caption" color={mfa.totp_enabled ? "success.main" : "text.secondary"}>
+                        {mfa.totp_enabled ? t("totpEnabled") : t("totpDisabled")}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      size="small"
+                      sx={{ ml: "auto" }}
+                      color={mfa.totp_enabled ? "success" : "default"}
+                      label={mfa.totp_enabled ? t("enabled") : t("disabled")}
+                    />
+                  </Box>
+                </Paper>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                    {t("passkeys")} ({mfa.webauthn_credentials.length})
+                  </Typography>
+                  {mfa.webauthn_credentials.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">{t("noPasskeys")}</Typography>
+                  ) : (
+                    <Box sx={{ display: "grid", gap: 1 }}>
+                      {mfa.webauthn_credentials.map((cred) => (
+                        <Paper key={cred.id} variant="outlined" sx={{ p: 1.5 }}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                            <SecurityIcon color="primary" fontSize="small" />
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                                {cred.name || t("unnamedPasskey")}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {t("signCount")}: {cred.sign_count} · {t("added")}: {formatDate(cred.created_at, i18n.language)}
+                              </Typography>
+                              {cred.last_used_at && (
+                                <Typography variant="caption" color="text.disabled" sx={{ display: "block" }}>
+                                  {t("lastUsed")}: {formatDateTime(cred.last_used_at, i18n.language)}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Box>
+                        </Paper>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              </>
+            )}
+          </Box>
+        )}
+      </Box>
+    </Drawer>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
@@ -244,6 +541,13 @@ export default function UsersPage() {
 
   // Sessions dialog
   const [sessionsUser, setSessionsUser] = useState<UserData | null>(null);
+
+  // Profile drawer
+  const [drawerUser, setDrawerUser] = useState<UserData | null>(null);
+
+  const handleRowClick = useCallback((params: GridRowParams<UserData>) => {
+    setDrawerUser(params.row);
+  }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const fetcher = useCallback((p: PageParams) => api.admin.listUsers(p), [refresh]);
@@ -442,6 +746,7 @@ export default function UsersPage() {
         pageSizeOptions={[10, 25, 50]}
         defaultPageSize={25}
         rowHeight={64}
+        onRowClick={handleRowClick}
       />
 
       {/* ── Create user dialog ── */}
@@ -488,6 +793,40 @@ export default function UsersPage() {
           </DialogActions>
         </Box>
       </Dialog>
+
+      {/* ── User profile drawer ── */}
+      {drawerUser && (
+        <UserProfileDrawer
+          user={drawerUser}
+          onClose={() => setDrawerUser(null)}
+          isSelf={drawerUser.id === me?.user_id}
+          onStatusChange={async (userId, active) => {
+            await handleStatusChange(userId, active);
+            setRefresh((n) => n + 1);
+            setDrawerUser((prev) => prev ? { ...prev, is_active: active } : null);
+          }}
+          onRevoke={async (userId, sessionId) => {
+            try {
+              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId));
+            } catch (err) {
+              if (err instanceof ApiError && err.message === "mfa_required") throw err;
+              toast.error(t("errors.internal_error"));
+              throw err;
+            }
+          }}
+          onRevokeAll={async (userId) => {
+            if (!window.confirm(t("revokeAllConfirm"))) return;
+            try {
+              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId));
+              setRefresh((n) => n + 1);
+            } catch (err) {
+              if (err instanceof ApiError && err.message === "mfa_required") throw err;
+              toast.error(t("errors.internal_error"));
+              throw err;
+            }
+          }}
+        />
+      )}
 
       {/* ── Sessions dialog ── */}
       {sessionsUser && (

@@ -10,6 +10,11 @@ export interface WebAuthnCredential {
   last_used_at: string | null;
 }
 
+export interface UserMfaInfo {
+  totp_enabled: boolean;
+  webauthn_credentials: WebAuthnCredential[];
+}
+
 export interface MeData {
   user_id: string;
   email: string;
@@ -472,6 +477,9 @@ export const api = {
 
     revokeUserSession: (userId: string, sessionId: string) =>
       request<void>(`/api/v1/admin/users/${userId}/sessions/${sessionId}`, { method: "DELETE" }),
+
+    listUserMfa: (userId: string) =>
+      request<UserMfaInfo>(`/api/v1/admin/users/${userId}/mfa`),
 
     listServiceAccounts: (p: PageParams) =>
       request<PagedResult<ServiceAccount>>(`/api/v1/admin/service-accounts${buildQuery(p)}`),

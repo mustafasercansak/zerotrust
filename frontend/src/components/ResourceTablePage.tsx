@@ -33,6 +33,7 @@ interface ResourceTablePageProps<T extends GridValidRowModel> {
   liveRefreshMs?: number;
   eventSourceUrl?: string;
   rowHeight?: number;
+  onRowClick?: (params: import("@mui/x-data-grid").GridRowParams<T>) => void;
 }
 
 /**
@@ -56,6 +57,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
   liveRefreshMs = 5_000,
   eventSourceUrl,
   rowHeight,
+  onRowClick,
 }: ResourceTablePageProps<T>) {
   const { t, i18n } = useTranslation("common");
 
@@ -218,7 +220,8 @@ export function ResourceTablePage<T extends GridValidRowModel>({
             setPaginationModel((prev) => ({ ...prev, page: 0 }));
           }}
           pageSizeOptions={pageSizeOptions}
-          disableRowSelectionOnClick
+          disableRowSelectionOnClick={!onRowClick}
+          onRowClick={onRowClick}
           localeText={localeText}
           sx={{
             borderColor: "divider",

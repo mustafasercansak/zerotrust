@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type AuditEntry, type AuditTrendPoint, type PageParams } from "@/lib/api";
 import { formatDateTime } from "@/lib/dateUtils";
@@ -8,9 +8,15 @@ import { getBezierPath, getBezierAreaPath } from "@/lib/chartUtils";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Drawer from "@mui/material/Drawer";
+import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
-import type { GridColDef } from "@mui/x-data-grid";
+import CloseIcon from "@mui/icons-material/Close";
+import ComputerIcon from "@mui/icons-material/Computer";
+import InfoIcon from "@mui/icons-material/Info";
+import PersonIcon from "@mui/icons-material/Person";
+import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
 
 type AuditClientInfo = NonNullable<AuditEntry["metadata"]>["client_info"];
 
@@ -45,6 +51,8 @@ function osLabel(info?: AuditClientInfo, ua?: string | null): string {
   return "";
 }
 
+// ── Audit Trend Chart ─────────────────────────────────────────────────────────
+
 function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const { t } = useTranslation("audit");
   const [trends, setTrends] = useState<AuditTrendPoint[] | null>(null);
@@ -55,20 +63,12 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
     let cancelled = false;
     setLoading(!hasLoaded.current);
     api.listAuditLogTrends()
-      .then((data) => {
-        if (!cancelled) setTrends(data);
-      })
+      .then((data) => { if (!cancelled) setTrends(data); })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) {
-          hasLoaded.current = true;
-          setLoading(false);
-        }
+        if (!cancelled) { hasLoaded.current = true; setLoading(false); }
       });
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [refreshSignal]);
 
   if (loading) {
@@ -82,12 +82,8 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   if (!trends || trends.length === 0) return null;
 
   const maxVal = Math.max(...trends.map((pt) => Math.max(pt.success, pt.failure)), 1);
-  const paddingX = 60;
-  const paddingY = 25;
-  const width = 800;
-  const height = 160;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingY * 2;
+  const paddingX = 60; const paddingY = 25; const width = 800; const height = 160;
+  const chartWidth = width - paddingX * 2; const chartHeight = height - paddingY * 2;
 
   const points = trends.map((pt, i) => {
     const x = paddingX + i * (chartWidth / (trends.length - 1));
@@ -99,7 +95,6 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const successPts = points.map(p => ({ x: p.x, y: p.ySuccess }));
   const successPath = getBezierPath(successPts);
   const successArea = getBezierAreaPath(successPts, height - paddingY);
-
   const failurePts = points.map(p => ({ x: p.x, y: p.yFailure }));
   const failurePath = getBezierPath(failurePts);
   const failureArea = getBezierAreaPath(failurePts, height - paddingY);
@@ -107,9 +102,7 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   return (
     <Paper variant="outlined" sx={{ p: 3, mb: 2, bgcolor: "background.paper" }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-          {t("trendsTitle")}
-        </Typography>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("trendsTitle")}</Typography>
         <Box sx={{ display: "flex", gap: 2 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
             <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "#22c55e" }} />
@@ -121,7 +114,6 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
           </Box>
         </Box>
       </Box>
-
       <Box sx={{ overflowX: "auto", width: "100%" }}>
         <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ minWidth: 600, display: "block" }}>
           <defs>
@@ -134,48 +126,30 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
               <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
             </linearGradient>
           </defs>
-
-          {/* Horizontal Grid lines */}
           <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="currentColor" opacity="0.08" strokeDasharray="3 3" />
           <line x1={paddingX} y1={paddingY + chartHeight / 2} x2={width - paddingX} y2={paddingY + chartHeight / 2} stroke="currentColor" opacity="0.08" strokeDasharray="3 3" />
           <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="currentColor" opacity="0.08" />
-
-          {/* Area Gradients */}
           {successArea && <path d={successArea} fill="url(#successGrad)" />}
           {failureArea && <path d={failureArea} fill="url(#failureGrad)" />}
-
-          {/* Line paths */}
           {successPath && <path d={successPath} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
           {failurePath && <path d={failurePath} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
-
-          {/* Dots and values for Success */}
           {points.map((p, i) => (
             <g key={`succ-${i}`}>
               <circle cx={p.x} cy={p.ySuccess} r="3.5" fill="#22c55e" stroke="#0b1120" strokeWidth="1.5" />
-              <text x={p.x} y={p.ySuccess - 8} textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="700">
-                {p.success > 0 ? p.success : ""}
-              </text>
+              <text x={p.x} y={p.ySuccess - 8} textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="700">{p.success > 0 ? p.success : ""}</text>
             </g>
           ))}
-
-          {/* Dots and values for Failure */}
           {points.map((p, i) => (
             <g key={`fail-${i}`}>
               <circle cx={p.x} cy={p.yFailure} r="3.5" fill="#f43f5e" stroke="#0b1120" strokeWidth="1.5" />
-              <text x={p.x} y={p.yFailure - 8} textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="700">
-                {p.failure > 0 ? p.failure : ""}
-              </text>
+              <text x={p.x} y={p.yFailure - 8} textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="700">{p.failure > 0 ? p.failure : ""}</text>
             </g>
           ))}
-
-          {/* X-Axis labels */}
           {points.map((p, i) => {
             const m = p.date.split("-");
             const label = m.length >= 3 ? `${m[2]}/${m[1]}` : p.date;
             return (
-              <text key={`lbl-${i}`} x={p.x} y={height - 6} textAnchor="middle" fill="currentColor" opacity="0.35" fontSize="9">
-                {label}
-              </text>
+              <text key={`lbl-${i}`} x={p.x} y={height - 6} textAnchor="middle" fill="currentColor" opacity="0.35" fontSize="9">{label}</text>
             );
           })}
         </svg>
@@ -184,17 +158,215 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   );
 }
 
+// ── Audit Detail Drawer ───────────────────────────────────────────────────────
+
+interface AuditDetailDrawerProps {
+  entry: AuditEntry;
+  onClose: () => void;
+}
+
+function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
+  const { t } = useTranslation("audit");
+  const { i18n } = useTranslation();
+  const [activeSection, setActiveSection] = useState<"info" | "client" | "user">("info");
+  const [showRaw, setShowRaw] = useState(false);
+
+  const loc = entry.metadata?.location;
+  const location = [loc?.city, loc?.country].filter(Boolean).join(", ");
+  const clientInfo = entry.metadata?.client_info;
+  const outcome = entry.metadata?.outcome as string | undefined;
+  const isSuccess = outcome === "success";
+  const isFailure = outcome === "failure";
+
+  const sections = [
+    { key: "info" as const, icon: <InfoIcon fontSize="small" />, label: t("drawerInfo") },
+    { key: "client" as const, icon: <ComputerIcon fontSize="small" />, label: t("drawerClient") },
+    { key: "user" as const, icon: <PersonIcon fontSize="small" />, label: t("drawerUser") },
+  ];
+
+  return (
+    <Drawer
+      anchor="right"
+      open
+      onClose={onClose}
+      slotProps={{ paper: { sx: { width: { xs: "100vw", sm: 460 }, display: "flex", flexDirection: "column" } } }}
+    >
+      {/* Header */}
+      <Box sx={{ p: 2.5, display: "flex", alignItems: "flex-start", gap: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5, flexWrap: "wrap" }}>
+            {outcome && (
+              <Chip size="small" color={isSuccess ? "success" : isFailure ? "error" : "default"} label={outcome} />
+            )}
+          </Box>
+          <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: "monospace", wordBreak: "break-all" }}>
+            {entry.action}
+          </Typography>
+          <Typography variant="caption" color="text.disabled">
+            {formatDateTime(entry.created_at, i18n.language)}
+          </Typography>
+        </Box>
+        <IconButton onClick={onClose} size="small" sx={{ mt: -0.5, flexShrink: 0 }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      {/* Section nav */}
+      <Box sx={{ display: "flex", borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
+        {sections.map((sec) => (
+          <Box
+            key={sec.key}
+            onClick={() => setActiveSection(sec.key)}
+            sx={{
+              alignItems: "center", cursor: "pointer", display: "flex", flex: 1,
+              flexDirection: "column", gap: 0.5, py: 1.25, borderBottom: 2,
+              borderColor: activeSection === sec.key ? "primary.main" : "transparent",
+              color: activeSection === sec.key ? "primary.main" : "text.secondary",
+              transition: "all 0.15s",
+              "&:hover": { color: "primary.main", bgcolor: "action.hover" },
+            }}
+          >
+            {sec.icon}
+            <Typography variant="caption" sx={{ lineHeight: 1, fontSize: 10, fontWeight: activeSection === sec.key ? 700 : 400 }}>
+              {sec.label}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+
+      {/* Content */}
+      <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+
+        {/* Info section */}
+        {activeSection === "info" && (
+          <Box sx={{ display: "grid", gap: 2 }}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1.5 }}>
+                {t("eventDetails")}
+              </Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 1 }}>
+                {([
+                  { label: t("action"), value: entry.action },
+                  { label: t("resource"), value: entry.resource || "—" },
+                  { label: t("ip"), value: entry.ip_address || "—" },
+                  ...(location ? [{ label: t("location"), value: location }] : []),
+                  ...(entry.metadata?.status != null ? [{ label: t("status"), value: String(entry.metadata.status) }] : []),
+                  ...(entry.metadata?.reason ? [{ label: t("reason"), value: String(entry.metadata.reason) }] : []),
+                ] as { label: string; value: string }[]).map(({ label, value }) => (
+                  <React.Fragment key={label}>
+                    <Typography variant="body2" color="text.secondary">{label}</Typography>
+                    <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all", fontSize: 12 }}>{value}</Typography>
+                  </React.Fragment>
+                ))}
+              </Box>
+            </Paper>
+
+            {/* Raw metadata toggle */}
+            {entry.metadata && (
+              <Box>
+                <Box onClick={() => setShowRaw((v) => !v)} sx={{ display: "flex", alignItems: "center", gap: 0.75, cursor: "pointer", mb: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                    {t("rawMetadata")}
+                  </Typography>
+                  <Typography variant="caption" color="primary">{showRaw ? "▲" : "▼"}</Typography>
+                </Box>
+                {showRaw && (
+                  <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "background.default" }}>
+                    <Typography component="pre" variant="caption" sx={{ fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all", m: 0 }}>
+                      {JSON.stringify(entry.metadata, null, 2)}
+                    </Typography>
+                  </Paper>
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* Client section */}
+        {activeSection === "client" && (
+          <Box sx={{ display: "grid", gap: 2 }}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1.5 }}>
+                {t("clientDetails")}
+              </Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 1 }}>
+                {([
+                  { label: t("browserLabel"), value: clientLabel(clientInfo, entry.user_agent) },
+                  { label: t("osLabel"), value: osLabel(clientInfo, entry.user_agent) || "—" },
+                  ...(clientInfo?.architecture ? [{ label: t("arch"), value: clientInfo.architecture }] : []),
+                  ...(clientInfo?.mobile ? [{ label: t("mobile"), value: clientInfo.mobile }] : []),
+                ] as { label: string; value: string }[]).map(({ label, value }) => (
+                  <React.Fragment key={label}>
+                    <Typography variant="body2" color="text.secondary">{label}</Typography>
+                    <Typography variant="body2" sx={{ wordBreak: "break-all" }}>{value}</Typography>
+                  </React.Fragment>
+                ))}
+              </Box>
+            </Paper>
+            {entry.user_agent && (
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1 }}>
+                  {t("userAgent")}
+                </Typography>
+                <Typography variant="caption" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                  {entry.user_agent}
+                </Typography>
+              </Paper>
+            )}
+          </Box>
+        )}
+
+        {/* User section */}
+        {activeSection === "user" && (
+          <Box sx={{ display: "grid", gap: 2 }}>
+            {(entry.user_email || entry.user_id) ? (
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1.5 }}>
+                  {t("actorDetails")}
+                </Typography>
+                <Box sx={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 1 }}>
+                  {entry.user_email && (
+                    <>
+                      <Typography variant="body2" color="text.secondary">{t("email")}</Typography>
+                      <Typography variant="body2">{entry.user_email}</Typography>
+                    </>
+                  )}
+                  {entry.user_id && (
+                    <>
+                      <Typography variant="body2" color="text.secondary">{t("userId")}</Typography>
+                      <Typography variant="caption" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>{entry.user_id}</Typography>
+                    </>
+                  )}
+                </Box>
+              </Paper>
+            ) : (
+              <Typography variant="body2" color="text.secondary">{t("anonymousActor")}</Typography>
+            )}
+          </Box>
+        )}
+      </Box>
+    </Drawer>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function AuditPage() {
   const { t } = useTranslation("audit");
   const { i18n } = useTranslation();
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
   const [trendRefresh, setTrendRefresh] = useState(0);
+  const [detailEntry, setDetailEntry] = useState<AuditEntry | null>(null);
 
   const fetcher = useCallback(async (p: PageParams) => {
     const result = await api.listAuditLog(p);
     setTrendRefresh((n) => n + 1);
     return result;
+  }, []);
+
+  const handleRowClick = useCallback((params: GridRowParams<AuditEntry>) => {
+    setDetailEntry(params.row);
   }, []);
 
   const tabs = useMemo(() => [
@@ -209,14 +381,7 @@ export default function AuditPage() {
       renderCell: ({ row }) => {
         const outcome = row.metadata?.outcome;
         if (!outcome) return null;
-        return (
-          <Chip
-            size="small"
-            label={outcome === "success" ? t("success") : t("failure")}
-            color={outcome === "success" ? "success" : "error"}
-            variant="outlined"
-          />
-        );
+        return <Chip size="small" label={outcome === "success" ? t("success") : t("failure")} color={outcome === "success" ? "success" : "error"} variant="outlined" />;
       },
     },
     {
@@ -239,20 +404,8 @@ export default function AuditPage() {
         if (!status && !reason) return null;
         return (
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
-            {status != null && (
-              <Chip
-                size="small"
-                label={String(status)}
-                variant="outlined"
-                color={status >= 400 ? "warning" : "default"}
-                sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
-              />
-            )}
-            {reason && (
-              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                {reason}
-              </Typography>
-            )}
+            {status != null && <Chip size="small" label={String(status)} variant="outlined" color={status >= 400 ? "warning" : "default"} sx={{ fontFamily: "monospace", fontSize: "0.7rem" }} />}
+            {reason && <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>{reason}</Typography>}
           </Box>
         );
       },
@@ -263,14 +416,10 @@ export default function AuditPage() {
         row.user_email ? (
           <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", py: 0.5 }}>
             <Typography variant="body2" sx={{ lineHeight: 1.4 }}>{row.user_email}</Typography>
-            <Typography variant="caption" color="text.disabled" sx={{ fontFamily: "monospace", lineHeight: 1.3 }}>
-              {row.user_id}
-            </Typography>
+            <Typography variant="caption" color="text.disabled" sx={{ fontFamily: "monospace", lineHeight: 1.3 }}>{row.user_id}</Typography>
           </Box>
         ) : (
-          <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-            {row.user_id ?? "—"}
-          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>{row.user_id ?? "—"}</Typography>
         ),
     },
     {
@@ -280,14 +429,8 @@ export default function AuditPage() {
         const place = [loc?.city, loc?.country].filter(Boolean).join(", ");
         return (
           <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", py: 0.5 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", lineHeight: 1.4 }}>
-              {row.ip_address ?? "—"}
-            </Typography>
-            {place && (
-              <Typography variant="caption" color="text.disabled" sx={{ lineHeight: 1.2 }}>
-                {place}
-              </Typography>
-            )}
+            <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", lineHeight: 1.4 }}>{row.ip_address ?? "—"}</Typography>
+            {place && <Typography variant="caption" color="text.disabled" sx={{ lineHeight: 1.2 }}>{place}</Typography>}
           </Box>
         );
       },
@@ -330,8 +473,16 @@ export default function AuditPage() {
           pageSizeOptions={[10, 25, 50]}
           defaultPageSize={25}
           rowHeight={64}
+          onRowClick={handleRowClick}
         />
       </Box>
+
+      {detailEntry && (
+        <AuditDetailDrawer
+          entry={detailEntry}
+          onClose={() => setDetailEntry(null)}
+        />
+      )}
     </Box>
   );
 }

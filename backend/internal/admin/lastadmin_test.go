@@ -26,7 +26,7 @@ func reqWithClaims(method, body, targetID, callerID string) *http.Request {
 
 func TestUpdateRoles_SelfModificationForbidden(t *testing.T) {
 	m := &mockUserManager{}
-	h := NewHandler(m, nil)
+	h := NewHandler(m, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.UpdateRoles(w, reqWithClaims(http.MethodPatch, `{"roles":["viewer"]}`, "admin-1", "admin-1"))
@@ -41,7 +41,7 @@ func TestUpdateRoles_SelfModificationForbidden(t *testing.T) {
 
 func TestSetStatus_SelfModificationForbidden(t *testing.T) {
 	m := &mockUserManager{}
-	h := NewHandler(m, nil)
+	h := NewHandler(m, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.SetStatus(w, reqWithClaims(http.MethodPatch, `{"is_active":false}`, "admin-1", "admin-1"))
@@ -56,7 +56,7 @@ func TestSetStatus_SelfModificationForbidden(t *testing.T) {
 
 func TestUpdateRoles_LastAdminConflict(t *testing.T) {
 	m := &mockUserManager{setRolesErr: user.ErrLastAdmin}
-	h := NewHandler(m, nil)
+	h := NewHandler(m, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.UpdateRoles(w, reqWithClaims(http.MethodPatch, `{"roles":["viewer"]}`, "admin-2", "admin-1"))
@@ -71,7 +71,7 @@ func TestUpdateRoles_LastAdminConflict(t *testing.T) {
 
 func TestSetStatus_LastAdminConflict(t *testing.T) {
 	m := &mockUserManager{setActiveErr: user.ErrLastAdmin}
-	h := NewHandler(m, nil)
+	h := NewHandler(m, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.SetStatus(w, reqWithClaims(http.MethodPatch, `{"is_active":false}`, "admin-2", "admin-1"))
@@ -83,7 +83,7 @@ func TestSetStatus_LastAdminConflict(t *testing.T) {
 
 func TestUpdateRoles_OtherUserSucceeds(t *testing.T) {
 	m := &mockUserManager{}
-	h := NewHandler(m, nil)
+	h := NewHandler(m, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.UpdateRoles(w, reqWithClaims(http.MethodPatch, `{"roles":["viewer"]}`, "user-9", "admin-1"))

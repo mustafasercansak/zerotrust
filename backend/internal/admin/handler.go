@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
+	"github.com/zerotrust/backend/internal/webauthn"
 	"github.com/zerotrust/backend/pkg/middleware"
 	"github.com/zerotrust/backend/pkg/validation"
 )
@@ -31,15 +32,31 @@ type UserManager interface {
 	UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*user.User, error)
 	SetRoles(ctx context.Context, userID string, roles []string) error
 	SetActive(ctx context.Context, userID string, active bool) error
+	FindByID(ctx context.Context, id string) (*user.User, error)
+}
+
+type MfaRepo interface {
+	IsEnabledForUser(ctx context.Context, userID string) (bool, error)
+}
+
+type WebAuthnRepo interface {
+	ListMeta(ctx context.Context, userID string) ([]webauthn.CredentialMeta, error)
 }
 
 type Handler struct {
 	userSvc  UserManager
 	sessions SessionManager // nil when not wired
+	webauthn WebAuthnRepo
+	mfa      MfaRepo
 }
 
-func NewHandler(userSvc UserManager, sessions SessionManager) *Handler {
-	return &Handler{userSvc: userSvc, sessions: sessions}
+func NewHandler(userSvc UserManager, sessions SessionManager, webauthn WebAuthnRepo, mfa MfaRepo) *Handler {
+	return &Handler{
+		userSvc:  userSvc,
+		sessions: sessions,
+		webauthn: webauthn,
+		mfa:      mfa,
+	}
 }
 
 type userResponse struct {
@@ -280,6 +297,49 @@ func (h *Handler) RevokeUserSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/v1/admin/users/{id}/mfa
+func (h *Handler) GetUserMfa(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+
+	if _, err := h.userSvc.FindByID(r.Context(), userID); err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+		}
+		return
+	}
+
+	totpEnabled := false
+	if h.mfa != nil {
+		enabled, err := h.mfa.IsEnabledForUser(r.Context(), userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		totpEnabled = enabled
+	}
+
+	var credentials []webauthn.CredentialMeta
+	if h.webauthn != nil {
+		var err error
+		credentials, err = h.webauthn.ListMeta(r.Context(), userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
+	} else {
+		credentials = []webauthn.CredentialMeta{}
+	}
+
+	resp := map[string]any{
+		"totp_enabled":         totpEnabled,
+		"webauthn_credentials": credentials,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

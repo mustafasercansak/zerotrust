@@ -130,7 +130,6 @@ export default function ServiceAccountsPage() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [newSecret, setNewSecret] = useState<ServiceAccountCreated | null>(null);
-  const [copied, setCopied] = useState(false);
   const [name, setName] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [expiresAt, setExpiresAt] = useState("");

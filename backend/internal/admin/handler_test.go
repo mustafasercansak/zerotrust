@@ -81,7 +81,7 @@ func mockHandlerDeps(t *testing.T) (*Handler, *user.Service, *pgxpool.Pool, cont
 	}
 
 	mockSessions := &mockSessionManager{}
-	h := NewHandler(svc, mockSessions)
+	h := NewHandler(svc, mockSessions, nil, nil)
 
 	return h, svc, pool, ctx, mockSessions
 }
