@@ -9,14 +9,16 @@ export function formatSessionDevice(s: Session): string {
   const di = s.device_info;
 
   // ── Structured path (preferred) ────────────────────────────────────────────
-  if (di?.browser) {
+  if (di) {
     const major = di.browser_version?.split(".")?.[0];
-    const browserStr = major ? `${di.browser} ${major}` : di.browser;
+    const browserStr = di.browser ? (major ? `${di.browser} ${major}` : di.browser) : "";
     const osStr = [di.os_version ? `${di.os} ${di.os_version}` : di.os, di.architecture]
       .filter(Boolean)
       .join(" ");
     if (browserStr && osStr) return `${browserStr} — ${osStr}`;
-    return browserStr || osStr || "Unknown device";
+    if (browserStr) return browserStr;
+    if (osStr) return osStr;
+    return "Unknown device";
   }
 
   // ── UA-string fallback ──────────────────────────────────────────────────────

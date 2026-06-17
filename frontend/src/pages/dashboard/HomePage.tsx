@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api, type AuditEntry, type Session } from "@/lib/api";
+import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { SessionCard } from "@/components/SessionCard";
 import { AuditEntryCard } from "@/components/AuditEntryCard";
@@ -16,6 +17,9 @@ import Typography from "@mui/material/Typography";
 import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircle";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import DevicesIcon from "@mui/icons-material/Devices";
 
 // ── Small section wrapper ─────────────────────────────────────────────────────
 
@@ -41,6 +45,29 @@ function Section({ title, linkLabel, onLink, children }: SectionProps) {
       </Box>
       {children}
     </Paper>
+  );
+}
+
+// ── Security checklist row ────────────────────────────────────────────────────
+
+function SecurityRow({ ok, primary, action }: {
+  ok: boolean;
+  primary: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, py: 0.75 }}>
+      {ok
+        ? <CheckCircleOutlineIcon color="success" sx={{ fontSize: 20, flexShrink: 0 }} />
+        : <WarningAmberIcon color="warning" sx={{ fontSize: 20, flexShrink: 0 }} />
+      }
+      <Typography variant="body2" sx={{ flex: 1 }}>{primary}</Typography>
+      {action && (
+        <Button size="small" onClick={action.onClick} sx={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>
+          {action.label} →
+        </Button>
+      )}
+    </Box>
   );
 }
 
@@ -93,6 +120,8 @@ export default function HomePage() {
     ? `${me.first_name[0]}${me.last_name?.[0] ?? ""}`.toUpperCase()
     : me.email.slice(0, 2).toUpperCase();
 
+  const lastSeenEntry = !auditLoading && audit ? (audit.find((e) => !!e.ip_address) ?? null) : null;
+
   return (
     <Box
       sx={{
@@ -128,7 +157,9 @@ export default function HomePage() {
             <Typography variant="h6" sx={{ fontWeight: 700 }} noWrap>{name}</Typography>
             <VerifiedUserIcon color="success" fontSize="small" />
           </Box>
-          <Typography variant="body2" color="text.secondary" noWrap>{me.email}</Typography>
+          {name !== me.email && (
+            <Typography variant="body2" color="text.secondary" noWrap>{me.email}</Typography>
+          )}
           <Box sx={{ display: "flex", gap: 0.75, mt: 1, flexWrap: "wrap" }}>
             {me.roles.map((r) => (
               <Chip key={r} size="small" color="primary" label={r} />
@@ -140,6 +171,10 @@ export default function HomePage() {
           <Typography variant="caption" sx={{ fontFamily: "monospace", fontSize: 11 }} noWrap>{me.user_id}</Typography>
           <Typography variant="caption" color="text.secondary">{t("locale")}</Typography>
           <Typography variant="caption">{i18n.language.toUpperCase()}</Typography>
+          <Typography variant="caption" color="text.secondary">{t("joined")}</Typography>
+          <Typography variant="caption">{formatDate(me.created_at, i18n.language)}</Typography>
+          <Typography variant="caption" color="text.secondary">{t("modified")}</Typography>
+          <Typography variant="caption">{formatDate(me.updated_at, i18n.language)}</Typography>
         </Box>
       </Paper>
 
@@ -150,7 +185,7 @@ export default function HomePage() {
         <Section
           title={t("mfaTitle")}
           linkLabel={mfaEnabled === false ? t("mfaSetup") : t("mfaManage")}
-          onLink={() => navigate("/mfa")}
+          onLink={() => navigate("/dashboard/mfa")}
         >
           {mfaLoading ? (
             <Skeleton variant="rounded" height={48} />
@@ -179,11 +214,14 @@ export default function HomePage() {
         <Section
           title={t("sessionsTitle")}
           linkLabel={t("sessionsViewAll")}
-          onLink={() => navigate("/sessions")}
+          onLink={() => navigate("/dashboard/sessions")}
         >
           {sessionsLoading && <LinearProgress />}
           {!sessionsLoading && sessions?.length === 0 && (
-            <Typography variant="body2" color="text.secondary">{t("noSessions")}</Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, py: 2, color: "text.disabled" }}>
+              <DevicesIcon sx={{ fontSize: 32 }} />
+              <Typography variant="body2" align="center">{t("noSessions")}</Typography>
+            </Box>
           )}
           {sessions && sessions.length > 0 && (
             <Box sx={{ display: "grid", gap: 1 }}>
@@ -199,7 +237,7 @@ export default function HomePage() {
       <Section
         title={t("activityTitle")}
         linkLabel={t("activityViewAll")}
-        onLink={() => navigate("/audit")}
+        onLink={() => navigate("/dashboard/audit")}
       >
         {auditLoading && <LinearProgress />}
         {!auditLoading && audit?.length === 0 && (
@@ -215,6 +253,39 @@ export default function HomePage() {
                 compact
               />
             ))}
+          </Box>
+        )}
+      </Section>
+
+      {/* ── Security overview ── */}
+      <Section title={t("securityTitle")}>
+        {(mfaLoading || sessionsLoading) ? (
+          <Box sx={{ display: "grid", gap: 1 }}>
+            <Skeleton variant="rounded" height={38} />
+            <Skeleton variant="rounded" height={38} />
+          </Box>
+        ) : (
+          <Box sx={{ "& > * + *": { borderTop: "1px solid", borderColor: "divider" } }}>
+            {mfaEnabled !== null && (
+              <SecurityRow
+                ok={mfaEnabled}
+                primary={mfaEnabled ? t("securityMfaOn") : t("securityMfaOff")}
+                action={!mfaEnabled ? { label: t("mfaSetup"), onClick: () => navigate("/dashboard/mfa") } : undefined}
+              />
+            )}
+            {sessions && sessions.length > 0 && (
+              <SecurityRow
+                ok={sessions.length === 1}
+                primary={sessions.length === 1 ? t("securityOneSession") : t("securityManySessions", { count: sessions.length })}
+                action={sessions.length > 1 ? { label: t("sessionsViewAll"), onClick: () => navigate("/dashboard/sessions") } : undefined}
+              />
+            )}
+            {lastSeenEntry && (
+              <SecurityRow
+                ok
+                primary={t("securityLastSeen", { ip: lastSeenEntry.ip_address, date: formatDate(lastSeenEntry.created_at, i18n.language) })}
+              />
+            )}
           </Box>
         )}
       </Section>

@@ -70,6 +70,7 @@ func TestToResponseHandlesNilRoles(t *testing.T) {
 		Locale:    "en",
 		IsActive:  true,
 		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 6, 7, 8, 9, 10, 0, time.UTC),
 		Roles:     nil,
 	}
 
@@ -77,6 +78,9 @@ func TestToResponseHandlesNilRoles(t *testing.T) {
 
 	if resp.CreatedAt != "2026-01-02T03:04:05Z" {
 		t.Fatalf("created_at=%q", resp.CreatedAt)
+	}
+	if resp.UpdatedAt != "2026-06-07T08:09:10Z" {
+		t.Fatalf("updated_at=%q", resp.UpdatedAt)
 	}
 	if resp.ActiveSessions != 3 {
 		t.Fatalf("active_sessions=%d want=3", resp.ActiveSessions)
@@ -202,6 +206,7 @@ func TestListUsersWithMockService(t *testing.T) {
 		ID:        "u1",
 		Email:     "one@example.com",
 		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}
 	mgr := &mockUserManager{
 		listResult: user.ListResult{

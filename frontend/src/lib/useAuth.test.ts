@@ -107,6 +107,8 @@ describe("useAuth React hook", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       locale: "tr", // mismatching locale
       roles: ["admin"],
     });
@@ -128,6 +130,8 @@ describe("useAuth React hook", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       locale: "en",
       roles: ["admin"],
     });
@@ -150,6 +154,8 @@ describe("useAuth React hook", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       locale: "",
       roles: ["admin"],
     });

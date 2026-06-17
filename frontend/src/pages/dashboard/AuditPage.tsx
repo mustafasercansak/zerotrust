@@ -165,7 +165,7 @@ interface AuditDetailDrawerProps {
   onClose: () => void;
 }
 
-function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
+export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
   const { t } = useTranslation("audit");
   const { i18n } = useTranslation();
   const [activeSection, setActiveSection] = useState<"info" | "client" | "user">("info");

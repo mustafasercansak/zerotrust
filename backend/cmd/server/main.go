@@ -844,6 +844,8 @@ type meResponse struct {
 	Locale      string   `json:"locale"`
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"permissions"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 // buildMeResponse assembles the /me payload, normalizing nil slices to empty
@@ -865,6 +867,8 @@ func buildMeResponse(profile *user.User, perms []string) meResponse {
 		Locale:      profile.Locale,
 		Roles:       roles,
 		Permissions: perms,
+		CreatedAt:   profile.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   profile.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 

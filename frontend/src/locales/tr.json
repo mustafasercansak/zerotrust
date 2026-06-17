@@ -138,6 +138,7 @@
     "active": "Aktif",
     "inactive": "Pasif",
     "createdAt": "Oluşturma",
+    "updatedAt": "Değiştirilme",
     "roles": "Roller",
     "noRoles": "Rol yok",
     "create": "Oluştur",
@@ -273,8 +274,16 @@
     "noActivity": "Son etkinlik bulunamadı.",
     "userId": "Kullanıcı ID",
     "locale": "Dil",
+    "joined": "Katılım tarihi",
+    "modified": "Değiştirilme",
     "enabled": "Etkin",
-    "disabled": "Devre Dışı"
+    "disabled": "Devre Dışı",
+    "securityTitle": "Güvenlik Özeti",
+    "securityMfaOn": "İki faktörlü doğrulama aktif",
+    "securityMfaOff": "İki faktörlü doğrulama kurulmamış",
+    "securityOneSession": "Yalnızca bu cihaz oturum açmış",
+    "securityManySessions": "{{count}} cihaz oturum açmış — beklenmedik erişimi inceleyin",
+    "securityLastSeen": "Son aktivite: {{ip}} · {{date}}"
   },
   "securityDashboard": {
     "title": "Güvenlik Paneli",

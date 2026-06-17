@@ -35,6 +35,8 @@ describe("SecurityDashboardPage", () => {
       first_name: "Regular",
       last_name: "User",
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       locale: "en",
       roles: ["user"],
     });
@@ -52,6 +54,8 @@ describe("SecurityDashboardPage", () => {
       first_name: "Admin",
       last_name: "User",
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       locale: "en",
       roles: ["admin"],
     });

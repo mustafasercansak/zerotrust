@@ -167,6 +167,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -195,6 +197,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -226,6 +230,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -258,6 +264,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -279,6 +287,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -327,6 +337,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -358,6 +370,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -384,6 +398,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -430,6 +446,8 @@ describe("SettingsPage page component", () => {
       first_name: undefined,
       last_name: undefined,
       has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["user"],
       locale: "en",
     } as any);
@@ -452,6 +470,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -490,6 +510,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -512,6 +534,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });
@@ -542,6 +566,8 @@ describe("SettingsPage page component", () => {
       first_name: "John",
       last_name: "Doe",
       has_avatar: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"],
       locale: "en",
     });

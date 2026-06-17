@@ -243,7 +243,7 @@ interface UserProfileDrawerProps {
   isSelf: boolean;
 }
 
-function UserProfileDrawer({
+export function UserProfileDrawer({
   user, onClose, onRevoke, onRevokeAll, onStatusChange, isSelf,
 }: UserProfileDrawerProps) {
   const { t } = useTranslation("admin");
@@ -252,6 +252,8 @@ function UserProfileDrawer({
 
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionCount, setSessionCount] = useState<number | null>(null);
+  const effectiveSessionCount = sessionCount ?? user.active_sessions;
 
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -264,7 +266,7 @@ function UserProfileDrawer({
     if (activeSection === "sessions" && sessions === null && !sessionsLoading) {
       setSessionsLoading(true);
       api.admin.listUserSessions(user.id)
-        .then(setSessions)
+        .then((data) => { setSessions(data); setSessionCount(data.length); })
         .catch(() => setSessions([]))
         .finally(() => setSessionsLoading(false));
     }
@@ -380,6 +382,7 @@ function UserProfileDrawer({
                   { label: t("user"), value: name },
                   { label: t("email"), value: user.email },
                   { label: t("createdAt"), value: formatDate(user.created_at, i18n.language) },
+                  { label: t("updatedAt"), value: formatDate(user.updated_at, i18n.language) },
                   { label: t("locale"), value: user.locale?.toUpperCase() || "—" },
                 ].map(({ label, value }) => (
                   <React.Fragment key={label}>
@@ -399,8 +402,12 @@ function UserProfileDrawer({
                 >
                   {user.is_active ? t("deactivate") : t("activate")}
                 </Button>
-                {user.active_sessions > 0 && (
-                  <Button size="small" variant="outlined" color="warning" onClick={() => onRevokeAll(user.id)}>
+                {effectiveSessionCount > 0 && (
+                  <Button size="small" variant="outlined" color="warning" onClick={async () => {
+                    await onRevokeAll(user.id);
+                    setSessionCount(0);
+                    setSessions([]);
+                  }}>
                     {t("revokeAllSessions")}
                   </Button>
                 )}
@@ -427,6 +434,7 @@ function UserProfileDrawer({
                       try {
                         await onRevoke(user.id, sess.id);
                         setSessions((prev) => prev!.filter((x) => x.id !== sess.id));
+                        setSessionCount((n) => Math.max(0, (n ?? user.active_sessions) - 1));
                       } catch { /* handled by caller */ }
                     }}
                   />

@@ -24,6 +24,8 @@ export interface MeData {
   locale: string;
   roles: string[];
   permissions?: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface UserData {
@@ -36,6 +38,7 @@ export interface UserData {
   is_active: boolean;
   roles: string[];
   created_at: string;
+  updated_at: string;
   active_sessions: number;
 }
 

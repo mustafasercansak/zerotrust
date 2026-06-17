@@ -69,6 +69,7 @@ type userResponse struct {
 	IsActive       bool     `json:"is_active"`
 	Roles          []string `json:"roles"`
 	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
 	ActiveSessions int      `json:"active_sessions"`
 }
 
@@ -92,6 +93,7 @@ func toResponse(u *user.User, activeSessions int) userResponse {
 		IsActive:       u.IsActive,
 		Roles:          roles,
 		CreatedAt:      u.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:      u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		ActiveSessions: activeSessions,
 	}
 }

@@ -221,6 +221,7 @@ describe("UsersPage page component", () => {
         roles: ["admin"],
         active_sessions: 2,
         created_at: "2026-06-04T12:00:00Z",
+        updated_at: "2026-06-04T12:00:00Z",
       },
       {
         id: "u2",
@@ -233,6 +234,7 @@ describe("UsersPage page component", () => {
         roles: [],
         active_sessions: 0,
         created_at: "2026-06-04T10:00:00Z",
+        updated_at: "2026-06-04T10:00:00Z",
       },
       {
         id: "u3",
@@ -245,6 +247,7 @@ describe("UsersPage page component", () => {
         roles: ["user"],
         active_sessions: 3,
         created_at: "2026-06-04T09:00:00Z",
+        updated_at: "2026-06-04T09:00:00Z",
       },
       {
         id: "u4",
@@ -257,6 +260,7 @@ describe("UsersPage page component", () => {
         roles: ["user"],
         active_sessions: 5,
         created_at: "2026-06-04T08:00:00Z",
+        updated_at: "2026-06-04T08:00:00Z",
       }
     ],
     total: 4,
@@ -1031,7 +1035,7 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUserSessions").mockReturnValue(new Promise(() => {}));
 
     stateStore[9] = user;
-    stateStore[20] = true;
+    stateStore[21] = true; // SessionsDialog.loading (sessions=20, loading=21 with 9 ResourceTablePage states)
 
     const html = runRender();
 

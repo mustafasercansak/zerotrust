@@ -138,6 +138,7 @@
     "active": "Active",
     "inactive": "Inactive",
     "createdAt": "Created",
+    "updatedAt": "Modified",
     "roles": "Roles",
     "noRoles": "No roles",
     "create": "Create",
@@ -273,8 +274,16 @@
     "noActivity": "No recent activity.",
     "userId": "User ID",
     "locale": "Language",
+    "joined": "Joined",
+    "modified": "Modified",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "securityTitle": "Security Overview",
+    "securityMfaOn": "Two-factor authentication is active",
+    "securityMfaOff": "Two-factor authentication is not set up",
+    "securityOneSession": "Only this device is signed in",
+    "securityManySessions": "{{count}} devices signed in — review for unexpected access",
+    "securityLastSeen": "Last activity from {{ip}} · {{date}}"
   },
   "securityDashboard": {
     "title": "Security Dashboard",
