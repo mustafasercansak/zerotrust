@@ -37,6 +37,23 @@ vi.mock("@mui/x-data-grid", () => ({
   GridToolbar: () => React.createElement("div", null),
 }));
 
+const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
+
+vi.mock("@/hooks/useStepUp", () => ({
+  useStepUp: () => ({
+    runWithStepUp: mockRunWithStepUp,
+    stepUpOpen: false,
+    stepUpError: "",
+    stepUpSubmitting: false,
+    handleStepUpSubmit: vi.fn(),
+    handleStepUpClose: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/StepUpMfaDialog", () => ({
+  StepUpMfaDialog: () => null,
+}));
+
 vi.mock("@/components/SecretDisplayCard", () => ({
   SecretDisplayCard: (props: any) => {
     const onCopy = () => {
@@ -149,6 +166,8 @@ describe("OidcClientsSection", () => {
     writeTextMock.mockClear();
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
+    mockRunWithStepUp.mockClear();
+    mockRunWithStepUp.mockImplementation(async (action: any) => action());
 
     vi.stubGlobal("window", { confirm: confirmMock, prompt: vi.fn() });
     vi.stubGlobal("navigator", { clipboard: { writeText: writeTextMock } });

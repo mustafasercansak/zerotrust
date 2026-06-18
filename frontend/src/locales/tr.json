@@ -17,6 +17,13 @@
     },
     "validation": {
       "required": "Lütfen bu alanı doldurun."
+    },
+    "stepUpMfa": {
+      "title": "Kimliğinizi Doğrulayın",
+      "description": "Bu işlem için güncel bir MFA doğrulaması gereklidir. Kimlik doğrulayıcı uygulamanızdaki 6 haneli kodu girin.",
+      "codeLabel": "Doğrulama Kodu",
+      "verify": "Doğrula",
+      "invalidCode": "Geçersiz kod. Lütfen tekrar deneyin."
     }
   },
   "auth": {

@@ -127,6 +127,23 @@ vi.mock("@mui/material/Tooltip", () => ({
   default: (props: any) => props.children
 }));
 
+const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
+
+vi.mock("@/hooks/useStepUp", () => ({
+  useStepUp: () => ({
+    runWithStepUp: mockRunWithStepUp,
+    stepUpOpen: false,
+    stepUpError: "",
+    stepUpSubmitting: false,
+    handleStepUpSubmit: vi.fn(),
+    handleStepUpClose: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/StepUpMfaDialog", () => ({
+  StepUpMfaDialog: () => null,
+}));
+
 vi.mock("@mui/x-data-grid", () => ({
   DataGrid: (props: any) => {
     const renderedRows = (props.rows ?? []).map((row: any) => {
@@ -166,6 +183,8 @@ describe("UsersPage page component", () => {
     alertMock = vi.fn();
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
+    mockRunWithStepUp.mockClear();
+    mockRunWithStepUp.mockImplementation(async (action: any) => action());
 
     vi.stubGlobal("document", {
       visibilityState: "visible",
@@ -371,10 +390,14 @@ describe("UsersPage page component", () => {
     // [0] -> viewSessions for Bob (u2)
     // [1] -> activate/deactivate for Bob (u2 is not self, status is inactive)
     expect(capturedMenuItemClicks[1]).toBeDefined();
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
+      try { return await action(); }
+      catch { await api.mfaStepUp("123456"); return action(); }
+    });
     await capturedMenuItemClicks[1]();
 
     expect(statusSpy).toHaveBeenCalledWith("u2", true);
-    expect(promptMock).toHaveBeenCalled();
+    expect(mockRunWithStepUp).toHaveBeenCalled();
     expect(stepUpSpy).toHaveBeenCalledWith("123456");
     expect(statusSpy).toHaveBeenCalledTimes(2);
   });
@@ -489,7 +512,6 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new ApiError("mfa_required"));
-    promptMock.mockReturnValue(""); // empty prompt return
 
     runRender();
     await Promise.resolve();
@@ -501,7 +523,7 @@ describe("UsersPage page component", () => {
     runRender();
     await capturedMenuItemClicks[1](); // Bob status toggle (index 1 when Alice menu is closed)
 
-    expect(promptMock).toHaveBeenCalled();
+    expect(mockRunWithStepUp).toHaveBeenCalled();
   });
 
   it("handles settings load failure and cleanup", async () => {
@@ -668,7 +690,6 @@ describe("UsersPage page component", () => {
     await capturedMenuItemClicks[1]();
     expect(revokeAllSpy).not.toHaveBeenCalled();
 
-    promptMock.mockReturnValueOnce("");
     capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
     runRender();
     await capturedMenuItemClicks[1]();
@@ -790,7 +811,6 @@ describe("UsersPage page component", () => {
     ]);
     const revokeSessionSpy = vi.spyOn(api.admin, "revokeUserSession").mockRejectedValue(new ApiError("mfa_required"));
     const revokeAllSpy = vi.spyOn(api.admin, "revokeAllUserSessions").mockRejectedValue(new ApiError("mfa_required"));
-    promptMock.mockReturnValue("");
 
     runRender();
     await Promise.resolve();
@@ -1001,7 +1021,6 @@ describe("UsersPage page component", () => {
       } as any,
     ]);
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new ApiError("mfa_required"));
-    promptMock.mockReturnValue(undefined);
 
     runRender();
     await Promise.resolve();
@@ -1014,7 +1033,7 @@ describe("UsersPage page component", () => {
     capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
     runRender();
     await capturedMenuItemClicks[capturedMenuItemClicks.length - 1]();
-    expect(promptMock).toHaveBeenCalled();
+    expect(mockRunWithStepUp).toHaveBeenCalled();
 
     capturedMenuItemClicks[0]();
     runRender();

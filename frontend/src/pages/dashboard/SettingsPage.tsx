@@ -4,6 +4,8 @@ import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { DashboardPage } from "@/components/DashboardPage";
 import SessionsPage from "./SessionsPage";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 import { toast } from "sonner";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
@@ -29,6 +31,8 @@ export default function SettingsPage() {
   const { t: tProfile } = useTranslation("profile");
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
+
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
 
   const [activeTab, setActiveTab] = useState(0);
 
@@ -119,21 +123,7 @@ export default function SettingsPage() {
     }
   }
 
-  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
-    try {
-      return await action();
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
-        throw err;
-      }
-      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
-      if (!code) {
-        throw err;
-      }
-      await api.mfaStepUp(code);
-      return action();
-    }
-  }
+
 
   async function handleSystemSave(e: React.FormEvent) {
     e.preventDefault();
@@ -297,6 +287,13 @@ export default function SettingsPage() {
           </Paper>
         )}
       </Box>
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
     </DashboardPage>
   );
 }

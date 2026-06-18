@@ -117,6 +117,23 @@ vi.mock("@mui/material/Dialog", () => ({
   }
 }));
 
+const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
+
+vi.mock("@/hooks/useStepUp", () => ({
+  useStepUp: () => ({
+    runWithStepUp: mockRunWithStepUp,
+    stepUpOpen: false,
+    stepUpError: "",
+    stepUpSubmitting: false,
+    handleStepUpSubmit: vi.fn(),
+    handleStepUpClose: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/StepUpMfaDialog", () => ({
+  StepUpMfaDialog: () => null,
+}));
+
 vi.mock("@mui/material/Tooltip", () => ({
   default: (props: any) => props.children
 }));
@@ -157,6 +174,8 @@ describe("ServiceAccountsPage page component", () => {
     confirmMock = vi.fn().mockReturnValue(true);
     promptMock = vi.fn().mockReturnValue("123456");
     alertMock = vi.fn();
+    mockRunWithStepUp.mockClear();
+    mockRunWithStepUp.mockImplementation(async (action: any) => action());
 
     vi.stubGlobal("document", {
       visibilityState: "visible",
@@ -300,6 +319,11 @@ describe("ServiceAccountsPage page component", () => {
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus")
       .mockRejectedValueOnce(new ApiError("mfa_required"))
       .mockResolvedValueOnce({} as any);
+    // Simulate useStepUp catching mfa_required and retrying after step-up
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
+      try { return await action(); }
+      catch { await api.mfaStepUp("123456"); return action(); }
+    });
 
     runRender();
     await Promise.resolve();
@@ -313,7 +337,7 @@ describe("ServiceAccountsPage page component", () => {
     await capturedChipClicks[0]();
 
     expect(statusSpy).toHaveBeenCalledWith("sa1", false);
-    expect(promptMock).toHaveBeenCalled();
+    expect(mockRunWithStepUp).toHaveBeenCalled();
     expect(stepUpSpy).toHaveBeenCalledWith("123456");
   });
 
@@ -542,7 +566,8 @@ describe("ServiceAccountsPage page component", () => {
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus").mockRejectedValue(new ApiError("mfa_required"));
-    promptMock.mockReturnValue("");
+    // Simulate useStepUp propagating mfa_required without calling mfaStepUp (user dismissed dialog)
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => action());
 
     runRender();
     await Promise.resolve();
@@ -550,10 +575,10 @@ describe("ServiceAccountsPage page component", () => {
     await Promise.resolve();
     runRender();
 
-    await capturedChipClicks[0]();
+    await capturedChipClicks[0]().catch(() => {});
 
     expect(statusSpy).toHaveBeenCalledTimes(1);
-    expect(promptMock).toHaveBeenCalled();
+    expect(mockRunWithStepUp).toHaveBeenCalled();
     expect(stepUpSpy).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
   });
@@ -1045,7 +1070,8 @@ describe("ServiceAccountsPage page component", () => {
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus").mockRejectedValue(new ApiError("mfa_required"));
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
-    promptMock.mockReturnValue(undefined);
+    // Simulate user dismissing the dialog (runWithStepUp propagates the error)
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => action());
 
     runRender();
     await Promise.resolve();
@@ -1053,7 +1079,7 @@ describe("ServiceAccountsPage page component", () => {
     await Promise.resolve();
     runRender();
 
-    await capturedChipClicks[0]();
+    await capturedChipClicks[0]().catch(() => {});
 
     expect(statusSpy).toHaveBeenCalledTimes(1);
     expect(stepUpSpy).not.toHaveBeenCalled();

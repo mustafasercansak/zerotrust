@@ -17,6 +17,13 @@
     },
     "validation": {
       "required": "Please fill out this field."
+    },
+    "stepUpMfa": {
+      "title": "Confirm Your Identity",
+      "description": "This action requires a recent MFA verification. Enter the 6-digit code from your authenticator app.",
+      "codeLabel": "Authentication Code",
+      "verify": "Verify",
+      "invalidCode": "Invalid code. Please try again."
     }
   },
   "auth": {

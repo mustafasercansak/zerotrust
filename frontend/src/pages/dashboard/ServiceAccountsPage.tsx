@@ -5,6 +5,8 @@ import { requiredValidator } from "@/lib/validation";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -127,6 +129,8 @@ export default function ServiceAccountsPage() {
   const { i18n } = useTranslation();
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
+
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
 
   const [showCreate, setShowCreate] = useState(false);
   const [newSecret, setNewSecret] = useState<ServiceAccountCreated | null>(null);
@@ -341,24 +345,6 @@ export default function ServiceAccountsPage() {
   }
 
 
-
-  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
-    try {
-      return await action();
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
-        throw err;
-      }
-
-      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
-      if (!code) {
-        throw err;
-      }
-
-      await api.mfaStepUp(code);
-      return action();
-    }
-  }
 
   async function handleTokenTest() {
     if (!testing || !testSecret) return;
@@ -617,6 +603,14 @@ export default function ServiceAccountsPage() {
           <Button variant="contained" fullWidth onClick={() => setNewSecret(null)} sx={{ py: 1.25, fontWeight: 700, borderRadius: 2 }}>{t("done")}</Button>
         </DialogActions>
       </Dialog>
+
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
     </>
   );
 }

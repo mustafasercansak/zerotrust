@@ -22,6 +22,23 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
+
+vi.mock("@/hooks/useStepUp", () => ({
+  useStepUp: () => ({
+    runWithStepUp: mockRunWithStepUp,
+    stepUpOpen: false,
+    stepUpError: "",
+    stepUpSubmitting: false,
+    handleStepUpSubmit: vi.fn(),
+    handleStepUpClose: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/StepUpMfaDialog", () => ({
+  StepUpMfaDialog: () => null,
+}));
+
 const capturedButtonClicks: any[] = [];
 let stateStore: any = {};
 let stateSetters: any = {};
@@ -75,6 +92,8 @@ describe("ConsentPage", () => {
     mockSearchParams.delete("code_challenge_method");
     mockSearchParams.delete("nonce");
     vi.mocked(toast.error).mockClear();
+    mockRunWithStepUp.mockClear();
+    mockRunWithStepUp.mockImplementation(async (action: any) => action());
     vi.stubGlobal("window", { location: { href: "" } });
     vi.spyOn(api, "getOidcClientInfo").mockResolvedValue({ name: "Test App", allowed_scopes: ["openid"] });
   });
@@ -200,22 +219,22 @@ describe("ConsentPage", () => {
     mockSearchParams.set("redirect_uri", "http://localhost/cb");
     mockSearchParams.set("scope", "openid");
 
-    vi.stubGlobal("window", {
-      location: { href: "" },
-      prompt: vi.fn().mockReturnValue("123456"),
-    });
-
     const submitConsentSpy = vi.spyOn(api, "submitConsent")
       .mockRejectedValueOnce(new ApiError("mfa_required", undefined, 403))
       .mockResolvedValueOnce({ redirect_url: "http://localhost/cb?code=stepped" });
 
     const mfaStepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({ ok: true });
 
+    // Simulate useStepUp: catches mfa_required, calls mfaStepUp, retries action
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
+      try { return await action(); }
+      catch { await api.mfaStepUp("123456"); return action(); }
+    });
+
     runRender();
 
     await capturedButtonClicks[0]();
 
-    expect(window.prompt).toHaveBeenCalled();
     expect(mfaStepUpSpy).toHaveBeenCalledWith("123456");
     expect(submitConsentSpy).toHaveBeenCalledTimes(2);
     expect(window.location.href).toBe("http://localhost/cb?code=stepped");

@@ -8,6 +8,8 @@ import { ResourceTablePage } from "@/components/ResourceTablePage";
 import { SessionCard } from "@/components/SessionCard";
 import { AuditEntryCard } from "@/components/AuditEntryCard";
 import { requiredValidator } from "@/lib/validation";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 import { toast } from "sonner";
 import Alert from "@mui/material/Alert";
 import Avatar from "@mui/material/Avatar";
@@ -537,6 +539,8 @@ export default function UsersPage() {
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
 
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
+
   const [showCreate, setShowCreate] = useState(false);
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -588,23 +592,6 @@ export default function UsersPage() {
     { key: "active",   label: tCommon("filterActive"),   preset: { status: "active" } },
     { key: "inactive", label: tCommon("filterInactive"), preset: { status: "inactive" } },
   ], [tCommon]);
-  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
-    try {
-      return await action();
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.message !== "mfa_required") {
-        throw err;
-      }
-
-      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
-      if (!code) {
-        throw err;
-      }
-
-      await api.mfaStepUp(code);
-      return action();
-    }
-  }
 
   async function handleStatusChange(userId: string, active: boolean) {
     if (!active && !window.confirm(t("deactivateConfirm"))) return;
@@ -866,6 +853,14 @@ export default function UsersPage() {
           }}
         />
       )}
+
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
     </>
   );
 }

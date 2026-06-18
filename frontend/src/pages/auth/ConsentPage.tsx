@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { AuthPage } from "@/components/AuthPage";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -19,6 +21,7 @@ export default function ConsentPage() {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [clientName, setClientName] = useState<string | null>(null);
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
 
   const clientID = searchParams.get("client_id") || "";
   const redirectURI = searchParams.get("redirect_uri") || "";
@@ -53,15 +56,7 @@ export default function ConsentPage() {
   async function handleResponse(approved: boolean) {
     setLoading(true);
     try {
-      const resp = await submitConsent(approved).catch(async (err: unknown) => {
-        if (err instanceof ApiError && err.message === "mfa_required" && err.status === 403) {
-          const code = window.prompt(t("consent.mfaPrompt"))?.trim() ?? "";
-          if (!code) throw err;
-          await api.mfaStepUp(code);
-          return submitConsent(approved);
-        }
-        throw err;
-      });
+      const resp = await runWithStepUp(() => submitConsent(approved));
       window.location.href = resp.redirect_url;
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -76,6 +71,13 @@ export default function ConsentPage() {
 
   return (
     <AuthPage title={t("consent.title")} subtitle={t("consent.subtitle")}>
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
       <Box sx={{ display: "grid", gap: 3 }}>
         <Paper variant="outlined" sx={{ p: 2.5, bgcolor: "background.default", border: 1, borderColor: "divider" }}>
           <Typography variant="body1" sx={{ fontWeight: 700, mb: 0.5, color: "primary.main" }}>

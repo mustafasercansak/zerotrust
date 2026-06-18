@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, OidcClient } from "@/lib/api";
 import { requiredValidator } from "@/lib/validation";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 import { toast } from "sonner";
 import {
   DataGrid,
@@ -39,6 +41,7 @@ export default function OidcClientsSection() {
   const localeText = muiLocale.components.MuiDataGrid.defaultProps.localeText;
   const [clients, setClients] = useState<OidcClient[]>([]);
   const [loading, setLoading] = useState(true);
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
 
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
@@ -70,18 +73,6 @@ export default function OidcClientsSection() {
   }, [t]);
 
   useEffect(() => { loadClients(); }, [loadClients]);
-
-  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
-    try {
-      return await action();
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.message !== "mfa_required") throw err;
-      const code = window.prompt(t("mfaPrompt"))?.trim() ?? "";
-      if (!code) throw err;
-      await api.mfaStepUp(code);
-      return action();
-    }
-  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -533,6 +524,14 @@ export default function OidcClientsSection() {
           </DialogActions>
         </Box>
       </Dialog>
+
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
     </Box>
   );
 }
