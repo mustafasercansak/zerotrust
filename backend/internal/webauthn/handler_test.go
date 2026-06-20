@@ -243,3 +243,56 @@ func TestDelete_Success(t *testing.T) {
 		t.Fatalf("expected delete of c1, got %q", f.deletedID)
 	}
 }
+
+type mockNotif struct {
+	calls []struct{ alertType, to string }
+}
+
+func (m *mockNotif) SendSecurityAlert(_ context.Context, to, alertType, _, _, _ string) error {
+	m.calls = append(m.calls, struct{ alertType, to string }{alertType, to})
+	return nil
+}
+
+func TestRegisterFinish_SendsPasskeyRegisteredAlert(t *testing.T) {
+	n := &mockNotif{}
+	h := NewHandler(&fakeService{})
+	h.ConfigureNotifier(n)
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, authedReq(http.MethodPost, `{"name":"YubiKey","credential":{"id":"abc"}}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if len(n.calls) != 1 || n.calls[0].alertType != "passkey_registered" {
+		t.Fatalf("expected passkey_registered alert, got %+v", n.calls)
+	}
+	if n.calls[0].to != "u@example.com" {
+		t.Fatalf("expected alert to u@example.com, got %s", n.calls[0].to)
+	}
+}
+
+func TestDelete_SendsPasskeyRemovedAlert(t *testing.T) {
+	n := &mockNotif{}
+	h := NewHandler(&fakeService{})
+	h.ConfigureNotifier(n)
+	r := authedReq(http.MethodDelete, "")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "c1")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	h.Delete(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	if len(n.calls) != 1 || n.calls[0].alertType != "passkey_removed" {
+		t.Fatalf("expected passkey_removed alert, got %+v", n.calls)
+	}
+}
+
+func TestRegisterFinish_NoAlertWithoutNotifier(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.RegisterFinish(w, authedReq(http.MethodPost, `{"credential":{"id":"abc"}}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}

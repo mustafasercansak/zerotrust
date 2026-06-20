@@ -282,6 +282,63 @@ func TestMFAHandlerStepUp_Success(t *testing.T) {
 	}
 }
 
+type mockNotifier struct {
+	calls []struct{ alertType, to string }
+	err   error
+}
+
+func (m *mockNotifier) SendSecurityAlert(_ context.Context, to, alertType, _, _, _ string) error {
+	m.calls = append(m.calls, struct{ alertType, to string }{alertType, to})
+	return m.err
+}
+
+func TestMFAHandlerVerify_SendsEmailOnSuccess(t *testing.T) {
+	n := &mockNotifier{}
+	h := NewHandler(&mockMFAService{}, nil, 0)
+	h.ConfigureNotifier(n)
+
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Verify(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=200", rr.Code)
+	}
+	if len(n.calls) != 1 || n.calls[0].alertType != "mfa_enabled" {
+		t.Fatalf("expected mfa_enabled alert, got %+v", n.calls)
+	}
+	if n.calls[0].to != "u1@example.com" {
+		t.Fatalf("expected alert to u1@example.com, got %s", n.calls[0].to)
+	}
+}
+
+func TestMFAHandlerDisable_SendsEmailOnSuccess(t *testing.T) {
+	n := &mockNotifier{}
+	h := NewHandler(&mockMFAService{}, nil, 0)
+	h.ConfigureNotifier(n)
+
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Disable(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=200", rr.Code)
+	}
+	if len(n.calls) != 1 || n.calls[0].alertType != "mfa_disabled" {
+		t.Fatalf("expected mfa_disabled alert, got %+v", n.calls)
+	}
+}
+
+func TestMFAHandlerVerify_NoEmailWithoutNotifier(t *testing.T) {
+	h := NewHandler(&mockMFAService{}, nil, 0)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Verify(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=200", rr.Code)
+	}
+}
+
 func TestMFAHandlerStepUp_ExtendedPaths(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:9999"})
 

@@ -298,6 +298,10 @@ func run(ctx context.Context, cfg config) error {
 	}
 	authSvc.ConfigureWebAuthn(webauthnSvc)
 	webauthnHandler := webauthn.NewHandler(webauthnSvc)
+	webauthnHandler.ConfigureNotifier(resilientMailer)
+	if mfaHandler != nil {
+		mfaHandler.ConfigureNotifier(resilientMailer)
+	}
 
 	oidcRepo := oidc.NewClientRepository(db)
 	oidcCodeStore := oidc.NewAuthCodeStore(rdb)

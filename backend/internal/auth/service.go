@@ -315,7 +315,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		}, nil
 	}
 
-	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo)
+	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo, hasAnomaly)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +496,7 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 		return nil, ErrInvalidCredentials
 	}
 
-	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
+	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo, false)
 }
 
 // WebAuthnLoginBegin returns passkey assertion options for the second factor.
@@ -549,7 +549,7 @@ func (s *Service) WebAuthnLoginFinish(ctx context.Context, pendingToken string, 
 	if err != nil {
 		return nil, ErrInvalidCredentials
 	}
-	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo)
+	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo, false)
 }
 
 // WebAuthnPasswordlessBegin returns assertion options for a passwordless
@@ -582,7 +582,7 @@ func (s *Service) WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID str
 	if err != nil || !u.IsActive {
 		return nil, ErrInvalidCredentials
 	}
-	return s.completeLogin(ctx, u, ip, ua, deviceInfo)
+	return s.completeLogin(ctx, u, ip, ua, deviceInfo, false)
 }
 
 // peekPendingUID reads the userID from a pending-login record without consuming it.
@@ -602,7 +602,7 @@ func (s *Service) peekPendingUID(ctx context.Context, pendingToken string) (stri
 
 // completeLogin generates tokens and creates a session row. Called after all
 // authentication factors have been verified.
-func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
+func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string, deviceInfo map[string]string, skipLoginAlert bool) (*TokenPair, error) {
 	perms, err := s.users.GetPermissions(ctx, u.ID)
 	if err != nil {
 		slog.Error("failed to load permissions", "user_id", u.ID, "error", err)
@@ -625,6 +625,19 @@ func (s *Service) completeLogin(ctx context.Context, u *user.User, ip, ua string
 	}
 	if err := s.sessions.Create(ctx, u.ID, hashToken(pair.RefreshToken), ip, ua, deviceInfo, time.Now().Add(s.sessionAbsoluteTimeout(ctx))); err != nil {
 		return nil, err
+	}
+	if !skipLoginAlert && s.mailer != nil && u.NotifySecurityEmails {
+		var locStr string
+		if s.geoip != nil {
+			if loc, err := s.geoip.Lookup(ip); err == nil {
+				locStr = formatLocation(loc)
+			}
+		}
+		if locStr == "" {
+			locStr = "Unknown"
+		}
+		details := fmt.Sprintf("A new session was started from IP %s. If this was not you, revoke all sessions from your settings page.", ip)
+		_ = s.mailer.SendSecurityAlert(ctx, u.Email, "new_login", ip, locStr, details)
 	}
 	return pair, nil
 }

@@ -62,14 +62,34 @@ func (m *SMTPMailer) SendPasswordReset(_ context.Context, to, resetURL string) e
 	return smtp.SendMail(addr, m.auth, m.from, []string{to}, []byte(msg))
 }
 
+func alertSubject(alertType string) string {
+	subjects := map[string]string{
+		"new_login":          "New sign-in to your account",
+		"impossible_travel":  "Security Alert: Login from unexpected location",
+		"new_ip":             "Security Alert: Login from new IP address",
+		"new_ua":             "Security Alert: Login from new device",
+		"account_lockout":    "Security Alert: Your account has been locked",
+		"password_changed":   "Security Alert: Your password was changed",
+		"locale_changed":     "Security Alert: Your account language was changed",
+		"mfa_enabled":        "Security Alert: Two-factor authentication enabled",
+		"mfa_disabled":       "Security Alert: Two-factor authentication disabled",
+		"passkey_registered": "Security Alert: A new passkey was added",
+		"passkey_removed":    "Security Alert: A passkey was removed",
+	}
+	if s, ok := subjects[alertType]; ok {
+		return "ZeroTrust — " + s
+	}
+	return "ZeroTrust — Security Alert"
+}
+
 func (m *SMTPMailer) SendSecurityAlert(_ context.Context, to, alertType, ipAddress, location, details string) error {
-	subject := "Security Alert: Unusual login activity detected"
-	body := fmt.Sprintf("Hello,\n\nWe detected unusual login activity on your ZeroTrust account:\n\n"+
-		"Alert Type: %s\n"+
+	subject := alertSubject(alertType)
+	body := fmt.Sprintf("Hello,\n\nSecurity notice for your ZeroTrust account:\n\n"+
+		"Event:      %s\n"+
 		"IP Address: %s\n"+
 		"Location:   %s\n"+
 		"Details:    %s\n\n"+
-		"If this was not you, please log in and revoke this session immediately from your settings page.",
+		"If this was not you, please log in and revoke all sessions immediately from your settings page.",
 		alertType, ipAddress, location, details)
 
 	msg := strings.Join([]string{

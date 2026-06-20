@@ -155,3 +155,70 @@ func TestLogin_NewDevice(t *testing.T) {
 		t.Errorf("expected new_device anomaly, got %q", res.AnomalyType)
 	}
 }
+
+func TestLogin_SendsNewLoginAlert_WhenNoAnomaly(t *testing.T) {
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true, NotifySecurityEmails: true}
+	reader := &dummyUserReader{u: u}
+	store := &testAnomalySessionStore{}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
+
+	// Use an empty geoip (no anomaly detection) and a mailer
+	g := geoip.NewService("")
+	m := &testAnomalyMailer{}
+	svc.ConfigureSecurityAnomalies(g, m)
+
+	_, err := svc.Login(context.Background(), "user1@example.com", "pass", "1.2.3.4", "Chrome", nil)
+	if err != nil {
+		t.Fatalf("Login returned error: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if len(m.sentAlerts) != 1 {
+		t.Fatalf("expected 1 new_login alert, got %d: %v", len(m.sentAlerts), m.sentAlerts)
+	}
+	if m.sentAlerts[0] != "user1@example.com:new_login:1.2.3.4" {
+		t.Errorf("unexpected alert: %s", m.sentAlerts[0])
+	}
+}
+
+func TestLogin_NoNewLoginAlert_WhenAnomalyDetected(t *testing.T) {
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true, NotifySecurityEmails: true}
+	reader := &dummyUserReader{u: u}
+
+	sessions := []map[string]any{
+		{
+			"ip_address":   "100.0.0.2", // London
+			"user_agent":   "Chrome",
+			"created_at":   time.Now().Add(-30 * time.Minute),
+			"last_used_at": time.Now().Add(-30 * time.Minute),
+		},
+	}
+	store := &testAnomalySessionStore{sessions: sessions}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
+
+	g := geoip.NewService("")
+	m := &testAnomalyMailer{}
+	svc.ConfigureSecurityAnomalies(g, m)
+
+	// Login from Tokyo — triggers impossible_travel
+	res, err := svc.Login(context.Background(), "user1@example.com", "pass", "100.0.0.1", "Chrome", nil)
+	if err != nil {
+		t.Fatalf("Login returned error: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if res.AnomalyType != "impossible_travel" {
+		t.Errorf("expected impossible_travel, got %q", res.AnomalyType)
+	}
+	// Exactly 1 email: the anomaly alert — NOT a duplicate new_login alert
+	if len(m.sentAlerts) != 1 {
+		t.Fatalf("expected 1 alert (anomaly only), got %d: %v", len(m.sentAlerts), m.sentAlerts)
+	}
+	if m.sentAlerts[0] != "user1@example.com:impossible_travel:100.0.0.1" {
+		t.Errorf("unexpected alert: %s", m.sentAlerts[0])
+	}
+}

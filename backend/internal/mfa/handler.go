@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -17,6 +18,7 @@ type Handler struct {
 	svc          mfaService
 	rdb          *redis.Client
 	recentWindow time.Duration
+	notif        notifier
 }
 
 type mfaService interface {
@@ -27,8 +29,23 @@ type mfaService interface {
 	Validate(ctx context.Context, userID, code string) bool
 }
 
+type notifier interface {
+	SendSecurityAlert(ctx context.Context, to, alertType, ipAddress, location, details string) error
+}
+
 func NewHandler(svc mfaService, rdb *redis.Client, recentWindow time.Duration) *Handler {
 	return &Handler{svc: svc, rdb: rdb, recentWindow: recentWindow}
+}
+
+func (h *Handler) ConfigureNotifier(n notifier) {
+	h.notif = n
+}
+
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		return strings.SplitN(xf, ",", 2)[0]
+	}
+	return r.RemoteAddr
 }
 
 // POST /api/v1/mfa/setup — generate a new TOTP secret as a pending candidate.
@@ -85,6 +102,12 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.notif != nil {
+		_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
+			"mfa_enabled", clientIP(r), "Unknown",
+			"Two-factor authentication (TOTP) was enabled on your account.")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -108,6 +131,12 @@ func (h *Handler) Disable(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Disable(r.Context(), claims.UserID, req.Code); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
+	}
+
+	if h.notif != nil {
+		_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
+			"mfa_disabled", clientIP(r), "Unknown",
+			"Two-factor authentication (TOTP) was disabled on your account.")
 	}
 
 	w.Header().Set("Content-Type", "application/json")

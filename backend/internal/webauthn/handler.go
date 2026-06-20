@@ -19,12 +19,28 @@ type service interface {
 	DeleteCredential(ctx context.Context, id, userID string) error
 }
 
+type notifier interface {
+	SendSecurityAlert(ctx context.Context, to, alertType, ipAddress, location, details string) error
+}
+
 type Handler struct {
-	svc service
+	svc   service
+	notif notifier
 }
 
 func NewHandler(svc service) *Handler {
 	return &Handler{svc: svc}
+}
+
+func (h *Handler) ConfigureNotifier(n notifier) {
+	h.notif = n
+}
+
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		return strings.SplitN(xf, ",", 2)[0]
+	}
+	return r.RemoteAddr
 }
 
 // POST /api/v1/webauthn/register/begin — start passkey registration.
@@ -70,6 +86,11 @@ func (h *Handler) RegisterFinish(w http.ResponseWriter, r *http.Request) {
 	err := h.svc.FinishRegistration(r.Context(), claims.UserID, claims.Email, claims.Email, name, req.Credential)
 	switch {
 	case err == nil:
+		if h.notif != nil {
+			_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
+				"passkey_registered", clientIP(r), "Unknown",
+				"A new passkey named \""+name+"\" was registered on your account.")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	case errors.Is(err, ErrCredentialInUse):
@@ -108,6 +129,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	err := h.svc.DeleteCredential(r.Context(), id, claims.UserID)
 	switch {
 	case err == nil:
+		if h.notif != nil {
+			_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
+				"passkey_removed", clientIP(r), "Unknown",
+				"A passkey was removed from your account.")
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found")
