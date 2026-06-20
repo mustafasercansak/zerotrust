@@ -18,10 +18,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// SettingReader provides cached access to system settings. nil disables the
+// feature and the caller falls back to false.
+type SettingReader interface {
+	GetBool(ctx context.Context, key string, defaultVal bool) bool
+}
+
 var (
-	ErrNoCredentials   = errors.New("no_webauthn_credentials")
-	ErrSessionNotFound = errors.New("webauthn_session_not_found")
-	ErrCredentialInUse = errors.New("webauthn_credential_already_registered")
+	ErrNoCredentials               = errors.New("no_webauthn_credentials")
+	ErrSessionNotFound             = errors.New("webauthn_session_not_found")
+	ErrCredentialInUse             = errors.New("webauthn_credential_already_registered")
+	ErrHardwareAttestationRequired = errors.New("hardware_attestation_required")
 )
 
 // ceremonySessionTTL bounds how long a begun registration/login ceremony can be
@@ -47,12 +54,13 @@ type Config struct {
 }
 
 type Service struct {
-	repo store
-	rdb  *redis.Client
-	wa   *gowebauthn.WebAuthn
+	repo     store
+	rdb      *redis.Client
+	wa       *gowebauthn.WebAuthn
+	settings SettingReader
 }
 
-func NewService(repo store, rdb *redis.Client, cfg Config) (*Service, error) {
+func NewService(repo store, rdb *redis.Client, cfg Config, settings SettingReader) (*Service, error) {
 	wa, err := gowebauthn.New(&gowebauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPDisplayName,
@@ -61,7 +69,7 @@ func NewService(repo store, rdb *redis.Client, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{repo: repo, rdb: rdb, wa: wa}, nil
+	return &Service{repo: repo, rdb: rdb, wa: wa, settings: settings}, nil
 }
 
 // waUser adapts our user data to the go-webauthn User interface.
@@ -142,15 +150,25 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, name, displayNa
 	// must surface the credential by userHandle with no allowCredentials list.
 	// Require user verification at enrollment too, so adding a passkey confirms
 	// the user (biometric/PIN) and matches the verification demanded at login.
-	creation, session, err := s.wa.BeginRegistration(
-		user,
+	opts := []gowebauthn.RegistrationOption{
 		gowebauthn.WithExclusions(exclusions),
 		gowebauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
 			ResidentKey:        protocol.ResidentKeyRequirementRequired,
 			RequireResidentKey: protocol.ResidentKeyRequired(),
 			UserVerification:   protocol.VerificationRequired,
 		}),
-	)
+	}
+
+	requireHardware := false
+	if s.settings != nil {
+		requireHardware = s.settings.GetBool(ctx, "require_hardware_attestation", false)
+	}
+
+	if requireHardware {
+		opts = append(opts, gowebauthn.WithConveyancePreference(protocol.PreferDirectAttestation))
+	}
+
+	creation, session, err := s.wa.BeginRegistration(user, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +196,25 @@ func (s *Service) FinishRegistration(ctx context.Context, userID, name, displayN
 	cred, err := s.wa.CreateCredential(user, session, parsed)
 	if err != nil {
 		return err
+	}
+
+	// Verify hardware attestation if required
+	requireHardware := false
+	if s.settings != nil {
+		requireHardware = s.settings.GetBool(ctx, "require_hardware_attestation", false)
+	}
+	if requireHardware {
+		isNone := cred.AttestationType == "none" || cred.AttestationType == ""
+		allZeroes := true
+		for _, b := range cred.Authenticator.AAGUID {
+			if b != 0 {
+				allZeroes = false
+				break
+			}
+		}
+		if isNone || allZeroes {
+			return ErrHardwareAttestationRequired
+		}
 	}
 
 	credID := base64.RawURLEncoding.EncodeToString(cred.ID)

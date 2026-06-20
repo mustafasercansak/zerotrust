@@ -113,6 +113,9 @@ export default function SettingsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyTotal, setHistoryTotal] = useState(0);
 
+  // Hardware attestation state (appended last to preserve test state indices)
+  const [requireHardwareAttestation, setRequireHardwareAttestation] = useState("false");
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
@@ -150,6 +153,7 @@ export default function SettingsPage() {
         setMaxSessions(s["max_sessions_per_user"] ?? "5");
         setPasswordComplexity(s["password_complexity"] ?? "low");
         setGlobalMfaRequired(s["global_mfa_required"] ?? "false");
+        setRequireHardwareAttestation(s["require_hardware_attestation"] ?? "false");
         setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
         setIdleTimeout(s["session_idle_timeout_seconds"] ?? "300");
         setAdminIdleTimeout(s["session_idle_timeout_seconds_admin"] ?? "180");
@@ -282,6 +286,7 @@ export default function SettingsPage() {
         max_sessions_per_user: String(n),
         password_complexity: passwordComplexity,
         global_mfa_required: globalMfaRequired,
+        require_hardware_attestation: requireHardwareAttestation,
         max_login_attempts: String(m),
         session_idle_timeout_seconds: String(idle),
         session_idle_timeout_seconds_admin: String(adminIdle),
@@ -615,6 +620,25 @@ export default function SettingsPage() {
                         />
                       }
                       label={t("globalMfaRequired")}
+                      sx={{ mt: 0.5 }}
+                    />
+                  </Box>
+                </Box>
+
+                {/* Row 4: Require Hardware Attestation */}
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                  <Box sx={{ display: "grid", gap: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("requireHardwareAttestation")}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t("requireHardwareAttestationDesc")}</Typography>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={requireHardwareAttestation === "true"}
+                          onChange={(e) => setRequireHardwareAttestation(e.target.checked ? "true" : "false")}
+                          color="primary"
+                        />
+                      }
+                      label={t("requireHardwareAttestation")}
                       sx={{ mt: 0.5 }}
                     />
                   </Box>

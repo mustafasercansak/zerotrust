@@ -292,7 +292,7 @@ func run(ctx context.Context, cfg config) error {
 		RPID:          cfg.WebAuthnRPID,
 		RPDisplayName: cfg.WebAuthnRPDisplayName,
 		RPOrigins:     cfg.CORSOrigins,
-	})
+	}, settingsCache)
 	if err != nil {
 		return fmt.Errorf("webauthn init: %w", err)
 	}

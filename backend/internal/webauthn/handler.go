@@ -97,6 +97,8 @@ func (h *Handler) RegisterFinish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "credential_already_registered")
 	case errors.Is(err, ErrSessionNotFound):
 		writeError(w, http.StatusBadRequest, "ceremony_expired")
+	case errors.Is(err, ErrHardwareAttestationRequired):
+		writeError(w, http.StatusBadRequest, "hardware_attestation_required")
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_credential")
 	}

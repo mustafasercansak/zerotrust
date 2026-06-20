@@ -94,7 +94,7 @@ func newTestService(t *testing.T) (*Service, *memStore) {
 		RPID:          "localhost",
 		RPDisplayName: "ZeroTrust",
 		RPOrigins:     []string{"http://localhost:3000"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestBeginCeremonies_RedisUnavailable(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	svc, err := NewService(newMemStore(), rdb, Config{
 		RPID: "localhost", RPDisplayName: "ZeroTrust", RPOrigins: []string{"http://localhost:3000"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -462,3 +462,78 @@ func TestFinishDiscoverableLogin_MalformedAssertion(t *testing.T) {
 		t.Fatal("expected an error for a malformed assertion body")
 	}
 }
+
+type mockSettings struct {
+	bools map[string]bool
+}
+
+func (m *mockSettings) GetBool(ctx context.Context, key string, defaultVal bool) bool {
+	if v, ok := m.bools[key]; ok {
+		return v
+	}
+	return defaultVal
+}
+
+func TestHardwareAttestationEnforcement(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := newMemStore()
+	
+	settings := &mockSettings{bools: map[string]bool{"require_hardware_attestation": true}}
+	svc, err := NewService(store, rdb, Config{
+		RPID:          "localhost",
+		RPDisplayName: "ZeroTrust",
+		RPOrigins:     []string{"http://localhost:3000"},
+	}, settings)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	rp := vwa.RelyingParty{ID: "localhost", Name: "ZeroTrust", Origin: "http://localhost:3000"}
+
+	// 1. None attestation should be rejected when require_hardware_attestation is true.
+	authenticatorNone := vwa.NewAuthenticator()
+	authenticatorNone.Aaguid = [16]byte{} // all zeroes
+	credNone := vwa.NewCredential(vwa.KeyTypeEC2)
+
+	optsJSON, err := svc.BeginRegistration(ctx, userID, "user@example.com", "User")
+	if err != nil {
+		t.Fatalf("BeginRegistration: %v", err)
+	}
+	attOpts, err := vwa.ParseAttestationOptions(string(optsJSON))
+	if err != nil {
+		t.Fatalf("ParseAttestationOptions: %v", err)
+	}
+	attResponseNone := vwa.CreateAttestationResponse(rp, authenticatorNone, credNone, *attOpts)
+	err = svc.FinishRegistration(ctx, userID, "user@example.com", "User", "None Key", []byte(attResponseNone))
+	if !errors.Is(err, ErrHardwareAttestationRequired) {
+		t.Fatalf("expected ErrHardwareAttestationRequired for none/software attestation, got %v", err)
+	}
+
+	// 2. Packed attestation with a non-zero Aaguid should be accepted.
+	authenticatorHardware := vwa.NewAuthenticator()
+	authenticatorHardware.Aaguid = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	credHardware := vwa.NewCredential(vwa.KeyTypeEC2)
+
+	optsJSON2, err := svc.BeginRegistration(ctx, userID, "user@example.com", "User")
+	if err != nil {
+		t.Fatalf("BeginRegistration: %v", err)
+	}
+	attOpts2, err := vwa.ParseAttestationOptions(string(optsJSON2))
+	if err != nil {
+		t.Fatalf("ParseAttestationOptions: %v", err)
+	}
+	attResponseHardware := vwa.CreateAttestationResponse(rp, authenticatorHardware, credHardware, *attOpts2)
+	err = svc.FinishRegistration(ctx, userID, "user@example.com", "User", "Hardware Key", []byte(attResponseHardware))
+	if err != nil {
+		t.Fatalf("expected hardware attestation to succeed, got %v", err)
+	}
+}
+

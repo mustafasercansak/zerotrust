@@ -528,7 +528,8 @@
       "loadError": "Failed to load passkeys",
       "removeError": "Failed to remove passkey",
       "duplicateError": "That authenticator is already registered.",
-      "registerError": "Passkey registration was cancelled or failed."
+      "registerError": "Passkey registration was cancelled or failed.",
+      "hardwareAttestationRequiredError": "Registration failed: Only physical hardware security keys are permitted."
     }
   },
   "settings": {
@@ -536,6 +537,8 @@
     "tabProfile": "Profile Settings",
     "tabSecurity": "Security & Sessions",
     "tabSystem": "System Settings",
+    "requireHardwareAttestation": "Require Hardware Security Keys (FIDO2)",
+    "requireHardwareAttestationDesc": "Only permit registration of physical security keys (reject software and browser passkeys).",
     "tabOidc": "OIDC Clients",
     "sessionTimeouts": "Session Timeouts",
     "sessionTimeoutsDesc": "How long users and admins can remain idle before being warned and logged out.",

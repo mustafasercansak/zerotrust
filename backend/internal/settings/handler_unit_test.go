@@ -52,6 +52,9 @@ func TestAllowedKeysValidators(t *testing.T) {
 		{name: "complexity invalid", key: "password_complexity", value: "invalid", want: false},
 		{name: "mfa required true", key: "global_mfa_required", value: "true", want: true},
 		{name: "mfa required invalid", key: "global_mfa_required", value: "yes", want: false},
+		{name: "hardware attestation valid true", key: "require_hardware_attestation", value: "true", want: true},
+		{name: "hardware attestation valid false", key: "require_hardware_attestation", value: "false", want: true},
+		{name: "hardware attestation invalid", key: "require_hardware_attestation", value: "yes", want: false},
 		{name: "max login valid", key: "max_login_attempts", value: "3", want: true},
 		{name: "max login invalid", key: "max_login_attempts", value: "30", want: false},
 	}

@@ -528,7 +528,8 @@
       "loadError": "Geçiş anahtarları yüklenemedi",
       "removeError": "Geçiş anahtarı kaldırılamadı",
       "duplicateError": "Bu kimlik doğrulayıcı zaten kayıtlı.",
-      "registerError": "Geçiş anahtarı kaydı iptal edildi veya başarısız oldu."
+      "registerError": "Geçiş anahtarı kaydı iptal edildi veya başarısız oldu.",
+      "hardwareAttestationRequiredError": "Kayıt başarısız: Yalnızca fiziksel donanımsal güvenlik anahtarlarına izin verilir."
     }
   },
   "settings": {
@@ -536,6 +537,8 @@
     "tabProfile": "Profil Ayarları",
     "tabSecurity": "Güvenlik & Oturumlar",
     "tabSystem": "Sistem Ayarları",
+    "requireHardwareAttestation": "Donanımsal Güvenlik Anahtarı Zorunluluğu (FIDO2)",
+    "requireHardwareAttestationDesc": "Yalnızca fiziksel güvenlik anahtarlarının kaydedilmesine izin ver (yazılımsal ve tarayıcı geçiş anahtarlarını reddet).",
     "tabOidc": "OIDC İstemcileri",
     "sessionTimeouts": "Oturum Zaman Aşımı Süreleri",
     "sessionTimeoutsDesc": "Kullanıcıların uyarı almadan ve oturumları kapatılmadan önce ne kadar süre boşta kalabileceği.",

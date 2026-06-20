@@ -44,6 +44,8 @@ services:
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
       PUBLIC_APP_URL: "${PUBLIC_ORIGIN:-https://localhost}"
+      WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-localhost}"
+      WEBAUTHN_RP_DISPLAY_NAME: "${WEBAUTHN_RP_DISPLAY_NAME:-ZeroTrust}"
       TRUSTED_PROXIES: "192.168.200.2/32"
     secrets:
       - jwt_primary

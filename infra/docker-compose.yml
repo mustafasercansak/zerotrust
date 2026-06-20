@@ -53,6 +53,8 @@ services:
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       PUBLIC_APP_URL: "http://localhost:3000"
+      WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-localhost}"
+      WEBAUTHN_RP_DISPLAY_NAME: "${WEBAUTHN_RP_DISPLAY_NAME:-ZeroTrust}"
       # Optional field encryption. Use a separately managed, persistent
       # OpenBao/Vault transit server with a "db-encryption-key" key.
       BAO_ADDR: "${BAO_ADDR:-}"

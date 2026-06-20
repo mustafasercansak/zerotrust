@@ -58,6 +58,8 @@ export default function PasskeysSection() {
     } catch (err: unknown) {
       if (err instanceof ApiError && err.message === "credential_already_registered") {
         toast.error(t("passkeys.duplicateError"));
+      } else if (err instanceof ApiError && err.message === "hardware_attestation_required") {
+        toast.error(t("passkeys.hardwareAttestationRequiredError"));
       } else {
         toast.error(t("passkeys.registerError"));
       }

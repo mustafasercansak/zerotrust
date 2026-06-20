@@ -31,6 +31,9 @@ var allowedKeys = map[string]func(string) bool{
 	"global_mfa_required": func(v string) bool {
 		return v == "true" || v == "false"
 	},
+	"require_hardware_attestation": func(v string) bool {
+		return v == "true" || v == "false"
+	},
 	"max_login_attempts": func(v string) bool {
 		n, err := strconv.Atoi(v)
 		return err == nil && n >= 1 && n <= 20

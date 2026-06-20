@@ -43,7 +43,7 @@ export function useStepUp() {
       pendingRef.current = null;
       setOpen(false);
     } catch (err) {
-      if (err instanceof ApiError && (err.message === "mfa_required" || err.message === "too_many_attempts")) {
+      if (err instanceof ApiError && (err.message === "mfa_required" || err.message === "too_many_attempts" || err.message === "invalid_code")) {
         setError(err.message);
       } else {
         pending.reject(err);
