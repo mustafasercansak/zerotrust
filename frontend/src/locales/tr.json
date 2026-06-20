@@ -414,7 +414,7 @@
     "healthTitle": "Sistem Sağlığı",
     "healthDb": "PostgreSQL",
     "healthRedis": "Redis",
-    "healthPool": "{{total}} / {{max}} bağlantı"
+    "healthPool": "{{active}} aktif · {{idle}} boşta / {{max}}"
   },
   "securityDashboard": {
     "title": "Güvenlik Paneli",

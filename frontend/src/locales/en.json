@@ -414,7 +414,7 @@
     "healthTitle": "System Health",
     "healthDb": "PostgreSQL",
     "healthRedis": "Redis",
-    "healthPool": "{{total}} / {{max}} connections"
+    "healthPool": "{{active}} active · {{idle}} idle / {{max}}"
   },
   "securityDashboard": {
     "title": "Security Dashboard",

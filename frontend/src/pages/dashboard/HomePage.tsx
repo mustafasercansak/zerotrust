@@ -366,7 +366,7 @@ export default function HomePage() {
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" sx={{ fontWeight: 600, lineHeight: 1 }}>{label}</Typography>
                         <Typography variant="caption" color="text.disabled" sx={{ display: "block", fontSize: 10 }}>
-                          {t("healthPool", { total: svc.pool.total, max: svc.pool.max })}
+                          {t("healthPool", { active: svc.pool.total - svc.pool.idle, idle: svc.pool.idle, max: svc.pool.max })}
                         </Typography>
                       </Box>
                       <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: ok ? "success.main" : "error.main", flexShrink: 0 }} />
