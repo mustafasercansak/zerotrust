@@ -382,6 +382,15 @@ export const api = {
   deleteAvatar: () =>
     request<MeData>("/api/v1/me/avatar", { method: "DELETE" }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>("/api/v1/me/password", {
+      method: "PATCH",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
+  getSessionPolicy: () =>
+    request<{ idle_timeout_seconds: number }>("/api/v1/session/policy"),
+
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>("/api/v1/auth/forgot-password", {
       method: "POST",
@@ -401,6 +410,9 @@ export const api = {
 
   revokeOtherSessions: () =>
     request<void>("/api/v1/sessions", { method: "DELETE" }),
+
+  listMyAudit: (limit = 50, offset = 0) =>
+    request<PagedResult<AuditEntry>>(`/api/v1/me/audit?limit=${limit}&offset=${offset}&sort_by=created_at&sort_dir=desc`),
 
   listAuditLog: (p: PageParams) =>
     request<PagedResult<AuditEntry>>(`/api/v1/admin/audit${buildQuery(p)}`),
@@ -428,10 +440,10 @@ export const api = {
       body: JSON.stringify({ code }),
     }),
 
-  mfaStepUp: (code: string) =>
+  mfaStepUp: (code: string, reason?: string) =>
     request<{ ok: boolean }>("/api/v1/mfa/step-up", {
       method: "POST",
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, ...(reason ? { reason } : {}) }),
     }),
 
   // WebAuthn passkey management (authenticated user).

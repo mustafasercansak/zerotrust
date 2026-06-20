@@ -240,7 +240,7 @@ export default function ServiceAccountsPage() {
   ], [t, i18n.language]);
   async function handleToggleStatus(sa: ServiceAccount) {
     try {
-      await runWithStepUp(() => api.admin.setServiceAccountStatus(sa.id, !sa.is_active));
+      await runWithStepUp(() => api.admin.setServiceAccountStatus(sa.id, !sa.is_active), "service_account_status_update");
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -253,7 +253,7 @@ export default function ServiceAccountsPage() {
   async function handleRevoke(sa: ServiceAccount) {
     if (!confirm(t("revokeConfirm", { name: sa.name }))) return;
     try {
-      await runWithStepUp(() => api.admin.revokeServiceAccount(sa.id));
+      await runWithStepUp(() => api.admin.revokeServiceAccount(sa.id), "service_account_delete");
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -266,7 +266,7 @@ export default function ServiceAccountsPage() {
   async function handleRotate(sa: ServiceAccount) {
     if (!confirm(t("rotateConfirm", { name: sa.name }))) return;
     try {
-      const rotated = await runWithStepUp(() => api.admin.rotateServiceAccountSecret(sa.id));
+      const rotated = await runWithStepUp(() => api.admin.rotateServiceAccountSecret(sa.id), "service_account_secret_rotate");
       setNewSecret(rotated);
       setRefresh((n) => n + 1);
     } catch (err) {
@@ -309,7 +309,7 @@ export default function ServiceAccountsPage() {
     setCreating(true);
     try {
       const run = () => api.admin.createServiceAccount({ name: name.trim(), scopes: selectedScopes, expires_at: expiresAt || undefined });
-      const created = await runWithStepUp(run);
+      const created = await runWithStepUp(run, "service_account_create");
       setNewSecret(created);
       setShowCreate(false);
       reset();
@@ -333,7 +333,7 @@ export default function ServiceAccountsPage() {
         expires_at: editExpiresAt || null,
         is_active: editActive,
       });
-      await runWithStepUp(run);
+      await runWithStepUp(run, "service_account_update");
       setEditing(null);
       setRefresh((n) => n + 1);
     } catch (err) {

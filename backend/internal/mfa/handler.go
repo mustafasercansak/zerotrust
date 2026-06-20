@@ -141,7 +141,8 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Code string `json:"code"`
+		Code   string `json:"code"`
+		Reason string `json:"reason,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request")
@@ -150,6 +151,11 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 	if !h.svc.Validate(r.Context(), claims.UserID, req.Code) {
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
+	}
+	if req.Reason != "" {
+		if extras := authmw.AuditExtrasFrom(r.Context()); extras != nil {
+			extras.Set("step_up_for", req.Reason)
+		}
 	}
 
 	rt, err := r.Cookie("refresh_token")

@@ -1,10 +1,12 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState, Suspense, useEffect } from "react";
+import { useState, Suspense, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/useAuth";
 import { cancelRefresh } from "@/lib/tokenManager";
 import { api, type MeData } from "@/lib/api";
 import { MeContext } from "@/contexts/MeContext";
+import { useIdleTimeout } from "@/hooks/useIdleTimeout";
+import { SessionTimeoutDialog } from "@/components/SessionTimeoutDialog";
 import Alert from "@mui/material/Alert";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
@@ -35,6 +37,16 @@ export default function DashboardLayout() {
   const { i18n } = useTranslation();
   const { me, setMe, loading, bootstrapError, retry } = useAuth();
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+
+  // Defined with useCallback so useIdleTimeout receives a stable reference
+  // and can be called before the conditional early-returns (Rules of Hooks).
+  const handleLogout = useCallback(() => {
+    cancelRefresh();
+    void api.logout();
+    navigate("/auth/login");
+  }, [navigate]);
+
+  const { warningVisible, secondsRemaining, extendSession, dismissWarning } = useIdleTimeout(handleLogout);
 
   useEffect(() => {
     const handleMeUpdated = (e: Event) => {
@@ -125,6 +137,7 @@ export default function DashboardLayout() {
   const navLinks = [
     { to: "/dashboard", label: t("dashboard") },
     { to: "/dashboard/mfa", label: t("mfa") },
+    { to: "/dashboard/sessions", label: t("sessions") },
     { to: "/dashboard/settings", label: t("settings") },
     ...(isAdmin
       ? [
@@ -147,12 +160,6 @@ export default function DashboardLayout() {
 
   function openProfile() {
     navigate("/dashboard/settings");
-  }
-
-  function handleLogout() {
-    cancelRefresh();
-    void api.logout();
-    navigate("/auth/login");
   }
 
   return (
@@ -290,6 +297,12 @@ export default function DashboardLayout() {
           </Suspense>
         </Box>
       </Box>
+      <SessionTimeoutDialog
+        open={warningVisible}
+        secondsRemaining={secondsRemaining}
+        onExtend={extendSession}
+        onLogout={handleLogout}
+      />
     </MeContext.Provider>
   );
 }

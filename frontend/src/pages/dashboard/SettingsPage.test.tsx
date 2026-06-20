@@ -613,4 +613,103 @@ describe("SettingsPage page component", () => {
     expect(updateProfileSpy).toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith("saved");
   });
+
+  it("shows error when new passwords do not match", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"],
+      locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+
+    // newPassword (idx 13) and confirmPassword (idx 14) differ
+    stateStore[13] = "NewPass1!";
+    stateStore[14] = "DifferentPass1!";
+    runRender();
+
+    expect(capturedSubmits[1]).toBeDefined();
+    await capturedSubmits[1]({ preventDefault: vi.fn() });
+    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.passwords_do_not_match");
+  });
+
+  it("handles password change success", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"],
+      locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const changePasswordSpy = vi.spyOn(api, "changePassword").mockResolvedValue(undefined);
+
+    stateStore[12] = "Current1!";
+    stateStore[13] = "NewPass1!";
+    stateStore[14] = "NewPass1!";
+    runRender();
+
+    expect(capturedSubmits[1]).toBeDefined();
+    await capturedSubmits[1]({ preventDefault: vi.fn() });
+    expect(changePasswordSpy).toHaveBeenCalledWith("Current1!", "NewPass1!");
+    expect(toast.success).toHaveBeenCalledWith("changePassword.success");
+  });
+
+  it("handles password change api errors", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"],
+      locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+
+    // wrong_password error
+    vi.spyOn(api, "changePassword").mockRejectedValueOnce(new ApiError("wrong_password", undefined, 401));
+    stateStore[12] = "WrongCurrent!";
+    stateStore[13] = "NewPass1!";
+    stateStore[14] = "NewPass1!";
+    runRender();
+    await capturedSubmits[1]({ preventDefault: vi.fn() });
+    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.wrong_password");
+
+    // generic error
+    vi.spyOn(api, "changePassword").mockRejectedValueOnce(new Error("network"));
+    runRender();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.internal_error");
+  });
+
+  it("renders changing label while password change is in progress", () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123",
+      email: "test@example.com",
+      first_name: "John",
+      last_name: "Doe",
+      has_avatar: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"],
+      locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+
+    stateStore[15] = true; // changingPassword
+    const html = runRender();
+    expect(html).toContain("changePassword.submitting");
+  });
 });

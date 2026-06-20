@@ -52,6 +52,17 @@ export default function SettingsPage() {
   const [systemLoading, setSystemLoading] = useState(true);
   const [savingSystem, setSavingSystem] = useState(false);
 
+  // Change Password State (appended after system settings to preserve test state indices)
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  // Session Timeout State (appended last to preserve test state indices)
+  const [idleTimeout, setIdleTimeout] = useState("300");
+  const [adminIdleTimeout, setAdminIdleTimeout] = useState("180");
+  const [absoluteTimeout, setAbsoluteTimeout] = useState("28800");
+
   // Initialize Profile Settings Form
   useEffect(() => {
     if (me) {
@@ -69,6 +80,9 @@ export default function SettingsPage() {
         setPasswordComplexity(s["password_complexity"] ?? "low");
         setGlobalMfaRequired(s["global_mfa_required"] ?? "false");
         setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
+        setIdleTimeout(s["session_idle_timeout_seconds"] ?? "300");
+        setAdminIdleTimeout(s["session_idle_timeout_seconds_admin"] ?? "180");
+        setAbsoluteTimeout(s["session_absolute_timeout_seconds"] ?? "28800");
       })
       .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
@@ -125,12 +139,50 @@ export default function SettingsPage() {
 
 
 
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    const tPw = (key: string) => tProfile(`changePassword.errors.${key}`, { defaultValue: tProfile("changePassword.errors.internal_error") });
+    if (newPassword !== confirmPassword) {
+      toast.error(tProfile("changePassword.errors.passwords_do_not_match"));
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      toast.success(tProfile("changePassword.success"));
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      toast.error(tPw(code));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  const numericProps = (min: number, max: number) => ({
+    min, max,
+    onInvalid: (e: React.FormEvent<HTMLInputElement>) => {
+      (e.target as HTMLInputElement).setCustomValidity(t("errors.invalid_value"));
+    },
+    onInput: (e: React.FormEvent<HTMLInputElement>) => {
+      (e.target as HTMLInputElement).setCustomValidity("");
+    },
+  });
+
   async function handleSystemSave(e: React.FormEvent) {
     e.preventDefault();
     const n = parseInt(maxSessions, 10);
     if (isNaN(n) || n < 1 || n > 20) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     const m = parseInt(maxLoginAttempts, 10);
     if (isNaN(m) || m < 1 || m > 20) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const idle = parseInt(idleTimeout, 10);
+    if (isNaN(idle) || idle < 60 || idle > 3600) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const adminIdle = parseInt(adminIdleTimeout, 10);
+    if (isNaN(adminIdle) || adminIdle < 60 || adminIdle > 1800) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const absolute = parseInt(absoluteTimeout, 10);
+    if (isNaN(absolute) || absolute < 1800 || absolute > 172800) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     setSavingSystem(true);
     try {
       await runWithStepUp(() => api.admin.updateSettings({
@@ -138,7 +190,10 @@ export default function SettingsPage() {
         password_complexity: passwordComplexity,
         global_mfa_required: globalMfaRequired,
         max_login_attempts: String(m),
-      }));
+        session_idle_timeout_seconds: String(idle),
+        session_idle_timeout_seconds_admin: String(adminIdle),
+        session_absolute_timeout_seconds: String(absolute),
+      }), "settings_update");
       toast.success(t("saved"));
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
@@ -168,6 +223,7 @@ export default function SettingsPage() {
         </Box>
 
         {activeTab === 0 && (
+          <Box sx={{ display: "grid", gap: 3 }}>
           <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 4, display: "grid", gap: 3 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("title")}</Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
@@ -197,6 +253,36 @@ export default function SettingsPage() {
               </Button>
             </Box>
           </Paper>
+          <Paper variant="outlined" component="form" onSubmit={handlePasswordChange} sx={{ p: 4, display: "grid", gap: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("changePassword.title")}</Typography>
+            <TextField
+              label={tProfile("changePassword.currentPassword")}
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label={tProfile("changePassword.newPassword")}
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label={tProfile("changePassword.confirmPassword")}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              fullWidth
+            />
+            <Box>
+              <Button type="submit" variant="outlined" disabled={changingPassword} sx={{ minWidth: 160 }}>
+                {changingPassword ? tProfile("changePassword.submitting") : tProfile("changePassword.submit")}
+              </Button>
+            </Box>
+          </Paper>
+          </Box>
         )}
 
         {activeTab === 1 && (
@@ -225,8 +311,43 @@ export default function SettingsPage() {
                     value={maxSessions}
                     onChange={(e) => setMaxSessions(e.target.value)}
                     sx={{ width: 160 }}
-                    slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                    slotProps={{ htmlInput: numericProps(1, 20) }}
                   />
+                </Box>
+
+                {/* Session Timeouts */}
+                <Box sx={{ display: "grid", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sessionTimeouts")}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("sessionTimeoutsDesc")}</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
+                    <TextField
+                      label={t("idleTimeoutInput")}
+                      type="number"
+                      value={idleTimeout}
+                      onChange={(e) => setIdleTimeout(e.target.value)}
+                      slotProps={{ htmlInput: numericProps(60, 3600) }}
+                      helperText={t("idleTimeoutHint")}
+                      size="small"
+                    />
+                    <TextField
+                      label={t("adminIdleTimeoutInput")}
+                      type="number"
+                      value={adminIdleTimeout}
+                      onChange={(e) => setAdminIdleTimeout(e.target.value)}
+                      slotProps={{ htmlInput: numericProps(60, 1800) }}
+                      helperText={t("adminIdleTimeoutHint")}
+                      size="small"
+                    />
+                    <TextField
+                      label={t("absoluteTimeoutInput")}
+                      type="number"
+                      value={absoluteTimeout}
+                      onChange={(e) => setAbsoluteTimeout(e.target.value)}
+                      slotProps={{ htmlInput: numericProps(1800, 172800) }}
+                      helperText={t("absoluteTimeoutHint")}
+                      size="small"
+                    />
+                  </Box>
                 </Box>
 
                 {/* Password Complexity */}
@@ -256,7 +377,7 @@ export default function SettingsPage() {
                     value={maxLoginAttempts}
                     onChange={(e) => setMaxLoginAttempts(e.target.value)}
                     sx={{ width: 160 }}
-                    slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                    slotProps={{ htmlInput: numericProps(1, 20) }}
                   />
                 </Box>
 

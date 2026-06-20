@@ -66,7 +66,7 @@ export default function MfaPage() {
       inputMode="numeric"
       value={code}
       onChange={(e) => setCode(e.target.value)}
-      placeholder="000000"
+      placeholder={t("totpPlaceholder")}
       autoFocus
       sx={{
         width: 140,

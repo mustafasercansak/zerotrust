@@ -56,7 +56,7 @@ export default function ConsentPage() {
   async function handleResponse(approved: boolean) {
     setLoading(true);
     try {
-      const resp = await runWithStepUp(() => submitConsent(approved));
+      const resp = await runWithStepUp(() => submitConsent(approved), "oauth_consent");
       window.location.href = resp.redirect_url;
     } catch (err: unknown) {
       if (err instanceof ApiError) {

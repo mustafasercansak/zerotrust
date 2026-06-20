@@ -596,7 +596,7 @@ export default function UsersPage() {
   async function handleStatusChange(userId: string, active: boolean) {
     if (!active && !window.confirm(t("deactivateConfirm"))) return;
     try {
-      await runWithStepUp(() => api.admin.setUserStatus(userId, active));
+      await runWithStepUp(() => api.admin.setUserStatus(userId, active), "user_status_update");
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -609,7 +609,7 @@ export default function UsersPage() {
   async function handleRevokeAll(row: UserData) {
     if (!window.confirm(t("revokeAllConfirm"))) return;
     try {
-      await runWithStepUp(() => api.admin.revokeAllUserSessions(row.id));
+      await runWithStepUp(() => api.admin.revokeAllUserSessions(row.id), "user_sessions_revoke_all");
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -802,7 +802,7 @@ export default function UsersPage() {
           }}
           onRevoke={async (userId, sessionId) => {
             try {
-              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId));
+              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId), "user_session_revoke");
             } catch (err) {
               if (err instanceof ApiError && err.message === "mfa_required") throw err;
               toast.error(t("errors.internal_error"));
@@ -812,7 +812,7 @@ export default function UsersPage() {
           onRevokeAll={async (userId) => {
             if (!window.confirm(t("revokeAllConfirm"))) return;
             try {
-              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId));
+              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId), "user_sessions_revoke_all");
               setRefresh((n) => n + 1);
             } catch (err) {
               if (err instanceof ApiError && err.message === "mfa_required") throw err;
@@ -830,7 +830,7 @@ export default function UsersPage() {
           onClose={() => setSessionsUser(null)}
           onRevoke={async (userId, sessionId) => {
             try {
-              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId));
+              await runWithStepUp(() => api.admin.revokeUserSession(userId, sessionId), "user_session_revoke");
             } catch (err) {
               if (err instanceof ApiError && err.message === "mfa_required") {
                 throw err;
@@ -841,7 +841,7 @@ export default function UsersPage() {
           }}
           onRevokeAll={async (userId) => {
             try {
-              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId));
+              await runWithStepUp(() => api.admin.revokeAllUserSessions(userId), "user_sessions_revoke_all");
               setRefresh((n) => n + 1);
             } catch (err) {
               if (err instanceof ApiError && err.message === "mfa_required") {

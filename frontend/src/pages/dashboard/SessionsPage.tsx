@@ -2,13 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { api, ApiError, type PageParams, type PagedResult, type Session } from "@/lib/api";
+import { api, ApiError, type AuditEntry, type PageParams, type PagedResult, type Session } from "@/lib/api";
 import { cancelRefresh } from "@/lib/tokenManager";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
 import { formatDateTime } from "@/lib/dateUtils";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import type { GridColDef } from "@mui/x-data-grid";
 
@@ -55,9 +57,11 @@ function sessionDeviceKey(s: Session): string {
 export default function SessionsPage() {
   const { t } = useTranslation("sessions");
   const { t: tEvents } = useTranslation("securityEvents");
+  const { t: tAudit } = useTranslation("audit");
   const { i18n } = useTranslation();
   const navigate = useNavigate();
 
+  const [tab, setTab] = useState(0);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokingAll, setRevokingAll] = useState(false);
   const [otherSessionCount, setOtherSessionCount] = useState(0);
@@ -97,14 +101,13 @@ export default function SessionsPage() {
 
   useEffect(() => {
     void inspectSessions(false);
-    // TokenRefreshProvider handles the toast; here we only refresh the table.
     const onChanged = () => void inspectSessions(false);
     window.addEventListener("sessions:changed", onChanged);
     const timer = window.setInterval(() => void inspectSessions(true), 15_000);
     return () => { window.removeEventListener("sessions:changed", onChanged); window.clearInterval(timer); };
   }, [inspectSessions]);
 
-  const fetcher = useCallback(
+  const sessionFetcher = useCallback(
     async (p: PageParams): Promise<PagedResult<Session>> => {
       void refresh;
       const all = await api.listSessions();
@@ -125,7 +128,11 @@ export default function SessionsPage() {
     [refresh],
   );
 
-  const columns = useMemo<GridColDef<Session>[]>(() => [
+  const auditFetcher = useCallback(async (p: PageParams): Promise<PagedResult<AuditEntry>> => {
+    return api.listMyAudit(p.pageSize, p.page * p.pageSize);
+  }, []);
+
+  const sessionColumns = useMemo<GridColDef<Session>[]>(() => [
     {
       field: "user_agent", headerName: t("device"), flex: 1.4, minWidth: 220,
       renderCell: ({ row }) => (
@@ -170,6 +177,66 @@ export default function SessionsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, i18n.language, revoking]);
 
+  const auditColumns = useMemo<GridColDef<AuditEntry>[]>(() => [
+    {
+      field: "action", headerName: t("historyAction"), flex: 1.2, minWidth: 200,
+      renderCell: ({ row }) => {
+        const label = tAudit(`actions.${row.action}`, { defaultValue: row.action });
+        const isTranslated = label !== row.action;
+        const stepUpFor = row.metadata?.step_up_for as string | undefined;
+        const stepUpLabel = stepUpFor
+          ? tAudit(`step_up_for.${stepUpFor}`, { defaultValue: stepUpFor })
+          : undefined;
+        return (
+          <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
+            <Typography variant="body2">{label}</Typography>
+            {stepUpLabel && (
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
+                → {stepUpLabel}
+              </Typography>
+            )}
+            {isTranslated && !stepUpLabel && (
+              <Typography variant="caption" color="text.disabled" sx={{ fontFamily: "monospace", fontSize: 10 }}>
+                {row.action}
+              </Typography>
+            )}
+          </Box>
+        );
+      },
+    },
+    {
+      field: "ip_address", headerName: t("ip"), flex: 0.7, minWidth: 140,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {row.ip_address || "—"}
+        </Typography>
+      ),
+    },
+    {
+      field: "metadata.outcome", headerName: t("historyOutcome"), flex: 0.5, minWidth: 110,
+      sortable: false, filterable: false,
+      renderCell: ({ row }) => {
+        const outcome = row.metadata?.outcome as string | undefined;
+        if (!outcome) return null;
+        return (
+          <Chip
+            size="small"
+            color={outcome === "success" ? "success" : outcome === "failure" ? "error" : "default"}
+            label={outcome === "success" ? t("historySuccess") : outcome === "failure" ? t("historyFailure") : outcome}
+          />
+        );
+      },
+    },
+    {
+      field: "created_at", headerName: t("historyDate"), flex: 0.8, minWidth: 160,
+      renderCell: ({ row }) => (
+        <Typography variant="caption" color="text.secondary">
+          {formatDateTime(row.created_at, i18n.language)}
+        </Typography>
+      ),
+    },
+  ], [t, i18n.language]);
+
   async function handleRevoke(session: Session) {
     if (!confirm(session.is_current ? t("signOutThisConfirm") : t("signOutConfirm"))) return;
     setRevoking(session.id);
@@ -198,22 +265,46 @@ export default function SessionsPage() {
   }
 
   return (
-    <ResourceTablePage
-      columns={columns}
-      fetcher={fetcher}
-      getRowId={(s) => s.id}
-      defaultSortKey="last_used_at"
-      defaultSortDir="desc"
-      emptyMessage={t("noSessions")}
-      refreshSignal={refresh}
-      action={
-        <Button variant="outlined" color="error" size="small" onClick={handleRevokeOthers}
-          disabled={revokingAll || otherSessionCount === 0}>
-          {t("signOutOthers")}
-        </Button>
-      }
-      pageSizeOptions={[10, 25, 50]}
-      defaultPageSize={25}
-    />
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, flexShrink: 0 }}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab label={t("tabActiveSessions")} />
+          <Tab label={t("tabLoginHistory")} />
+        </Tabs>
+      </Box>
+
+      <Box sx={{ flex: 1, overflow: "hidden", display: tab === 0 ? "flex" : "none", flexDirection: "column" }}>
+        <ResourceTablePage
+          columns={sessionColumns}
+          fetcher={sessionFetcher}
+          getRowId={(s) => s.id}
+          defaultSortKey="last_used_at"
+          defaultSortDir="desc"
+          emptyMessage={t("noSessions")}
+          refreshSignal={refresh}
+          action={
+            <Button variant="outlined" color="error" size="small" onClick={handleRevokeOthers}
+              disabled={revokingAll || otherSessionCount === 0}>
+              {t("signOutOthers")}
+            </Button>
+          }
+          pageSizeOptions={[10, 25, 50]}
+          defaultPageSize={25}
+        />
+      </Box>
+
+      <Box sx={{ flex: 1, overflow: "hidden", display: tab === 1 ? "flex" : "none", flexDirection: "column" }}>
+        <ResourceTablePage
+          columns={auditColumns}
+          fetcher={auditFetcher}
+          getRowId={(e) => e.id}
+          defaultSortKey="created_at"
+          defaultSortDir="desc"
+          emptyMessage={t("noHistory")}
+          pageSizeOptions={[25, 50, 100]}
+          defaultPageSize={25}
+        />
+      </Box>
+    </Box>
   );
 }

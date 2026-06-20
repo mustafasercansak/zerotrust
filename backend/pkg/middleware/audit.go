@@ -19,21 +19,51 @@ type AuditLogger interface {
 	Log(context.Context, audit.Entry) error
 }
 
+// auditExtrasKey is the context key for handler-supplied audit metadata.
+type auditExtrasKey struct{}
+
+// AuditExtras holds key-value pairs that a handler wants to add to the
+// middleware-generated audit log entry for the current request.
+type AuditExtras struct {
+	data map[string]any
+}
+
+func (e *AuditExtras) Set(key string, value any) {
+	if e.data == nil {
+		e.data = map[string]any{}
+	}
+	e.data[key] = value
+}
+
+// AuditExtrasFrom returns the AuditExtras stored in ctx, or nil if absent.
+func AuditExtrasFrom(ctx context.Context) *AuditExtras {
+	v, _ := ctx.Value(auditExtrasKey{}).(*AuditExtras)
+	return v
+}
+
 func AuditLog(repo AuditLogger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			extras := &AuditExtras{}
+			r = r.WithContext(context.WithValue(r.Context(), auditExtrasKey{}, extras))
+
 			rw := newAuditResponseWriter(w)
 			next.ServeHTTP(wrapAuditResponseWriter(rw), r)
 
 			claims := ClaimsFrom(r.Context())
 			event := auditEventFor(r.Method, r.URL.Path)
 
+			meta := auditMetadata(r, rw.status)
+			for k, v := range extras.data {
+				meta[k] = v
+			}
+
 			entry := audit.Entry{
 				Action:    event.action,
 				Resource:  event.resource,
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  auditMetadata(r, rw.status),
+				Metadata:  meta,
 			}
 			if claims != nil {
 				entry.UserID = &claims.UserID

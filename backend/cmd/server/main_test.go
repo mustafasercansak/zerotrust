@@ -1074,6 +1074,36 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 		t.Fatalf("DELETE /me/avatar status=%d want=%d", deleteAvatarResp.StatusCode, http.StatusOK)
 	}
 
+	// PATCH /me/password: missing fields → 400
+	pwMissingResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/password", `{"current_password":"","new_password":""}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/password missing fields: %v", err)
+	}
+	pwMissingResp.Body.Close()
+	if pwMissingResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PATCH /me/password missing fields status=%d want=%d", pwMissingResp.StatusCode, http.StatusBadRequest)
+	}
+
+	// PATCH /me/password: wrong current password → 401
+	pwWrongResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/password", `{"current_password":"WrongPass1!","new_password":"NewStrong456@"}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/password wrong current: %v", err)
+	}
+	pwWrongResp.Body.Close()
+	if pwWrongResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("PATCH /me/password wrong current status=%d want=%d", pwWrongResp.StatusCode, http.StatusUnauthorized)
+	}
+
+	// PATCH /me/password: valid change → 204
+	pwOKResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/password", `{"current_password":"StrongPassword123!","new_password":"NewStrong456@"}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/password valid: %v", err)
+	}
+	pwOKResp.Body.Close()
+	if pwOKResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/password valid status=%d want=%d", pwOKResp.StatusCode, http.StatusNoContent)
+	}
+
 	cancel()
 	select {
 	case err := <-runErr:

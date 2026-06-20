@@ -5,6 +5,7 @@ interface PendingAction {
   action: () => Promise<unknown>;
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
+  reason?: string;
 }
 
 export function useStepUp() {
@@ -13,7 +14,7 @@ export function useStepUp() {
   const [submitting, setSubmitting] = useState(false);
   const pendingRef = useRef<PendingAction | null>(null);
 
-  async function runWithStepUp<T>(action: () => Promise<T>): Promise<T> {
+  async function runWithStepUp<T>(action: () => Promise<T>, reason?: string): Promise<T> {
     try {
       return await action();
     } catch (err) {
@@ -23,6 +24,7 @@ export function useStepUp() {
           action: action as () => Promise<unknown>,
           resolve: resolve as (v: unknown) => void,
           reject,
+          reason,
         };
         setOpen(true);
       });
@@ -35,7 +37,7 @@ export function useStepUp() {
     setSubmitting(true);
     setError("");
     try {
-      await api.mfaStepUp(code);
+      await api.mfaStepUp(code, pending.reason);
       const result = await pending.action();
       pending.resolve(result);
       pendingRef.current = null;

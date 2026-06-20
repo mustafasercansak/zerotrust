@@ -128,6 +128,27 @@
       "file_too_large": "File is too large (max 2MB).",
       "invalid_file_type": "Only JPEG and PNG images are allowed.",
       "internal_error": "Server error. Please try again."
+    },
+    "changePassword": {
+      "title": "Change Password",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "submit": "Change Password",
+      "submitting": "Changing...",
+      "success": "Password changed successfully.",
+      "errors": {
+        "passwords_do_not_match": "New passwords do not match.",
+        "wrong_password": "Current password is incorrect.",
+        "password_too_short": "Password must be at least 8 characters.",
+        "password_too_short_6": "Password must be at least 6 characters.",
+        "password_no_uppercase": "Password must contain at least one uppercase letter.",
+        "password_no_lowercase": "Password must contain at least one lowercase letter.",
+        "password_no_digit": "Password must contain at least one digit.",
+        "password_no_special": "Password must contain at least one special character.",
+        "password_no_letter": "Password must contain at least one letter.",
+        "internal_error": "Server error. Please try again."
+      }
     }
   },
   "admin": {
@@ -213,6 +234,16 @@
     "signOutOthersConfirm": "This will immediately sign out all other active sessions. Continue?",
     "signedOutOthers": "All other sessions have been signed out.",
     "noSessions": "No active sessions found.",
+    "tabActiveSessions": "Active Sessions",
+    "tabLoginHistory": "Login History",
+    "noHistory": "No activity recorded yet.",
+    "prev": "Previous",
+    "next": "Next",
+    "historyAction": "Action",
+    "historyOutcome": "Outcome",
+    "historyDate": "Date",
+    "historySuccess": "Success",
+    "historyFailure": "Failure",
     "errors": {
       "internal_error": "Server error. Please try again.",
       "not_found": "Session not found."
@@ -260,6 +291,47 @@
     "userId": "User ID",
     "anonymousActor": "Anonymous / unauthenticated request.",
     "noOutcome": "no outcome",
+    "actions": {
+      "auth.login_success": "Signed in",
+      "auth.login_failed": "Sign-in failed",
+      "auth.logout": "Signed out",
+      "auth.mfa_challenge_success": "MFA challenge passed",
+      "auth.mfa_challenge_failed": "MFA challenge failed",
+      "auth.webauthn_login_success": "Signed in with passkey",
+      "auth.webauthn_login_failed": "Passkey sign-in failed",
+      "auth.webauthn_passwordless_success": "Passwordless sign-in",
+      "auth.webauthn_passwordless_failed": "Passwordless sign-in failed",
+      "auth.refresh_failed": "Session refresh failed",
+      "auth.register": "Account created",
+      "auth.password_reset_requested": "Password reset requested",
+      "auth.password_reset_failed": "Password reset failed",
+      "auth.password_reset_success": "Password reset",
+      "auth.client_credentials_success": "Service account signed in",
+      "auth.client_credentials_failed": "Service account sign-in failed",
+      "login.anomaly": "Anomalous sign-in detected",
+      "mfa.setup_start": "MFA setup started",
+      "mfa.verify": "MFA verified",
+      "mfa.disable": "MFA disabled",
+      "mfa.step_up": "Step-up MFA verified",
+      "session.revoke": "Session terminated",
+      "session.revoke_others": "Other sessions terminated"
+    },
+    "step_up_for": {
+      "user_status_update": "User status change",
+      "user_session_revoke": "Revoke user session",
+      "user_sessions_revoke_all": "Revoke all user sessions",
+      "service_account_status_update": "Service account status change",
+      "service_account_delete": "Delete service account",
+      "service_account_secret_rotate": "Rotate service account secret",
+      "service_account_create": "Create service account",
+      "service_account_update": "Update service account",
+      "settings_update": "System settings update",
+      "oauth_consent": "OAuth consent approval",
+      "oidc_client_create": "Create OIDC client",
+      "oidc_client_delete": "Delete OIDC client",
+      "oidc_client_update": "Update OIDC client",
+      "oidc_client_secret_rotate": "Rotate OIDC client secret"
+    },
     "errors": {
       "internal_error": "Server error. Please try again."
     }
@@ -330,6 +402,39 @@
       "lockouts": "Account lockouts",
       "anomalies": "Login anomalies",
       "activeSessions": "Active sessions"
+    },
+    "systemSettings": {
+      "title": "System Settings",
+      "subtitle": "Configure global security policies applied to all users.",
+      "saved": "Settings saved successfully.",
+      "saveError": "Failed to save settings.",
+      "save": "Save Changes",
+      "saving": "Saving…",
+      "sections": {
+        "session": "Session Timeouts",
+        "authentication": "Authentication"
+      },
+      "fields": {
+        "session_idle_timeout_seconds": "User idle timeout (s)",
+        "session_idle_timeout_seconds_admin": "Admin idle timeout (s)",
+        "session_absolute_timeout_seconds": "Absolute timeout (s)",
+        "password_complexity": "Password complexity",
+        "max_login_attempts": "Max login attempts",
+        "max_sessions_per_user": "Max sessions per user",
+        "global_mfa_required": "Require MFA for all users"
+      },
+      "hints": {
+        "seconds_60_3600": "60–3600 s",
+        "seconds_60_1800": "60–1800 s",
+        "seconds_1800_172800": "1800–172800 s",
+        "attempts_1_20": "1–20",
+        "sessions_1_20": "1–20"
+      },
+      "complexity": {
+        "low": "Low",
+        "medium": "Medium",
+        "strong": "Strong"
+      }
     }
   },
   "mfa": {
@@ -347,6 +452,7 @@
     "setupInstructions": "Scan the code below or enter the secret manually in your authenticator app (Google Authenticator, Authy, etc.).",
     "secretLabel": "Manual entry secret",
     "openInApp": "Open in authenticator app →",
+    "totpPlaceholder": "000000",
     "verifyPrompt": "Enter the 6-digit code from your authenticator app to confirm setup.",
     "verifyButton": "Confirm & Enable",
     "disablePrompt": "Enter your current authentication code to disable 2FA.",
@@ -379,6 +485,14 @@
     "tabSecurity": "Security & Sessions",
     "tabSystem": "System Settings",
     "tabOidc": "OIDC Clients",
+    "sessionTimeouts": "Session Timeouts",
+    "sessionTimeoutsDesc": "How long users and admins can remain idle before being warned and logged out.",
+    "idleTimeoutInput": "User idle timeout (s)",
+    "idleTimeoutHint": "60–3600 s",
+    "adminIdleTimeoutInput": "Admin idle timeout (s)",
+    "adminIdleTimeoutHint": "60–1800 s",
+    "absoluteTimeoutInput": "Absolute timeout (s)",
+    "absoluteTimeoutHint": "1800–172800 s",
     "maxSessions": "Max Concurrent Sessions",
     "maxSessionsInput": "Limit",
     "maxSessionsDesc": "Maximum number of active sessions allowed per user account (1–20). Oldest sessions are evicted when the limit is reached.",
@@ -413,7 +527,9 @@
       "clientId": "Client ID",
       "clientIdPlaceholder": "client-id-123",
       "redirectUris": "Authorized Redirect URIs (comma-separated)",
+      "redirectUrisPlaceholder": "https://myapp.com/callback",
       "allowedScopes": "Allowed Scopes (space-separated)",
+      "scopesPlaceholder": "openid profile email",
       "secretTitle": "Copy client credentials",
       "secretWarning": "Write this client secret down. It will never be shown again.",
       "clientSecret": "Client Secret",
@@ -493,5 +609,11 @@
       "unauthorized": "Session expired. Please sign in again.",
       "internal_error": "Server error. Please try again."
     }
+  },
+  "sessionTimeout": {
+    "title": "Session About to Expire",
+    "description": "You have been inactive for a while. Your session will expire soon. Click \"Stay Signed In\" to continue.",
+    "extend": "Stay Signed In",
+    "logoutNow": "Log Out Now"
   }
 }

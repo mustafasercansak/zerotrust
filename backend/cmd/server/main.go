@@ -39,6 +39,8 @@ import (
 	"github.com/zerotrust/backend/pkg/mailer"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 	"github.com/zerotrust/backend/pkg/secrets"
+	"github.com/zerotrust/backend/pkg/validation"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -433,6 +435,25 @@ func run(ctx context.Context, cfg config) error {
 					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
 			})
 
+			r.Get("/session/policy", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				isAdmin := false
+				for _, role := range claims.Roles {
+					if role == "admin" {
+						isAdmin = true
+						break
+					}
+				}
+				var idleTimeout int
+				if isAdmin {
+					idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds_admin", 180)
+				} else {
+					idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds", 300)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"idle_timeout_seconds":%d}`, idleTimeout)
+			})
+
 			r.Patch("/me/locale", func(w http.ResponseWriter, r *http.Request) {
 				claims := authmw.ClaimsFrom(r.Context())
 				var req struct {
@@ -448,6 +469,49 @@ func run(ctx context.Context, cfg config) error {
 					return
 				}
 				if err := userRepo.UpdateLocale(r.Context(), claims.UserID, req.Locale); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+
+			r.Patch("/me/password", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				var req struct {
+					CurrentPassword string `json:"current_password"`
+					NewPassword     string `json:"new_password"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				if req.CurrentPassword == "" || req.NewPassword == "" {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+
+				profile, err := userRepo.FindByID(r.Context(), claims.UserID)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				if !userSvc.CheckPassword(profile.PasswordHash, req.CurrentPassword) {
+					http.Error(w, `{"error":"wrong_password"}`, http.StatusUnauthorized)
+					return
+				}
+
+				complexity := settingsCache.GetString(r.Context(), "password_complexity", "low")
+				if err := validation.PasswordWithComplexity(req.NewPassword, complexity); err != nil {
+					http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+					return
+				}
+
+				newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				if err := userSvc.UpdatePassword(r.Context(), claims.UserID, string(newHash)); err != nil {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
 				}
@@ -580,6 +644,41 @@ func run(ctx context.Context, cfg config) error {
 			r.Get("/sessions/events", sessionHandler.Events)
 			r.Delete("/sessions", sessionHandler.RevokeOthers)
 			r.Delete("/sessions/{id}", sessionHandler.Revoke)
+
+			// Own audit log — user sees only their own entries
+			r.Get("/me/audit", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				if claims == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+					return
+				}
+				q := r.URL.Query()
+				limit, offset := 25, 0
+				if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+					limit = n
+				}
+				if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+					offset = n
+				}
+				result, err := auditRepo.List(r.Context(), audit.ListParams{
+					Limit:              limit,
+					Offset:             offset,
+					SortBy:             q.Get("sort_by"),
+					SortDir:            q.Get("sort_dir"),
+					UserID:             claims.UserID,
+					SecurityEventsOnly: true,
+				})
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"data": result.Entries, "total": result.Total})
+			})
 
 			// MFA management — any authenticated user
 			if mfaHandler != nil {

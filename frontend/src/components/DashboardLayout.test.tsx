@@ -62,6 +62,19 @@ vi.mock("@/lib/tokenManager", () => ({
   cancelRefresh: vi.fn(),
 }));
 
+vi.mock("@/hooks/useIdleTimeout", () => ({
+  useIdleTimeout: () => ({
+    warningVisible: false,
+    secondsRemaining: 60,
+    extendSession: vi.fn(),
+    dismissWarning: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/SessionTimeoutDialog", () => ({
+  SessionTimeoutDialog: () => null,
+}));
+
 // Mock useAuth
 let mockLoading = false;
 let mockBootstrapError: any = null;

@@ -140,14 +140,15 @@ type EntryRow struct {
 
 // ListParams configures pagination, sorting, and filtering for List.
 type ListParams struct {
-	Limit    int
-	Offset   int
-	SortBy   string // created_at | action | user_id | resource
-	SortDir  string // asc | desc
-	Action   string // ILIKE filter
-	UserID   string // exact match
-	Resource string // ILIKE filter
-	Outcome  string // success | failure
+	Limit              int
+	Offset             int
+	SortBy             string // created_at | action | user_id | resource
+	SortDir            string // asc | desc
+	Action             string // ILIKE filter
+	UserID             string // exact match
+	Resource           string // ILIKE filter
+	Outcome            string // success | failure
+	SecurityEventsOnly bool   // when true, only return auth/mfa/session/login prefixed events
 }
 
 // ListResult holds one page of audit entries and the total matching count.
@@ -200,6 +201,9 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 		conds = append(conds, fmt.Sprintf("a.metadata->>'outcome' = $%d", n))
 		args = append(args, p.Outcome)
 		n++
+	}
+	if p.SecurityEventsOnly {
+		conds = append(conds, "a.action ~ '^(auth|mfa|session|login)\\.'")
 	}
 
 	where := ""

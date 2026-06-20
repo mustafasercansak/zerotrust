@@ -67,4 +67,5 @@ describe("SecurityDashboardPage", () => {
     expect(html).toContain("ranges.30d");
     expect(html).toContain("progressbar");
   });
+
 });

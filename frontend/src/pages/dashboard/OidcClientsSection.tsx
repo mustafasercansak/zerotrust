@@ -81,7 +81,8 @@ export default function OidcClientsSection() {
       const uris = redirectUris.split(",").map((x) => x.trim()).filter(Boolean);
       const scopes = allowedScopes.split(" ").map((x) => x.trim()).filter(Boolean);
       const client = await runWithStepUp(() =>
-        api.admin.createOidcClient({ client_id: clientIdInput.trim(), name: name.trim(), redirect_uris: uris, allowed_scopes: scopes })
+        api.admin.createOidcClient({ client_id: clientIdInput.trim(), name: name.trim(), redirect_uris: uris, allowed_scopes: scopes }),
+        "oidc_client_create"
       );
       setCreatedClient(client);
       setOpenCreate(false);
@@ -98,7 +99,7 @@ export default function OidcClientsSection() {
   async function handleDelete(client: OidcClient) {
     if (!window.confirm(t("oidc.deleteConfirm", { name: client.name }))) return;
     try {
-      await runWithStepUp(() => api.admin.deleteOidcClient(client.id));
+      await runWithStepUp(() => api.admin.deleteOidcClient(client.id), "oidc_client_delete");
       toast.success(t("saved"));
       loadClients();
     } catch (err) {
@@ -122,7 +123,8 @@ export default function OidcClientsSection() {
       const uris = editRedirectUris.split(",").map((x) => x.trim()).filter(Boolean);
       const scopes = editAllowedScopes.split(" ").map((x) => x.trim()).filter(Boolean);
       await runWithStepUp(() =>
-        api.admin.updateOidcClient(editingClient.id, { name: editName.trim(), redirect_uris: uris, allowed_scopes: scopes })
+        api.admin.updateOidcClient(editingClient.id, { name: editName.trim(), redirect_uris: uris, allowed_scopes: scopes }),
+        "oidc_client_update"
       );
       setEditingClient(null);
       toast.success(t("saved"));
@@ -138,7 +140,7 @@ export default function OidcClientsSection() {
   async function handleRotate(client: OidcClient) {
     if (!window.confirm(t("oidc.rotateConfirm", { name: client.name }))) return;
     try {
-      const { client_secret } = await runWithStepUp(() => api.admin.rotateOidcClientSecret(client.id));
+      const { client_secret } = await runWithStepUp(() => api.admin.rotateOidcClientSecret(client.id), "oidc_client_secret_rotate");
       setCreatedClient({ ...client, client_secret });
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "internal_error";
@@ -436,7 +438,7 @@ export default function OidcClientsSection() {
               label={t("oidc.redirectUris")}
               value={redirectUris}
               onChange={(e) => setRedirectUris(e.target.value)}
-              placeholder="http://localhost:3000/callback, https://myapp.com/callback"
+              placeholder={t("oidc.redirectUrisPlaceholder")}
               required
               fullWidth
               inputRef={requiredValidator(redirectUris, tCommon("validation.required"))}
@@ -445,7 +447,7 @@ export default function OidcClientsSection() {
               label={t("oidc.allowedScopes")}
               value={allowedScopes}
               onChange={(e) => setAllowedScopes(e.target.value)}
-              placeholder="openid profile email"
+              placeholder={t("oidc.scopesPlaceholder")}
               required
               fullWidth
               inputRef={requiredValidator(allowedScopes, tCommon("validation.required"))}
