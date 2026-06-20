@@ -56,7 +56,6 @@ function sessionDeviceKey(s: Session): string {
 
 export default function SessionsPage() {
   const { t } = useTranslation("sessions");
-  const { t: tEvents } = useTranslation("securityEvents");
   const { t: tAudit } = useTranslation("audit");
   const { i18n } = useTranslation();
   const navigate = useNavigate();
@@ -101,7 +100,7 @@ export default function SessionsPage() {
     } finally {
       checking.current = false;
     }
-  }, [navigate, tEvents]);
+  }, [navigate]);
 
   useEffect(() => {
     void inspectSessions(false);
@@ -239,7 +238,7 @@ export default function SessionsPage() {
         </Typography>
       ),
     },
-  ], [t, i18n.language]);
+  ], [t, tAudit, i18n.language]);
 
   async function handleRevoke(session: Session) {
     if (!confirm(session.is_current ? t("signOutThisConfirm") : t("signOutConfirm"))) return;

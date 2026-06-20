@@ -923,6 +923,18 @@
         </article>
 
         <article class="gallery-card" data-category="authentication">
+          <button class="gallery-trigger" type="button" data-full="images/login.png" data-title="Sign-in page" aria-label="Open sign-in page screenshot">
+            <img src="images/login.png" alt="ZeroTrust sign-in form with email, password, and passkey options" width="1440" height="900" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Sign-In Page</h3>
+            <p>Credential login with inline MFA prompt and passkey discovery — one screen handles all authentication paths.</p>
+            <ul class="tag-list"><li class="tag">MFA</li><li class="tag">Passkey</li><li class="tag">Rate limiting</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="authentication">
           <button class="gallery-trigger" type="button" data-full="images/mfa_setup.png" data-title="TOTP and recovery-code setup" aria-label="Open TOTP setup screenshot">
             <img src="images/mfa_setup.png" alt="TOTP setup screen with QR code and backup recovery codes" width="1440" height="813" loading="lazy" decoding="async">
             <span class="zoom-label" aria-hidden="true">↗ Expand</span>
@@ -1029,6 +1041,18 @@
             <ul class="tag-list"><li class="tag">Immutable events</li><li class="tag">Prometheus</li><li class="tag">Forensics</li></ul>
           </div>
         </article>
+
+        <article class="gallery-card" data-category="account">
+          <button class="gallery-trigger" type="button" data-full="images/settings.png" data-title="Profile and notification settings" aria-label="Open profile settings screenshot">
+            <img src="images/settings.png" alt="Profile settings page with language selector, email notification toggle, and password change form" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Profile &amp; Notification Settings</h3>
+            <p>Users control their display language, opt in or out of security alert emails, and change their password — all changes are server-audited.</p>
+            <ul class="tag-list"><li class="tag">Locale audit</li><li class="tag">Email alerts</li><li class="tag">i18n</li></ul>
+          </div>
+        </article>
       </div>
     </section>
 
@@ -1049,6 +1073,8 @@
         <article class="feature-card"><div class="feature-accent"></div><h3>Fine-Grained RBAC</h3><p>Roles map to explicit permissions for user, audit, settings, and service-account operations.</p></article>
         <article class="feature-card"><div class="feature-accent"></div><h3>Security Observability</h3><p>Synchronous audit events, Prometheus metrics, and administrator risk dashboards make authentication behavior and administrative changes inspectable.</p></article>
         <article class="feature-card"><div class="feature-accent"></div><h3>OIDC Identity Provider</h3><p>Standards-compliant OpenID Connect provider to issue authorization codes, ID tokens, and UserInfo to registered third-party clients.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>In-App Security Alerts</h3><p>Persistent banners — not dismissable toasts — notify users of new-device sign-ins, session terminations, locale changes from another session, and login anomalies detected within the last 24 hours.</p></article>
+        <article class="feature-card"><div class="feature-accent"></div><h3>Locale Change Audit</h3><p>Language preference changes are treated as a security signal. Each change is written to the audit log with from/to values and optionally triggers a security alert email.</p></article>
       </div>
     </section>
 
@@ -1123,6 +1149,8 @@
           "A focused overview of identity, roles, locale, and security status with responsive navigation.": "Kimlik, roller, dil ve güvenlik durumuna odaklanan duyarlı bir genel bakış.",
           "Session Management": "Oturum Yönetimi",
           "Users inspect active devices and revoke individual sessions or every other session immediately.": "Kullanıcılar aktif cihazları inceler, tekil oturumları veya diğer tüm oturumları anında iptal eder.",
+          "Sign-In Page": "Giriş Ekranı",
+          "Credential login with inline MFA prompt and passkey discovery — one screen handles all authentication paths.": "Satır içi MFA istemi ve geçiş anahtarı keşfiyle kimlik bilgisi girişi — tek ekran tüm kimlik doğrulama yollarını yönetir.",
           "TOTP & Recovery Codes": "TOTP ve Kurtarma Kodları",
           "Encrypted TOTP enrollment pairs a QR setup flow with eight single-use, bcrypt-hashed recovery codes.": "Şifreli TOTP kurulumu, QR akışını sekiz tek kullanımlık bcrypt özetli kurtarma koduyla birleştirir.",
           "Passkey Management": "Geçiş Anahtarı Yönetimi",
@@ -1168,6 +1196,14 @@
           "Synchronous audit events, Prometheus metrics, and administrator risk dashboards make authentication behavior and administrative changes inspectable.": "Eşzamanlı denetim olayları, Prometheus metrikleri ve yönetici risk panelleri kimlik doğrulama davranışını ve yönetim değişikliklerini incelenebilir kılar.",
           "Read the implementation, not just the feature list.": "Yalnızca özellik listesini değil, uygulamayı da inceleyin.",
           "The repository includes the Go API, React client, database migrations, Docker environments, and focused backend and frontend tests.": "Depo Go API'sini, React istemcisini, veritabanı geçişlerini, Docker ortamlarını ve odaklanmış backend/frontend testlerini içerir.",
+          "Profile & Notification Settings": "Profil ve Bildirim Ayarları",
+          "Users control their display language, opt in or out of security alert emails, and change their password — all changes are server-audited.": "Kullanıcılar görüntüleme dilini, güvenlik uyarı e-postası tercihlerini ve parolalarını yönetir — tüm değişiklikler sunucu tarafında denetlenir.",
+          "Locale audit": "Dil denetimi",
+          "Email alerts": "E-posta uyarıları",
+          "In-App Security Alerts": "Uygulama İçi Güvenlik Uyarıları",
+          "Persistent banners — not dismissable toasts — notify users of new-device sign-ins, session terminations, locale changes from another session, and login anomalies detected within the last 24 hours.": "Kalıcı banner'lar — kaybolan toast bildirimleri değil — kullanıcıları yeni cihaz girişleri, oturum sonlandırmaları, başka bir oturumdan yapılan dil değişiklikleri ve son 24 saatte tespit edilen giriş anormallikleri hakkında bilgilendirir.",
+          "Locale Change Audit": "Dil Değişikliği Denetimi",
+          "Language preference changes are treated as a security signal. Each change is written to the audit log with from/to values and optionally triggers a security alert email.": "Dil tercihi değişiklikleri bir güvenlik sinyali olarak değerlendirilir. Her değişiklik kaynak/hedef değerlerle denetim günlüğüne yazılır ve isteğe bağlı olarak bir güvenlik uyarı e-postası tetikler.",
           "Open GitHub repository": "GitHub deposunu aç",
           "Built by": "Geliştiren",
           "Source on GitHub": "GitHub'da kaynak kod"

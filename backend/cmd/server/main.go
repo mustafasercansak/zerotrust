@@ -489,8 +489,9 @@ func run(ctx context.Context, cfg config) error {
 						Resource:  "user",
 						IPAddress: ip,
 						Metadata: map[string]any{
-							"from": existing.Locale,
-							"to":   req.Locale,
+							"from":    existing.Locale,
+							"to":     req.Locale,
+							"outcome": "success",
 						},
 					})
 					if ml != nil && existing.NotifySecurityEmails {

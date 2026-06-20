@@ -48,7 +48,7 @@ export default function DashboardLayout() {
     navigate("/auth/login");
   }, [navigate]);
 
-  const { warningVisible, secondsRemaining, extendSession, dismissWarning } = useIdleTimeout(handleLogout);
+  const { warningVisible, secondsRemaining, extendSession } = useIdleTimeout(handleLogout);
 
   useEffect(() => {
     const handleMeUpdated = (e: Event) => {

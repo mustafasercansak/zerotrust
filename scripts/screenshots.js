@@ -118,6 +118,10 @@ const PAGES = [
     colorScheme: "dark",
     deviceScaleFactor: 1.5,
   });
+  // Force English locale in every page before React initializes
+  await context.addInitScript(() => {
+    localStorage.setItem("locale", "en");
+  });
   const page = await context.newPage();
 
   // ── Login ─────────────────────────────────────────────────────────────────
@@ -130,9 +134,11 @@ const PAGES = [
     process.exit(1);
   }
 
-  // Take login page screenshot before submitting
+  // Take login page screenshot before submitting (wait for form to render)
   const loginEntry = PAGES.find(p => p.name === "login");
   if (loginEntry) {
+    await page.waitForSelector('input[type="email"]', { state: "visible", timeout: 10000 });
+    await page.waitForTimeout(500);
     await page.screenshot({ path: path.join(OUT_DIR, loginEntry.file), fullPage: false });
     console.log(`  ✓ ${loginEntry.file}`);
   }
@@ -207,7 +213,13 @@ const PAGES = [
     if (entry.name === "login") continue; // already captured
     try {
       console.log(`  → ${entry.path}`);
-      await page.goto(`${BASE_URL}${entry.path}`, { waitUntil: "load", timeout: 15000 });
+      // SPA-internal navigation: avoids full page reload so React and auth state persist.
+      // React Router v6 listens to popstate and re-renders the matching route.
+      await page.evaluate((path) => {
+        window.history.pushState({}, "", path);
+        window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+      }, entry.path);
+      // Wait for the lazy chunk and page data to settle
       await page.waitForTimeout(2000);
 
       // If we are capturing MFA setup, click "Enable 2FA" to reveal the QR code and recovery codes
@@ -222,11 +234,25 @@ const PAGES = [
         } catch (e) {}
       }
 
+      // For settings page, scroll down so locale selector and notifications card are visible
+      if (entry.name === "settings") {
+        try {
+          // Wait for the profile tab content to load
+          await page.waitForSelector('text="Language & Region"', { timeout: 5000 });
+          // Scroll down slightly to show locale + notification cards
+          await page.evaluate(() => window.scrollBy(0, 200));
+          await page.waitForTimeout(300);
+        } catch (e) {}
+      }
+
       const dest = path.join(OUT_DIR, entry.file);
       await page.screenshot({ path: dest, fullPage: false });
       console.log(`  ✓ ${entry.file}`);
     } catch (err) {
+      const debugPath = path.join(OUT_DIR, `_debug_${entry.name}.png`);
+      await page.screenshot({ path: debugPath }).catch(() => {});
       console.warn(`  ⚠ Skipped ${entry.path}: ${err.message}`);
+      console.warn(`     Debug screenshot: ${debugPath}`);
     }
   }
 
