@@ -11,10 +11,11 @@ import (
 
 // Location contains the geo-coordinates and names for an IP.
 type Location struct {
-	Country   string  `json:"country"`
-	City      string  `json:"city"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code"` // ISO 3166-1 alpha-2, e.g. "TR", "US"
+	City        string  `json:"city"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
 }
 
 // mmdbReader is the subset of *geoip2.Reader used by Service.
@@ -33,12 +34,12 @@ type Service struct {
 
 // mockIPs maps specific test IPs to distinct locations to allow testing and dev without a real database file.
 var mockIPs = map[string]Location{
-	"8.8.8.8":     {Country: "United States", City: "Mountain View", Latitude: 37.386, Longitude: -122.083},
-	"81.2.69.142": {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
-	"1.1.1.1":     {Country: "Australia", City: "Sydney", Latitude: -33.868, Longitude: 151.209},
-	"100.0.0.1":   {Country: "Japan", City: "Tokyo", Latitude: 35.676, Longitude: 139.65},
-	"100.0.0.2":   {Country: "United Kingdom", City: "London", Latitude: 51.507, Longitude: -0.127},
-	"100.0.0.3":   {Country: "United States", City: "New York", Latitude: 40.7128, Longitude: -74.006},
+	"8.8.8.8":     {Country: "United States", CountryCode: "US", City: "Mountain View", Latitude: 37.386, Longitude: -122.083},
+	"81.2.69.142": {Country: "United Kingdom", CountryCode: "GB", City: "London", Latitude: 51.507, Longitude: -0.127},
+	"1.1.1.1":     {Country: "Australia", CountryCode: "AU", City: "Sydney", Latitude: -33.868, Longitude: 151.209},
+	"100.0.0.1":   {Country: "Japan", CountryCode: "JP", City: "Tokyo", Latitude: 35.676, Longitude: 139.65},
+	"100.0.0.2":   {Country: "United Kingdom", CountryCode: "GB", City: "London", Latitude: 51.507, Longitude: -0.127},
+	"100.0.0.3":   {Country: "United States", CountryCode: "US", City: "New York", Latitude: 40.7128, Longitude: -74.006},
 }
 
 // NewService initializes a GeoIP service using the provided path to a MaxMind DB file.
@@ -97,13 +98,15 @@ func (s *Service) Lookup(ipStr string) (*Location, error) {
 			return nil, fmt.Errorf("geoip database lookup: %w", err)
 		}
 		loc := &Location{
-			Country:   record.Country.Names["en"],
-			City:      record.City.Names["en"],
-			Latitude:  record.Location.Latitude,
-			Longitude: record.Location.Longitude,
+			Country:     record.Country.Names["en"],
+			CountryCode: record.Country.IsoCode,
+			City:        record.City.Names["en"],
+			Latitude:    record.Location.Latitude,
+			Longitude:   record.Location.Longitude,
 		}
 		if loc.Country == "" {
 			loc.Country = record.RegisteredCountry.Names["en"]
+			loc.CountryCode = record.RegisteredCountry.IsoCode
 		}
 		return loc, nil
 	}

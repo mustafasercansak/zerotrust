@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,6 +48,50 @@ var allowedKeys = map[string]func(string) bool{
 			return true
 		}
 		return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
+	},
+	"country_allowlist": func(v string) bool {
+		if v == "" {
+			return true
+		}
+		v = strings.ReplaceAll(v, "\n", ",")
+		for _, entry := range strings.Split(v, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			// ISO 3166-1 alpha-2: exactly 2 ASCII letters
+			if len(entry) != 2 {
+				return false
+			}
+			for _, c := range entry {
+				if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+					return false
+				}
+			}
+		}
+		return true
+	},
+	"ip_allowlist": func(v string) bool {
+		if v == "" {
+			return true
+		}
+		v = strings.ReplaceAll(v, "\n", ",")
+		for _, entry := range strings.Split(v, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if strings.Contains(entry, "/") {
+				if _, _, err := net.ParseCIDR(entry); err != nil {
+					return false
+				}
+			} else {
+				if net.ParseIP(entry) == nil {
+					return false
+				}
+			}
+		}
+		return true
 	},
 }
 

@@ -120,6 +120,12 @@ export default function SettingsPage() {
   const [webhookEnabled, setWebhookEnabled] = useState("false");
   const [webhookUrl, setWebhookUrl] = useState("");
 
+  // IP allowlist (appended last to preserve test state indices)
+  const [ipAllowlist, setIpAllowlist] = useState("");
+
+  // Country allowlist (appended last to preserve test state indices)
+  const [countryAllowlist, setCountryAllowlist] = useState("");
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
@@ -160,6 +166,8 @@ export default function SettingsPage() {
         setRequireHardwareAttestation(s["require_hardware_attestation"] ?? "false");
         setWebhookEnabled(s["webhook_enabled"] ?? "false");
         setWebhookUrl(s["webhook_url"] ?? "");
+        setIpAllowlist(s["ip_allowlist"] ?? "");
+        setCountryAllowlist(s["country_allowlist"] ?? "");
         setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
         setIdleTimeout(s["session_idle_timeout_seconds"] ?? "300");
         setAdminIdleTimeout(s["session_idle_timeout_seconds_admin"] ?? "180");
@@ -295,6 +303,8 @@ export default function SettingsPage() {
         require_hardware_attestation: requireHardwareAttestation,
         webhook_enabled: webhookEnabled,
         webhook_url: webhookUrl,
+        ip_allowlist: ipAllowlist,
+        country_allowlist: countryAllowlist,
         max_login_attempts: String(m),
         session_idle_timeout_seconds: String(idle),
         session_idle_timeout_seconds_admin: String(adminIdle),
@@ -652,7 +662,44 @@ export default function SettingsPage() {
                   </Box>
                 </Box>
 
-                {/* Row 5: Webhook Alerts */}
+                {/* Row 5: IP Allowlist */}
+                <Box sx={{ display: "grid", gap: 0.75 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("ipAllowlist")}</Typography>
+                  <Typography variant="body2" color="text.secondary">{t("ipAllowlistDesc")}</Typography>
+                  <TextField
+                    multiline
+                    minRows={3}
+                    maxRows={8}
+                    label={t("ipAllowlistInput")}
+                    value={ipAllowlist}
+                    onChange={(e) => setIpAllowlist(e.target.value)}
+                    placeholder={t("ipAllowlistPlaceholder")}
+                    size="small"
+                    fullWidth
+                    sx={{ mt: 0.5, fontFamily: "monospace" }}
+                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 } } }}
+                    helperText={t("ipAllowlistHint")}
+                  />
+                </Box>
+
+                {/* Row 6: Country Allowlist */}
+                <Box sx={{ display: "grid", gap: 0.75 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("countryAllowlist")}</Typography>
+                  <Typography variant="body2" color="text.secondary">{t("countryAllowlistDesc")}</Typography>
+                  <TextField
+                    label={t("countryAllowlistInput")}
+                    value={countryAllowlist}
+                    onChange={(e) => setCountryAllowlist(e.target.value)}
+                    placeholder={t("countryAllowlistPlaceholder")}
+                    size="small"
+                    fullWidth
+                    sx={{ mt: 0.5, fontFamily: "monospace" }}
+                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 } } }}
+                    helperText={t("countryAllowlistHint")}
+                  />
+                </Box>
+
+                {/* Row 7: Webhook Alerts */}
                 <Box sx={{ display: "grid", gap: 0.75 }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("webhookAlerts")}</Typography>
                   <Typography variant="body2" color="text.secondary">{t("webhookAlertsDesc")}</Typography>

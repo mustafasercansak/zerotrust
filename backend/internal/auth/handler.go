@@ -166,6 +166,24 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				"error":       "account_locked",
 				"retry_after": int(lockedErr.RetryAfter.Seconds()),
 			})
+		case errors.Is(err, ErrIPNotAllowed):
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/login",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata(req.Email, "ip_not_allowed", http.StatusForbidden, req.ClientInfo),
+			}, true)
+			writeError(w, http.StatusForbidden, "ip_not_allowed")
+		case errors.Is(err, ErrCountryNotAllowed):
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/login",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata(req.Email, "country_not_allowed", http.StatusForbidden, req.ClientInfo),
+			}, true)
+			writeError(w, http.StatusForbidden, "country_not_allowed")
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
 			h.logAudit(r.Context(), audit.Entry{
 				Action:    "auth.login_failed",
@@ -384,6 +402,28 @@ func (h *Handler) WebAuthnPasswordlessFinish(w http.ResponseWriter, r *http.Requ
 
 	pair, err := h.authSvc.WebAuthnPasswordlessFinish(r.Context(), req.CeremonyID, req.Credential, r.RemoteAddr, r.Header.Get("User-Agent"), nil)
 	if err != nil {
+		if errors.Is(err, ErrIPNotAllowed) {
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/webauthn/passwordless/finish",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  statusMetadata("ip_not_allowed", http.StatusForbidden),
+			}, true)
+			writeError(w, http.StatusForbidden, "ip_not_allowed")
+			return
+		}
+		if errors.Is(err, ErrCountryNotAllowed) {
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/webauthn/passwordless/finish",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  statusMetadata("country_not_allowed", http.StatusForbidden),
+			}, true)
+			writeError(w, http.StatusForbidden, "country_not_allowed")
+			return
+		}
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "auth.webauthn_passwordless_failed",
 			Resource:  "/api/v1/auth/webauthn/passwordless/finish",

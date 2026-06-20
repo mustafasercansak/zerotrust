@@ -210,6 +210,15 @@ func (s *Service) ConfigureWebAuthn(v WebAuthnVerifier) {
 // LoginResult with MFARequired=true and a short-lived pending token; otherwise
 // it returns a full TokenPair.
 func (s *Service) Login(ctx context.Context, email, password, ip, ua string, deviceInfo map[string]string) (*LoginResult, error) {
+	if s.settings != nil {
+		if allowlist := s.settings.GetString(ctx, "ip_allowlist", ""); !isIPAllowed(ip, allowlist) {
+			return nil, ErrIPNotAllowed
+		}
+		if allowlist := s.settings.GetString(ctx, "country_allowlist", ""); !isCountryAllowed(ip, allowlist, s.geoip) {
+			return nil, ErrCountryNotAllowed
+		}
+	}
+
 	if err := s.checkLockout(ctx, email); err != nil {
 		return nil, err
 	}
@@ -571,6 +580,15 @@ func (s *Service) WebAuthnPasswordlessBegin(ctx context.Context) (json.RawMessag
 // passkey with user verification stands in for both factors (possession +
 // inherence), so no password is required.
 func (s *Service) WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID string, credential []byte, ip, ua string, deviceInfo map[string]string) (*TokenPair, error) {
+	if s.settings != nil {
+		if allowlist := s.settings.GetString(ctx, "ip_allowlist", ""); !isIPAllowed(ip, allowlist) {
+			return nil, ErrIPNotAllowed
+		}
+		if allowlist := s.settings.GetString(ctx, "country_allowlist", ""); !isCountryAllowed(ip, allowlist, s.geoip) {
+			return nil, ErrCountryNotAllowed
+		}
+	}
+
 	if s.webauthn == nil {
 		return nil, ErrInvalidCredentials
 	}
