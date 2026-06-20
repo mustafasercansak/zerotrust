@@ -29,6 +29,7 @@ function initials(me: { email: string; first_name?: string; last_name?: string }
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
   const { t: tProfile } = useTranslation("profile");
+  const { i18n } = useTranslation();
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
 
@@ -169,6 +170,14 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleLocaleChange(locale: "tr" | "en") {
+    if (i18n.language.startsWith(locale)) return;
+    await api.updateLocale(locale).catch(() => {});
+    i18n.changeLanguage(locale);
+    localStorage.setItem("locale", locale);
+    toast.success(t("localeSaved"));
+  }
+
   async function handleNotifyToggle(enabled: boolean) {
     setNotifySecurityEmails(enabled);
     setSavingNotify(true);
@@ -303,6 +312,20 @@ export default function SettingsPage() {
                 {changingPassword ? tProfile("changePassword.submitting") : tProfile("changePassword.submit")}
               </Button>
             </Box>
+          </Paper>
+          <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("localeSection")}</Typography>
+            <Typography variant="body2" color="text.secondary">{t("localeDesc")}</Typography>
+            <TextField
+              select
+              label={t("localeLabel")}
+              value={i18n.language.startsWith("tr") ? "tr" : "en"}
+              onChange={(e) => handleLocaleChange(e.target.value as "tr" | "en")}
+              sx={{ width: 220 }}
+            >
+              <MenuItem value="en">English</MenuItem>
+              <MenuItem value="tr">Türkçe</MenuItem>
+            </TextField>
           </Paper>
           <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("notificationsSection")}</Typography>

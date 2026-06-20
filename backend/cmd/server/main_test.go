@@ -1152,26 +1152,26 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 		t.Fatalf("PATCH /me/notifications true status=%d want=%d", notifOnResp.StatusCode, http.StatusNoContent)
 	}
 
-	// PATCH /me/locale: change from "en" (registered) to "tr" → 204 + audit entry
-	localeChangeResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"tr"}`))
+	// Locale is currently "tr" (set earlier in this test). Change to "en" → 204 + audit entry.
+	localeChangeResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"en"}`))
 	if err != nil {
-		t.Fatalf("PATCH /me/locale en→tr: %v", err)
+		t.Fatalf("PATCH /me/locale tr→en: %v", err)
 	}
 	localeChangeResp.Body.Close()
 	if localeChangeResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("PATCH /me/locale en→tr status=%d want=%d", localeChangeResp.StatusCode, http.StatusNoContent)
+		t.Fatalf("PATCH /me/locale tr→en status=%d want=%d", localeChangeResp.StatusCode, http.StatusNoContent)
 	}
 
-	// GET /me/audit: verify locale_changed entry exists
+	// GET /me/audit: verify a locale_changed entry with from=tr to=en exists.
 	auditResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me/audit", ""))
 	if err != nil {
 		t.Fatalf("GET /me/audit: %v", err)
 	}
 	var auditPayload struct {
-		Entries []struct {
+		Data []struct {
 			Action   string         `json:"action"`
 			Metadata map[string]any `json:"metadata"`
-		} `json:"entries"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(auditResp.Body).Decode(&auditPayload); err != nil {
 		auditResp.Body.Close()
@@ -1182,26 +1182,32 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 		t.Fatalf("GET /me/audit status=%d want=%d", auditResp.StatusCode, http.StatusOK)
 	}
 	var foundLocaleChanged bool
-	for _, e := range auditPayload.Entries {
-		if e.Action == "user.locale_changed" {
-			if e.Metadata["from"] == "en" && e.Metadata["to"] == "tr" {
-				foundLocaleChanged = true
-				break
-			}
+	for _, e := range auditPayload.Data {
+		if e.Action == "user.locale_changed" && e.Metadata["from"] == "tr" && e.Metadata["to"] == "en" {
+			foundLocaleChanged = true
+			break
 		}
 	}
 	if !foundLocaleChanged {
-		t.Fatal("audit log missing user.locale_changed entry with from=en to=tr")
+		t.Fatal("audit log missing user.locale_changed entry with from=tr to=en")
 	}
 
-	// PATCH /me/locale: same locale → 204, no new audit entry
-	localeSameResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"tr"}`))
+	// Count how many locale_changed entries exist before the same-locale PATCH.
+	var countBeforeSame int
+	for _, e := range auditPayload.Data {
+		if e.Action == "user.locale_changed" {
+			countBeforeSame++
+		}
+	}
+
+	// PATCH /me/locale: same locale (en→en) → 204, no new audit entry.
+	localeSameResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"en"}`))
 	if err != nil {
-		t.Fatalf("PATCH /me/locale tr→tr: %v", err)
+		t.Fatalf("PATCH /me/locale en→en: %v", err)
 	}
 	localeSameResp.Body.Close()
 	if localeSameResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("PATCH /me/locale tr→tr status=%d want=%d", localeSameResp.StatusCode, http.StatusNoContent)
+		t.Fatalf("PATCH /me/locale en→en status=%d want=%d", localeSameResp.StatusCode, http.StatusNoContent)
 	}
 
 	auditResp2, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me/audit", ""))
@@ -1209,9 +1215,9 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 		t.Fatalf("GET /me/audit after same-locale: %v", err)
 	}
 	var auditPayload2 struct {
-		Entries []struct {
+		Data []struct {
 			Action string `json:"action"`
-		} `json:"entries"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(auditResp2.Body).Decode(&auditPayload2); err != nil {
 		auditResp2.Body.Close()
@@ -1219,13 +1225,13 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 	}
 	auditResp2.Body.Close()
 	var localeChangedCount int
-	for _, e := range auditPayload2.Entries {
+	for _, e := range auditPayload2.Data {
 		if e.Action == "user.locale_changed" {
 			localeChangedCount++
 		}
 	}
-	if localeChangedCount != 1 {
-		t.Fatalf("expected exactly 1 locale_changed audit entry, got %d", localeChangedCount)
+	if localeChangedCount != countBeforeSame {
+		t.Fatalf("same-locale PATCH must not add audit entry: before=%d after=%d", countBeforeSame, localeChangedCount)
 	}
 
 	cancel()

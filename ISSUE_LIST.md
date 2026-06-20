@@ -1220,3 +1220,25 @@ Acceptance criteria:
 - No audit entry or email is written when the submitted locale is the same as the current one.
 
 State: CLOSED
+
+### 51. Security alert banner system
+
+Severity: Medium
+
+Status: Toast notifications are inadequate for security-relevant events — they disappear silently and can be missed. Security signals require persistent, dismissable banners that stay visible until the user acknowledges them.
+
+Related files:
+- [frontend/src/components/DashboardLayout.tsx](/home/m/projects/zerotrust/frontend/src/components/DashboardLayout.tsx)
+- [frontend/src/lib/useAuth.ts](/home/m/projects/zerotrust/frontend/src/lib/useAuth.ts)
+- [frontend/src/pages/dashboard/SessionsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SessionsPage.tsx)
+- [frontend/src/components/TokenRefreshProvider.tsx](/home/m/projects/zerotrust/frontend/src/components/TokenRefreshProvider.tsx)
+
+Acceptance criteria:
+- New sign-in from a new/unrecognised device → red `Alert` banner at top of dashboard with "View Sessions" button.
+- Session terminated from another device → yellow `Alert` banner with "View Sessions" button.
+- Locale changed from another session (localStorage mismatch with backend value) → yellow `Alert` banner.
+- Login anomaly detected in audit log within last 24 hours → red `Alert` banner with "View Sessions" button.
+- All banners are persistent (not auto-dismissed) and can be manually closed.
+- Session events communicated via custom window events (`session:new_device`, `session:ended`) to decouple child components from layout.
+
+State: CLOSED

@@ -203,7 +203,7 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 		n++
 	}
 	if p.SecurityEventsOnly {
-		conds = append(conds, "a.action ~ '^(auth|mfa|session|login)\\.'")
+		conds = append(conds, "a.action ~ '^(auth|mfa|session|login|user)\\.'")
 	}
 
 	where := ""

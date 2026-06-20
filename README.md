@@ -83,7 +83,10 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | CSP / OWASP Headers | `frame-ancestors 'none'`, `object-src 'none'`, HSTS |
 | bcrypt | Cost factor 12 |
 | OIDC Provider | Standards-compliant OpenID Connect IdP — Authorization Code + PKCE (S256, RFC 7636), refresh token grant (RFC 6749 §6) with rotating opaque tokens, token revocation (RFC 7009), introspection (RFC 7662), `max_age` re-auth (OIDC Core §3.1.2.1), `prompt=none/login`, `offline_access` scope, MFA step-up on consent, admin client management with step-up MFA |
-| i18n | Turkish (default) / English |
+| i18n | Turkish (default) / English, locale preference stored server-side |
+| Locale Change Audit | Language changes recorded with `from`/`to` values; triggers opt-in security email |
+| Security Alert Banners | Persistent in-app alerts (not toasts) for new-device sign-in, session termination, locale change from another session, and login anomalies detected in the last 24 h |
+| Per-User Notification Preferences | Each user can toggle security alert emails (new device, lockout, locale change) independently of system-wide settings |
 
 ## Current Scope
 
@@ -101,14 +104,15 @@ ZeroTrust currently includes:
 - Password reset flow with SMTP or development log mailer
 - Audit log listing and an aggregated administrator security dashboard
 - OIDC Identity Provider — Authorization Code + PKCE (S256, RFC 7636), refresh token grant with single-use rotating opaque tokens (RFC 6749 §6, `offline_access` scope), token revocation (RFC 7009), introspection (RFC 7662), `max_age` re-auth enforcement (OIDC Core §3.1.2.1), `prompt=none/login`, MFA step-up on consent, rate-limited endpoints, admin client management with step-up MFA
-- Turkish and English UI messages
+- Turkish and English UI, with language preference stored server-side and audited on change
+- Security alert banners — persistent in-app alerts for new-device logins, session terminations, locale changes from another session, and login anomalies detected in the last 24 hours
+- Per-user email notification preferences (toggle security alert emails from profile settings)
+- Frontend route-level code splitting — DataGrid, React/ReactDOM, MUI, and i18n loaded in separate lazy chunks for fast initial load
 - Docker Compose development and production profiles
-- GitHub Actions CI for backend and frontend checks
+- GitHub Actions CI for backend and frontend checks; automated showcase deployment to GitHub Pages
 
 Planned/ongoing hardening:
 
-- Broader unit test coverage for MFA, password reset, session revocation, and service account handlers
-- End-to-end browser auth flow tests
 - Operational security review before any real production deployment
 
 ## Quick Start
@@ -205,6 +209,9 @@ npm run test:e2e:ui
 | Wrong credentials toast | 1 | Backend |
 | Regular user flow | 4 | Backend + user creds |
 | Admin flow | 4 | Backend + admin creds |
+| Settings page — regular user | 6 | Backend + user creds |
+| Settings page — admin | 2 | Backend + admin creds |
+| MFA page | 4 | Backend + user creds |
 
 Auth state is saved once per role via `storageState` (not repeated per test) to stay below the backend rate limit.
 
@@ -293,6 +300,8 @@ zerotrust/
 | GET | `/api/v1/me/avatar` | Get current user's profile picture |
 | GET | `/api/v1/users/{id}/avatar` | Get specific user's profile picture |
 | DELETE | `/api/v1/me/avatar` | Delete current user's profile picture |
+| PATCH | `/api/v1/me/notifications` | Toggle security alert email preference |
+| GET | `/api/v1/me/audit` | Personal security event log (auth, MFA, session, locale changes) |
 | GET | `/api/v1/sessions` | List active sessions |
 | GET | `/api/v1/sessions/events` | Session change event stream |
 | DELETE | `/api/v1/sessions` | Revoke all other sessions |

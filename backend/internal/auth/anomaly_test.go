@@ -79,7 +79,7 @@ func TestHaversineDistance(t *testing.T) {
 }
 
 func TestLogin_ImpossibleTravel(t *testing.T) {
-	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true}
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true, NotifySecurityEmails: true}
 	reader := &dummyUserReader{u: u}
 
 	// Active session in London

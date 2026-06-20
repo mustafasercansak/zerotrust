@@ -30,5 +30,23 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom") || id.includes("node_modules/react-router")) {
+            return "vendor-react";
+          }
+          if (id.includes("node_modules/@mui/x-data-grid")) {
+            return "vendor-datagrid";
+          }
+          if (id.includes("node_modules/@mui")) {
+            return "vendor-mui";
+          }
+          if (id.includes("node_modules/i18next") || id.includes("node_modules/react-i18next")) {
+            return "vendor-i18n";
+          }
+        },
+      },
+    },
   },
 });
