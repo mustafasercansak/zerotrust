@@ -57,6 +57,13 @@ func TestAllowedKeysValidators(t *testing.T) {
 		{name: "hardware attestation invalid", key: "require_hardware_attestation", value: "yes", want: false},
 		{name: "max login valid", key: "max_login_attempts", value: "3", want: true},
 		{name: "max login invalid", key: "max_login_attempts", value: "30", want: false},
+		{name: "webhook enabled true", key: "webhook_enabled", value: "true", want: true},
+		{name: "webhook enabled false", key: "webhook_enabled", value: "false", want: true},
+		{name: "webhook enabled invalid", key: "webhook_enabled", value: "yes", want: false},
+		{name: "webhook url valid http", key: "webhook_url", value: "http://example.com/hook", want: true},
+		{name: "webhook url valid https", key: "webhook_url", value: "https://hooks.slack.com/services/123", want: true},
+		{name: "webhook url empty", key: "webhook_url", value: "", want: true},
+		{name: "webhook url invalid", key: "webhook_url", value: "invalid-url", want: false},
 	}
 
 	for _, tt := range tests {

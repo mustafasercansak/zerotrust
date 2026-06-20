@@ -116,6 +116,10 @@ export default function SettingsPage() {
   // Hardware attestation state (appended last to preserve test state indices)
   const [requireHardwareAttestation, setRequireHardwareAttestation] = useState("false");
 
+  // Webhook alerts state (appended last to preserve test state indices)
+  const [webhookEnabled, setWebhookEnabled] = useState("false");
+  const [webhookUrl, setWebhookUrl] = useState("");
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
@@ -154,6 +158,8 @@ export default function SettingsPage() {
         setPasswordComplexity(s["password_complexity"] ?? "low");
         setGlobalMfaRequired(s["global_mfa_required"] ?? "false");
         setRequireHardwareAttestation(s["require_hardware_attestation"] ?? "false");
+        setWebhookEnabled(s["webhook_enabled"] ?? "false");
+        setWebhookUrl(s["webhook_url"] ?? "");
         setMaxLoginAttempts(s["max_login_attempts"] ?? "5");
         setIdleTimeout(s["session_idle_timeout_seconds"] ?? "300");
         setAdminIdleTimeout(s["session_idle_timeout_seconds_admin"] ?? "180");
@@ -287,6 +293,8 @@ export default function SettingsPage() {
         password_complexity: passwordComplexity,
         global_mfa_required: globalMfaRequired,
         require_hardware_attestation: requireHardwareAttestation,
+        webhook_enabled: webhookEnabled,
+        webhook_url: webhookUrl,
         max_login_attempts: String(m),
         session_idle_timeout_seconds: String(idle),
         session_idle_timeout_seconds_admin: String(adminIdle),
@@ -311,7 +319,7 @@ export default function SettingsPage() {
 
   return (
     <DashboardPage>
-      <Box sx={{ width: "100%", display: "grid", gap: 2 }}>
+      <Box sx={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", minHeight: 0, gap: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={activeTab} onChange={(_, val: number) => setActiveTab(val)}>
             <Tab label={t("tabProfile")} id="tab-profile" />
@@ -433,7 +441,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 1 && (
-          <Box>
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <SessionsPage />
           </Box>
         )}
@@ -640,6 +648,34 @@ export default function SettingsPage() {
                       }
                       label={t("requireHardwareAttestation")}
                       sx={{ mt: 0.5 }}
+                    />
+                  </Box>
+                </Box>
+
+                {/* Row 5: Webhook Alerts */}
+                <Box sx={{ display: "grid", gap: 0.75 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("webhookAlerts")}</Typography>
+                  <Typography variant="body2" color="text.secondary">{t("webhookAlertsDesc")}</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "auto 1fr" }, gap: 3, alignItems: "center", mt: 0.5 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={webhookEnabled === "true"}
+                          onChange={(e) => setWebhookEnabled(e.target.checked ? "true" : "false")}
+                          color="primary"
+                        />
+                      }
+                      label={t("webhookEnabled")}
+                    />
+                    <TextField
+                      label={t("webhookUrlInput")}
+                      type="url"
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      disabled={webhookEnabled !== "true"}
+                      placeholder={t("webhookUrlPlaceholder")}
+                      size="small"
+                      fullWidth
                     />
                   </Box>
                 </Box>

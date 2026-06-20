@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // allowedKeys defines which settings are admin-editable and validates their values.
@@ -37,6 +38,15 @@ var allowedKeys = map[string]func(string) bool{
 	"max_login_attempts": func(v string) bool {
 		n, err := strconv.Atoi(v)
 		return err == nil && n >= 1 && n <= 20
+	},
+	"webhook_enabled": func(v string) bool {
+		return v == "true" || v == "false"
+	},
+	"webhook_url": func(v string) bool {
+		if v == "" {
+			return true
+		}
+		return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
 	},
 }
 

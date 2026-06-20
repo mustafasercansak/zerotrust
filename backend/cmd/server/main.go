@@ -265,6 +265,7 @@ func run(ctx context.Context, cfg config) error {
 
 	settingsRepo := settings.NewRepository(db)
 	settingsCache := settings.NewCache(settingsRepo)
+	auditRepo.SetSettingsReader(settingsCache)
 	settingsHandler := settings.NewHandler(settingsRepo)
 
 	var mfaChecker auth.MFAChecker

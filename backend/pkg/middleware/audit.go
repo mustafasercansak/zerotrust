@@ -323,6 +323,20 @@ func auditEventFor(method, path string) auditEvent {
 		event.critical = true
 		return event
 	}
+	if method == http.MethodPost && path == "/api/v1/webauthn/register/begin" {
+		event.action = "webauthn.register_start"
+		return event
+	}
+	if method == http.MethodPost && path == "/api/v1/webauthn/register/finish" {
+		event.action = "webauthn.register_finish"
+		event.critical = true
+		return event
+	}
+	if method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/webauthn/credentials/") {
+		event.action = "webauthn.credential_delete"
+		event.critical = true
+		return event
+	}
 	return event
 }
 

@@ -30,10 +30,16 @@ type encrypter interface {
 // *geoip.Service satisfies this via a thin closure wrapper (see main.go).
 type IPLocator func(ip string) (country, city string)
 
+type SettingsReader interface {
+	GetBool(ctx context.Context, key string, defaultVal bool) bool
+	GetString(ctx context.Context, key string, defaultVal string) string
+}
+
 type Repository struct {
 	db        *pgxpool.Pool
 	secClient encrypter
 	locator   IPLocator
+	settings  SettingsReader
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
@@ -46,6 +52,10 @@ func (r *Repository) SetSecretsClient(c encrypter) {
 
 func (r *Repository) SetIPLocator(fn IPLocator) {
 	r.locator = fn
+}
+
+func (r *Repository) SetSettingsReader(s SettingsReader) {
+	r.settings = s
 }
 
 func (r *Repository) Log(ctx context.Context, e Entry) error {
@@ -122,6 +132,18 @@ func (r *Repository) Log(ctx context.Context, e Entry) error {
 	if err != nil {
 		return fmt.Errorf("insert audit log: %w", err)
 	}
+
+	if r.settings != nil && r.settings.GetBool(ctx, "webhook_enabled", false) {
+		url := r.settings.GetString(ctx, "webhook_url", "")
+		if url != "" && isHighRiskEvent(e) {
+			go func(entry Entry) {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = r.sendWebhook(bgCtx, url, entry)
+			}(e)
+		}
+	}
+
 	return nil
 }
 
