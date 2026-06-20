@@ -152,7 +152,7 @@ export default function ServiceAccountsPage() {
   const [probeResult, setProbeResult] = useState<ServiceProbeResult | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [probeLoading, setProbeLoading] = useState(false);
-  const [refresh, setRefresh] = useState(0);
+  const [, setRefresh] = useState(0);
 
   const fetcher = useCallback((p: PageParams) => api.admin.listServiceAccounts(p), []);
 
