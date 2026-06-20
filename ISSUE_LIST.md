@@ -1242,3 +1242,97 @@ Acceptance criteria:
 - Session events communicated via custom window events (`session:new_device`, `session:ended`) to decouple child components from layout.
 
 State: CLOSED
+
+---
+
+### 55. Admin Users table — show MFA status and passkey count per user
+
+Severity: Medium
+
+Status: Admin Users table showed session counts but no signal about per-user authentication security. An admin reviewing users could not tell at a glance who had MFA enabled or passkeys registered.
+
+Related files:
+- [backend/internal/admin/handler.go](/home/m/projects/zerotrust/backend/internal/admin/handler.go)
+- [backend/internal/mfa/repository.go](/home/m/projects/zerotrust/backend/internal/mfa/repository.go)
+- [backend/internal/webauthn/repository.go](/home/m/projects/zerotrust/backend/internal/webauthn/repository.go)
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Acceptance criteria:
+- `GET /api/v1/admin/users` response includes `mfa_enabled` (bool) and `passkey_count` (int) per user.
+- MFA and passkey data fetched in 2 batch SQL queries (`ANY($1)`) — no N+1.
+- Users table shows a "Security" column with TOTP chip (green/grey) and passkey chip (blue with count) when applicable.
+
+State: CLOSED
+
+---
+
+### 56. Admin home page — platform security posture summary
+
+Severity: Medium
+
+Status: Admin users had no at-a-glance view of the platform's authentication health. The home page only showed personal account state with no platform-level signal.
+
+Related files:
+- [backend/internal/user/repository.go](/home/m/projects/zerotrust/backend/internal/user/repository.go)
+- [backend/internal/admin/handler.go](/home/m/projects/zerotrust/backend/internal/admin/handler.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/pages/dashboard/HomePage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/HomePage.tsx)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Acceptance criteria:
+- New `GET /api/v1/admin/security-posture` endpoint (admin-only) returns `total_users`, `users_without_mfa`, `users_inactive_30d` in a single SQL query.
+- HomePage shows a "Platform Security Posture" card for admin users only.
+- Card displays 3 stat tiles: active users (neutral), users without MFA (warning if > 0), users inactive 30+ days (warning if > 0).
+- Card links to the Users admin page.
+
+State: CLOSED
+
+---
+
+### 57. Security email notification preference in Settings
+
+Severity: Low
+
+Status: Users had no way to opt out of security alert emails. The `notify_security_emails` field existed on the user model but was not exposed in the UI.
+
+Related files:
+- [backend/migrations/000024_user_notify_security_emails.up.sql](/home/m/projects/zerotrust/backend/migrations/000024_user_notify_security_emails.up.sql)
+- [backend/internal/user/repository.go](/home/m/projects/zerotrust/backend/internal/user/repository.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Acceptance criteria:
+- `PATCH /api/v1/me/notifications` endpoint accepts `{ notify_security_emails: bool }` and persists it.
+- Profile tab in Settings shows an "Email Notifications" section with a toggle.
+- Toggle state is initialised from the `/me` response on page load.
+- Saving shows a success toast; failure reverts the toggle and shows an error toast.
+- Password change alerts are always sent regardless of this preference.
+
+State: CLOSED
+
+---
+
+### 58. Password strength indicator
+
+Severity: Low
+
+Status: Password fields gave no feedback on strength, leaving users to guess whether their chosen password met the security bar.
+
+Related files:
+- [frontend/src/components/PasswordStrengthBar.tsx](/home/m/projects/zerotrust/frontend/src/components/PasswordStrengthBar.tsx)
+- [frontend/src/pages/auth/ResetPasswordPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/auth/ResetPasswordPage.tsx)
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+
+Acceptance criteria:
+- Reusable `PasswordStrengthBar` component renders 4 coloured segments + a text label below any password field.
+- Score 1–4 based on: length ≥ 8, length ≥ 14, uppercase present, digit present, special char present.
+- Colours: red (1) → orange (2) → yellow (3) → green (4).
+- Labels: Weak / Fair / Strong / Very Strong (TR: Zayıf / Orta / Güçlü / Çok güçlü).
+- Hidden when password field is empty.
+- Wired into: password reset flow, change-password form in Settings, admin create-user dialog.
+- No external dependency — pure regex logic.
+
+State: CLOSED

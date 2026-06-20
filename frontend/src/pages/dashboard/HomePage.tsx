@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { api, type AuditEntry, type Session } from "@/lib/api";
+import { api, type AuditEntry, type SecurityPostureData, type Session } from "@/lib/api";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { SessionCard } from "@/components/SessionCard";
@@ -10,6 +10,7 @@ import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
 import LinearProgress from "@mui/material/LinearProgress";
 import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
@@ -20,8 +21,10 @@ import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircle";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import DevicesIcon from "@mui/icons-material/Devices";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import GroupIcon from "@mui/icons-material/Group";
 
-// ── Small section wrapper ─────────────────────────────────────────────────────
+// ── Compact section wrapper ───────────────────────────────────────────────────
 
 interface SectionProps {
   title: string;
@@ -32,13 +35,13 @@ interface SectionProps {
 
 function Section({ title, linkLabel, onLink, children }: SectionProps) {
   return (
-    <Paper variant="outlined" sx={{ p: 2.5 }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, fontSize: 11 }}>
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, fontSize: 10 }}>
           {title}
         </Typography>
         {linkLabel && onLink && (
-          <Button size="small" onClick={onLink} sx={{ fontSize: 11 }}>
+          <Button size="small" onClick={onLink} sx={{ fontSize: 10, minWidth: 0, py: 0 }}>
             {linkLabel} →
           </Button>
         )}
@@ -56,17 +59,37 @@ function SecurityRow({ ok, primary, action }: {
   action?: { label: string; onClick: () => void };
 }) {
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, py: 0.75 }}>
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 0.5 }}>
       {ok
-        ? <CheckCircleOutlineIcon color="success" sx={{ fontSize: 20, flexShrink: 0 }} />
-        : <WarningAmberIcon color="warning" sx={{ fontSize: 20, flexShrink: 0 }} />
+        ? <CheckCircleOutlineIcon color="success" sx={{ fontSize: 16, flexShrink: 0 }} />
+        : <WarningAmberIcon color="warning" sx={{ fontSize: 16, flexShrink: 0 }} />
       }
-      <Typography variant="body2" sx={{ flex: 1 }}>{primary}</Typography>
+      <Typography variant="caption" sx={{ flex: 1, lineHeight: 1.4 }}>{primary}</Typography>
       {action && (
-        <Button size="small" onClick={action.onClick} sx={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>
+        <Button size="small" onClick={action.onClick} sx={{ fontSize: 10, minWidth: 0, py: 0, whiteSpace: "nowrap", flexShrink: 0 }}>
           {action.label} →
         </Button>
       )}
+    </Box>
+  );
+}
+
+// ── Admin posture stat tile ───────────────────────────────────────────────────
+
+function PostureStat({ icon, value, label, color }: {
+  icon: React.ReactNode;
+  value: number;
+  label: string;
+  color: "default" | "warning" | "success";
+}) {
+  const palette = color === "warning" ? "warning.main" : color === "success" ? "success.main" : "text.secondary";
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, p: 1, borderRadius: 1, bgcolor: "background.default", border: "1px solid", borderColor: "divider" }}>
+      <Box sx={{ color: palette, display: "flex", flexShrink: 0, "& svg": { fontSize: 18 } }}>{icon}</Box>
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1, color: palette }}>{value}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>{label}</Typography>
+      </Box>
     </Box>
   );
 }
@@ -79,38 +102,41 @@ export default function HomePage() {
   const me = useMeContext();
   const navigate = useNavigate();
 
-  // MFA status
   const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
   const [mfaLoading, setMfaLoading] = useState(true);
-
-  // Sessions
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-
-  // Recent audit
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
   const [auditLoading, setAuditLoading] = useState(true);
+
+  const isAdmin = me?.roles.includes("admin") ?? false;
+  const [posture, setPosture] = useState<SecurityPostureData | null>(null);
+  const [postureLoading, setPostureLoading] = useState(isAdmin);
 
   useEffect(() => {
     if (!me) return;
 
-    // MFA status
     api.mfaStatus()
       .then((d) => setMfaEnabled(d.supported !== false ? d.enabled : null))
       .catch(() => setMfaEnabled(null))
       .finally(() => setMfaLoading(false));
 
-    // Active sessions (show max 3)
     api.listSessions()
       .then((all) => setSessions(all.slice(0, 3)))
       .catch(() => setSessions([]))
       .finally(() => setSessionsLoading(false));
 
-    // Recent audit (last 5 of current user)
-    api.listAuditLog({ page: 0, pageSize: 5, sortKey: "created_at", sortDir: "desc", filters: { user_id: me.user_id } })
+    api.listAuditLog({ page: 0, pageSize: 3, sortKey: "created_at", sortDir: "desc", filters: { user_id: me.user_id } })
       .then((res) => setAudit(res.data))
       .catch(() => setAudit([]))
       .finally(() => setAuditLoading(false));
+
+    if (me.roles.includes("admin")) {
+      api.admin.securityPosture()
+        .then(setPosture)
+        .catch(() => setPosture(null))
+        .finally(() => setPostureLoading(false));
+    }
   }, [me]);
 
   if (!me) return null;
@@ -123,49 +149,43 @@ export default function HomePage() {
   const lastSeenEntry = !auditLoading && audit ? (audit.find((e) => !!e.ip_address) ?? null) : null;
 
   return (
-    <Box
-      sx={{
-        p: { xs: 2, sm: 4 },
-        display: "flex",
-        flexDirection: "column",
-        gap: 2.5,
-      }}
-    >
-      {/* ── Identity card ── */}
+    <Box sx={{ p: { xs: 1, sm: 1.5 }, display: "flex", flexDirection: "column", gap: 1.5 }}>
+
+      {/* ── Row 1: Compact identity card ── */}
       <Paper
         variant="outlined"
         sx={{
-          p: 3,
+          p: 1.5,
           display: "flex",
           alignItems: "center",
-          gap: 2.5,
+          gap: 2,
           background: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, transparent 100%)",
           borderColor: "rgba(99,102,241,0.25)",
         }}
       >
         <Avatar
           src={me.has_avatar ? `/api/v1/me/avatar` : undefined}
-          sx={{ width: 60, height: 60, fontSize: 22, fontWeight: 700, bgcolor: "primary.dark" }}
+          sx={{ width: 44, height: 44, fontSize: 16, fontWeight: 700, bgcolor: "primary.dark", flexShrink: 0 }}
         >
           {initials}
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 0.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }} noWrap>{name}</Typography>
-            <VerifiedUserIcon color="success" fontSize="small" />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap>{name}</Typography>
+            <VerifiedUserIcon color="success" sx={{ fontSize: 15 }} />
           </Box>
           {name !== me.email && (
-            <Typography variant="body2" color="text.secondary" noWrap>{me.email}</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>{me.email}</Typography>
           )}
-          <Box sx={{ display: "flex", gap: 0.75, mt: 1, flexWrap: "wrap" }}>
+          <Box sx={{ display: "flex", gap: 0.5, mt: 0.5, flexWrap: "wrap" }}>
             {me.roles.map((r) => (
-              <Chip key={r} size="small" color="primary" label={r} />
+              <Chip key={r} size="small" color="primary" label={r} sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.75 } }} />
             ))}
           </Box>
         </Box>
-        <Box sx={{ display: { xs: "none", sm: "grid" }, gridTemplateColumns: "auto 1fr", gap: 0.5, columnGap: 1.5 }}>
+        <Box sx={{ display: { xs: "none", sm: "grid" }, gridTemplateColumns: "auto 1fr", columnGap: 1.5, rowGap: 0.125 }}>
           <Typography variant="caption" color="text.secondary">{t("userId")}</Typography>
-          <Typography variant="caption" sx={{ fontFamily: "monospace", fontSize: 11 }} noWrap>{me.user_id}</Typography>
+          <Typography variant="caption" sx={{ fontFamily: "monospace", fontSize: 10 }} noWrap>{me.user_id}</Typography>
           <Typography variant="caption" color="text.secondary">{t("locale")}</Typography>
           <Typography variant="caption">{i18n.language.toUpperCase()}</Typography>
           <Typography variant="caption" color="text.secondary">{t("joined")}</Typography>
@@ -175,35 +195,62 @@ export default function HomePage() {
         </Box>
       </Paper>
 
-      {/* ── Two-column grid: MFA + Sessions ── */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2.5 }}>
+      {/* ── Row 2: 3-column grid ── */}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", lg: "1fr 1fr 1fr" }, gap: 1.5, alignItems: "start" }}>
 
-        {/* MFA status card */}
+        {/* Account security: MFA status + checklist merged */}
         <Section
-          title={t("mfaTitle")}
+          title={t("securityTitle")}
           linkLabel={mfaEnabled === false ? t("mfaSetup") : t("mfaManage")}
           onLink={() => navigate("/dashboard/mfa")}
         >
           {mfaLoading ? (
-            <Skeleton variant="rounded" height={48} />
+            <Skeleton variant="rounded" height={36} />
           ) : (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              {mfaEnabled
-                ? <LockIcon color="success" />
-                : <LockOpenIcon color="warning" />
-              }
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              {mfaEnabled ? <LockIcon color="success" sx={{ fontSize: 20 }} /> : <LockOpenIcon color="warning" sx={{ fontSize: 20 }} />}
               <Box>
                 <Chip
                   size="small"
                   color={mfaEnabled ? "success" : "warning"}
                   label={mfaEnabled ? t("enabled") : t("disabled")}
-                  sx={{ mb: 0.5 }}
+                  sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.75 } }}
                 />
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: 10 }}>
                   {mfaEnabled ? t("mfaEnabled") : t("mfaDisabled")}
                 </Typography>
               </Box>
             </Box>
+          )}
+          {!mfaLoading && !sessionsLoading && (
+            <>
+              <Divider sx={{ my: 0.75 }} />
+              <Box>
+                {mfaEnabled !== null && (
+                  <SecurityRow
+                    ok={mfaEnabled}
+                    primary={mfaEnabled ? t("securityMfaOn") : t("securityMfaOff")}
+                    action={!mfaEnabled ? { label: t("mfaSetup"), onClick: () => navigate("/dashboard/mfa") } : undefined}
+                  />
+                )}
+                {sessions && sessions.length > 0 && (
+                  <SecurityRow
+                    ok={sessions.length === 1}
+                    primary={sessions.length === 1 ? t("securityOneSession") : t("securityManySessions", { count: sessions.length })}
+                    action={sessions.length > 1 ? { label: t("sessionsViewAll"), onClick: () => navigate("/dashboard/sessions") } : undefined}
+                  />
+                )}
+                {lastSeenEntry && (
+                  <SecurityRow
+                    ok
+                    primary={t("securityLastSeen", { ip: lastSeenEntry.ip_address, date: formatDate(lastSeenEntry.created_at, i18n.language) })}
+                  />
+                )}
+              </Box>
+            </>
+          )}
+          {(mfaLoading || sessionsLoading) && !mfaLoading && (
+            <Skeleton variant="rounded" height={60} sx={{ mt: 1 }} />
           )}
         </Section>
 
@@ -215,77 +262,77 @@ export default function HomePage() {
         >
           {sessionsLoading && <LinearProgress />}
           {!sessionsLoading && sessions?.length === 0 && (
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, py: 2, color: "text.disabled" }}>
-              <DevicesIcon sx={{ fontSize: 32 }} />
-              <Typography variant="body2" align="center">{t("noSessions")}</Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, py: 1.5, color: "text.disabled" }}>
+              <DevicesIcon sx={{ fontSize: 28 }} />
+              <Typography variant="caption" align="center">{t("noSessions")}</Typography>
             </Box>
           )}
           {sessions && sessions.length > 0 && (
-            <Box sx={{ display: "grid", gap: 1 }}>
+            <Box sx={{ display: "grid", gap: 0.75 }}>
               {sessions.map((s) => (
                 <SessionCard key={s.id} session={s} locale={i18n.language} />
               ))}
             </Box>
           )}
         </Section>
+
+        {/* Recent activity feed */}
+        <Section
+          title={t("activityTitle")}
+          linkLabel={t("activityViewAll")}
+          onLink={() => navigate("/dashboard/sessions")}
+        >
+          {auditLoading && <LinearProgress />}
+          {!auditLoading && audit?.length === 0 && (
+            <Typography variant="caption" color="text.secondary">{t("noActivity")}</Typography>
+          )}
+          {audit && audit.length > 0 && (
+            <Box sx={{ display: "grid", gap: 0.75 }}>
+              {audit.map((entry) => (
+                <AuditEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  locale={i18n.language}
+                  compact
+                />
+              ))}
+            </Box>
+          )}
+        </Section>
       </Box>
 
-      {/* ── Recent activity feed ── */}
-      <Section
-        title={t("activityTitle")}
-        linkLabel={t("activityViewAll")}
-        onLink={() => navigate("/dashboard/audit")}
-      >
-        {auditLoading && <LinearProgress />}
-        {!auditLoading && audit?.length === 0 && (
-          <Typography variant="body2" color="text.secondary">{t("noActivity")}</Typography>
-        )}
-        {audit && audit.length > 0 && (
-          <Box sx={{ display: "grid", gap: 1 }}>
-            {audit.map((entry) => (
-              <AuditEntryCard
-                key={entry.id}
-                entry={entry}
-                locale={i18n.language}
-                compact
+      {/* ── Row 3: Admin platform security posture (admin-only) ── */}
+      {isAdmin && (
+        <Section
+          title={t("adminPostureTitle")}
+          linkLabel={t("adminPostureViewAll")}
+          onLink={() => navigate("/dashboard/users")}
+        >
+          {postureLoading ? (
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>
+              <Skeleton variant="rounded" height={52} />
+              <Skeleton variant="rounded" height={52} />
+              <Skeleton variant="rounded" height={52} />
+            </Box>
+          ) : posture ? (
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr" }, gap: 1 }}>
+              <PostureStat icon={<GroupIcon />} value={posture.total_users} label={t("adminPostureTotal")} color="default" />
+              <PostureStat
+                icon={<LockOpenIcon />}
+                value={posture.users_without_mfa}
+                label={t("adminPostureNoMfa")}
+                color={posture.users_without_mfa > 0 ? "warning" : "success"}
               />
-            ))}
-          </Box>
-        )}
-      </Section>
-
-      {/* ── Security overview ── */}
-      <Section title={t("securityTitle")}>
-        {(mfaLoading || sessionsLoading) ? (
-          <Box sx={{ display: "grid", gap: 1 }}>
-            <Skeleton variant="rounded" height={38} />
-            <Skeleton variant="rounded" height={38} />
-          </Box>
-        ) : (
-          <Box sx={{ "& > * + *": { borderTop: "1px solid", borderColor: "divider" } }}>
-            {mfaEnabled !== null && (
-              <SecurityRow
-                ok={mfaEnabled}
-                primary={mfaEnabled ? t("securityMfaOn") : t("securityMfaOff")}
-                action={!mfaEnabled ? { label: t("mfaSetup"), onClick: () => navigate("/dashboard/mfa") } : undefined}
+              <PostureStat
+                icon={<AdminPanelSettingsIcon />}
+                value={posture.users_inactive_30d}
+                label={t("adminPostureInactive")}
+                color={posture.users_inactive_30d > 0 ? "warning" : "success"}
               />
-            )}
-            {sessions && sessions.length > 0 && (
-              <SecurityRow
-                ok={sessions.length === 1}
-                primary={sessions.length === 1 ? t("securityOneSession") : t("securityManySessions", { count: sessions.length })}
-                action={sessions.length > 1 ? { label: t("sessionsViewAll"), onClick: () => navigate("/dashboard/sessions") } : undefined}
-              />
-            )}
-            {lastSeenEntry && (
-              <SecurityRow
-                ok
-                primary={t("securityLastSeen", { ip: lastSeenEntry.ip_address, date: formatDate(lastSeenEntry.created_at, i18n.language) })}
-              />
-            )}
-          </Box>
-        )}
-      </Section>
+            </Box>
+          ) : null}
+        </Section>
+      )}
     </Box>
   );
 }

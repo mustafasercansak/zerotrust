@@ -602,5 +602,14 @@ export const api = {
       request<{ client_secret: string }>(`/api/v1/admin/oidc/clients/${id}/rotate`, {
         method: "POST",
       }),
+
+    securityPosture: () =>
+      request<SecurityPostureData>("/api/v1/admin/security-posture"),
   },
 };
+
+export interface SecurityPostureData {
+  total_users: number;
+  users_without_mfa: number;
+  users_inactive_30d: number;
+}

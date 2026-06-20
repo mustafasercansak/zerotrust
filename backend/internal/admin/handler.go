@@ -45,11 +45,16 @@ type WebAuthnRepo interface {
 	CountByUsers(ctx context.Context, userIDs []string) (map[string]int, error)
 }
 
+type SecurityPostureProvider interface {
+	SecurityPosture(ctx context.Context) (user.SecurityPostureStats, error)
+}
+
 type Handler struct {
 	userSvc  UserManager
 	sessions SessionManager // nil when not wired
 	webauthn WebAuthnRepo
 	mfa      MfaRepo
+	posture  SecurityPostureProvider
 }
 
 func NewHandler(userSvc UserManager, sessions SessionManager, webauthn WebAuthnRepo, mfa MfaRepo) *Handler {
@@ -59,6 +64,10 @@ func NewHandler(userSvc UserManager, sessions SessionManager, webauthn WebAuthnR
 		webauthn: webauthn,
 		mfa:      mfa,
 	}
+}
+
+func (h *Handler) SetPostureProvider(p SecurityPostureProvider) {
+	h.posture = p
 }
 
 type userResponse struct {
@@ -363,6 +372,21 @@ func (h *Handler) GetUserMfa(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// GET /api/v1/admin/security-posture
+func (h *Handler) SecurityPosture(w http.ResponseWriter, r *http.Request) {
+	if h.posture == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable")
+		return
+	}
+	stats, err := h.posture.SecurityPosture(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

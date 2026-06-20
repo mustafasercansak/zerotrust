@@ -6,6 +6,7 @@ import { DashboardPage } from "@/components/DashboardPage";
 import SessionsPage from "./SessionsPage";
 import { useStepUp } from "@/hooks/useStepUp";
 import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
+import { PasswordStrengthBar } from "@/components/PasswordStrengthBar";
 import { toast } from "sonner";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
@@ -293,13 +294,16 @@ export default function SettingsPage() {
               onChange={(e) => setCurrentPassword(e.target.value)}
               fullWidth
             />
-            <TextField
-              label={tProfile("changePassword.newPassword")}
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              fullWidth
-            />
+            <Box>
+              <TextField
+                label={tProfile("changePassword.newPassword")}
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                fullWidth
+              />
+              <PasswordStrengthBar password={newPassword} />
+            </Box>
             <TextField
               label={tProfile("changePassword.confirmPassword")}
               type="password"

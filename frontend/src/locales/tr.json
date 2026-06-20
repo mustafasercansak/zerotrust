@@ -23,6 +23,12 @@
     "validation": {
       "required": "Lütfen bu alanı doldurun."
     },
+    "passwordStrength": {
+      "weak": "Zayıf",
+      "fair": "Orta",
+      "strong": "Güçlü",
+      "veryStrong": "Çok güçlü"
+    },
     "stepUpMfa": {
       "title": "Kimliğinizi Doğrulayın",
       "description": "Bu işlem için güncel bir MFA doğrulaması gereklidir. Kimlik doğrulayıcı uygulamanızdaki 6 haneli kodu girin.",
@@ -391,7 +397,12 @@
     "securityMfaOff": "İki faktörlü doğrulama kurulmamış",
     "securityOneSession": "Yalnızca bu cihaz oturum açmış",
     "securityManySessions": "{{count}} cihaz oturum açmış — beklenmedik erişimi inceleyin",
-    "securityLastSeen": "Son aktivite: {{ip}} · {{date}}"
+    "securityLastSeen": "Son aktivite: {{ip}} · {{date}}",
+    "adminPostureTitle": "Platform Güvenlik Durumu",
+    "adminPostureViewAll": "Kullanıcıları yönet",
+    "adminPostureTotal": "Aktif kullanıcı",
+    "adminPostureNoMfa": "MFA'sız kullanıcı",
+    "adminPostureInactive": "30+ gün pasif"
   },
   "securityDashboard": {
     "title": "Güvenlik Paneli",

@@ -590,6 +590,43 @@ func (r *Repository) UpdateAvatar(ctx context.Context, userID, key string, size 
 	return u, nil
 }
 
+// SecurityPostureStats holds platform-wide security posture counts for the admin home page.
+type SecurityPostureStats struct {
+	TotalUsers       int `json:"total_users"`
+	UsersWithoutMFA  int `json:"users_without_mfa"`
+	UsersInactive30d int `json:"users_inactive_30d"`
+}
+
+// SecurityPosture returns a snapshot of platform security health in a single query.
+func (r *Repository) SecurityPosture(ctx context.Context) (SecurityPostureStats, error) {
+	var s SecurityPostureStats
+	err := r.db.QueryRow(ctx, `
+		SELECT
+		  COUNT(*)                                                    AS total,
+		  COUNT(*) FILTER (
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM user_mfa m
+		      WHERE m.user_id = u.id AND m.enabled_at IS NOT NULL
+		    )
+		    AND NOT EXISTS (
+		      SELECT 1 FROM user_webauthn_credentials w
+		      WHERE w.user_id = u.id
+		    )
+		  )                                                           AS without_mfa,
+		  COUNT(*) FILTER (
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM audit_logs a
+		      WHERE a.user_id = u.id
+		        AND a.action = 'auth.login_success'
+		        AND a.created_at > NOW() - INTERVAL '30 days'
+		    )
+		  )                                                           AS inactive_30d
+		FROM users u
+		WHERE u.is_active = true
+	`).Scan(&s.TotalUsers, &s.UsersWithoutMFA, &s.UsersInactive30d)
+	return s, err
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

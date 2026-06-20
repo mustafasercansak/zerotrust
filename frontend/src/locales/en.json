@@ -23,6 +23,12 @@
     "validation": {
       "required": "Please fill out this field."
     },
+    "passwordStrength": {
+      "weak": "Weak",
+      "fair": "Fair",
+      "strong": "Strong",
+      "veryStrong": "Very strong"
+    },
     "stepUpMfa": {
       "title": "Confirm Your Identity",
       "description": "This action requires a recent MFA verification. Enter the 6-digit code from your authenticator app.",
@@ -391,7 +397,12 @@
     "securityMfaOff": "Two-factor authentication is not set up",
     "securityOneSession": "Only this device is signed in",
     "securityManySessions": "{{count}} devices signed in — review for unexpected access",
-    "securityLastSeen": "Last activity from {{ip}} · {{date}}"
+    "securityLastSeen": "Last activity from {{ip}} · {{date}}",
+    "adminPostureTitle": "Platform Security Posture",
+    "adminPostureViewAll": "Manage users",
+    "adminPostureTotal": "Active users",
+    "adminPostureNoMfa": "Users without MFA",
+    "adminPostureInactive": "Inactive 30+ days"
   },
   "securityDashboard": {
     "title": "Security Dashboard",

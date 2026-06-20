@@ -43,6 +43,7 @@ import MoreVertIcon from "@mui/icons-material/MoreVert";
 import PersonIcon from "@mui/icons-material/Person";
 import SecurityIcon from "@mui/icons-material/Security";
 import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
+import { PasswordStrengthBar } from "@/components/PasswordStrengthBar";
 
 const AVAILABLE_ROLES = ["admin", "user"];
 const DEFAULT_MAX_SESSIONS = 5;
@@ -789,15 +790,18 @@ export default function UsersPage() {
               <TextField label={t("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
               <TextField label={t("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
             </Stack>
-            <TextField
-              label={t("password")}
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              fullWidth
-              inputRef={requiredValidator(password, tCommon("validation.required"))}
-            />
+            <Box>
+              <TextField
+                label={t("password")}
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                fullWidth
+                inputRef={requiredValidator(password, tCommon("validation.required"))}
+              />
+              <PasswordStrengthBar password={password} />
+            </Box>
             <Stack direction="row" spacing={1}>
               {AVAILABLE_ROLES.map((role) => (
                 <Chip key={role} label={role}

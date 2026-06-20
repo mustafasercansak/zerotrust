@@ -94,10 +94,10 @@ describe("HomePage component", () => {
     expect(html).toContain("/api/v1/me/avatar");
   });
 
-  it("renders mfaTitle, sessionsTitle, and activityTitle section headings", () => {
+  it("renders securityTitle, sessionsTitle, and activityTitle section headings", () => {
     vi.mocked(useMeContext).mockReturnValue(baseMeData);
     const html = renderToString(React.createElement(HomePage));
-    expect(html).toContain("mfaTitle");
+    expect(html).toContain("securityTitle");
     expect(html).toContain("sessionsTitle");
     expect(html).toContain("activityTitle");
   });

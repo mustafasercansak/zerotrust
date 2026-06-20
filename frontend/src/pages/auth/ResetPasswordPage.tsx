@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/lib/api";
 import { AuthPage } from "@/components/AuthPage";
+import { PasswordStrengthBar } from "@/components/PasswordStrengthBar";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -49,14 +50,17 @@ export default function ResetPasswordPage() {
         <Alert severity="success">{t("resetDone")}</Alert>
       ) : (
         <Box component="form" onSubmit={handleSubmit} sx={{ display: "grid", gap: 2 }}>
-          <TextField
-            label={t("newPassword")}
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            fullWidth
-          />
+          <Box>
+            <TextField
+              label={t("newPassword")}
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              fullWidth
+            />
+            <PasswordStrengthBar password={password} />
+          </Box>
           <TextField
             label={t("confirmPassword")}
             type="password"

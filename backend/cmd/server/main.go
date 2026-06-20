@@ -308,6 +308,7 @@ func run(ctx context.Context, cfg config) error {
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepo)
+	adminHandler.SetPostureProvider(userRepo)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -766,6 +767,9 @@ func run(ctx context.Context, cfg config) error {
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/mfa", adminHandler.GetUserMfa)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions/{sessionId}", adminHandler.RevokeUserSession)
+
+			// Security posture summary — admin role only
+			r.With(authmw.RequireRole("admin")).Get("/admin/security-posture", adminHandler.SecurityPosture)
 
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
