@@ -568,12 +568,11 @@ export default function UsersPage() {
     setDrawerUser(params.row);
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const fetcher = useCallback(async (p: PageParams) => {
     const result = await api.admin.listUsers(p);
     loadedRowsRef.current = result.data;
     return result;
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
