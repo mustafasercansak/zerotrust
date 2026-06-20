@@ -174,7 +174,7 @@ export default function SettingsPage() {
     if (i18n.language.startsWith(locale)) return;
     await api.updateLocale(locale).catch(() => {});
     i18n.changeLanguage(locale);
-    localStorage.setItem("locale", locale);
+    globalThis.localStorage?.setItem("locale", locale);
     toast.success(t("localeSaved"));
   }
 
