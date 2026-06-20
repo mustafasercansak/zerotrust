@@ -271,8 +271,9 @@ type ListParams struct {
 	Offset  int
 	SortBy  string // email | created_at | is_active
 	SortDir string // asc | desc
-	Email   string // ILIKE filter
+	Email   string // exact match via email_hash
 	Status  string // active | inactive | ""
+	Role    string // exact role name filter
 }
 
 // ListResult holds one page of users and the unfiltered total count.
@@ -319,6 +320,13 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 	case "inactive":
 		conds = append(conds, fmt.Sprintf("u.is_active = $%d", n))
 		args = append(args, false)
+		n++
+	}
+	if p.Role != "" {
+		conds = append(conds, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND r.name = $%d)`, n,
+		))
+		args = append(args, p.Role)
 		n++
 	}
 

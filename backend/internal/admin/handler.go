@@ -123,6 +123,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		SortDir: q.Get("sort_dir"),
 		Email:   q.Get("email"),
 		Status:  q.Get("status"),
+		Role:    q.Get("role"),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")

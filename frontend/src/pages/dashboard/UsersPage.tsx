@@ -42,7 +42,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import PersonIcon from "@mui/icons-material/Person";
 import SecurityIcon from "@mui/icons-material/Security";
-import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
+import { getGridStringOperators, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
 import { PasswordStrengthBar } from "@/components/PasswordStrengthBar";
 
 const AVAILABLE_ROLES = ["admin", "user"];
@@ -622,6 +622,8 @@ export default function UsersPage() {
   const columns = useMemo<GridColDef<UserData>[]>(() => [
     {
       field: "email", headerName: t("user"), minWidth: 280, flex: 1.45,
+      filterable: true,
+      filterOperators: getGridStringOperators().filter((op) => op.value === "equals"),
       renderCell: ({ row }) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, minWidth: 0, height: "100%" }}>
           <Avatar
@@ -652,7 +654,8 @@ export default function UsersPage() {
       ),
     },
     {
-      field: "roles", headerName: t("roles"), minWidth: 160, flex: 0.9, sortable: false, filterable: false,
+      field: "role", headerName: t("roles"), minWidth: 160, flex: 0.9, sortable: false,
+      type: "singleSelect", valueOptions: AVAILABLE_ROLES,
       renderCell: ({ row }) =>
         row.roles.length === 0
           ? <Chip size="small" variant="outlined" label={t("noRoles")} />

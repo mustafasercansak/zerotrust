@@ -157,6 +157,10 @@ vi.mock("@mui/x-data-grid", () => ({
     });
     return React.createElement("div", { className: "mock-datagrid" }, renderedRows);
   },
+  getGridStringOperators: () => [
+    { value: "contains", label: "contains", getApplyFilterFn: () => null },
+    { value: "equals", label: "equals", getApplyFilterFn: () => null },
+  ],
 }));
 
 describe("UsersPage page component", () => {
