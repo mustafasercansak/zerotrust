@@ -306,6 +306,9 @@
     "userId": "Kullanıcı ID",
     "anonymousActor": "Anonim / kimlik doğrulanmamış istek.",
     "noOutcome": "sonuç yok",
+    "export": "Dışa Aktar",
+    "exportCsv": "CSV İndir",
+    "exportJson": "JSON İndir",
     "actions": {
       "auth.login_success": "Giriş yapıldı",
       "auth.login_failed": "Giriş başarısız",
@@ -402,7 +405,11 @@
     "adminPostureViewAll": "Kullanıcıları yönet",
     "adminPostureTotal": "Aktif kullanıcı",
     "adminPostureNoMfa": "MFA'sız kullanıcı",
-    "adminPostureInactive": "30+ gün pasif"
+    "adminPostureInactive": "30+ gün pasif",
+    "healthTitle": "Sistem Sağlığı",
+    "healthDb": "PostgreSQL",
+    "healthRedis": "Redis",
+    "healthPool": "{{total}} / {{max}} bağlantı"
   },
   "securityDashboard": {
     "title": "Güvenlik Paneli",

@@ -605,6 +605,20 @@ export const api = {
 
     securityPosture: () =>
       request<SecurityPostureData>("/api/v1/admin/security-posture"),
+
+    health: () =>
+      request<AdminHealthData>("/api/v1/admin/health"),
+
+    auditExport: (params: { format: "csv" | "json"; action?: string; user_id?: string; outcome?: string }) => {
+      const q = new URLSearchParams({ format: params.format });
+      if (params.action) q.set("action", params.action);
+      if (params.user_id) q.set("user_id", params.user_id);
+      if (params.outcome) q.set("outcome", params.outcome);
+      return fetch(`/api/v1/admin/audit/export?${q}`, {
+        headers: { Accept: params.format === "json" ? "application/json" : "text/csv" },
+        credentials: "include",
+      });
+    },
   },
 };
 
@@ -612,4 +626,10 @@ export interface SecurityPostureData {
   total_users: number;
   users_without_mfa: number;
   users_inactive_30d: number;
+}
+
+export interface AdminHealthData {
+  status: "ok" | "degraded";
+  database: { status: string; pool: { total: number; idle: number; max: number } };
+  redis: { status: string; pool: { total: number; idle: number; max: number } };
 }

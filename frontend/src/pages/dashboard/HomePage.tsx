@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { api, type AuditEntry, type SecurityPostureData, type Session } from "@/lib/api";
+import { api, type AdminHealthData, type AuditEntry, type SecurityPostureData, type Session } from "@/lib/api";
 import { formatDate } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { SessionCard } from "@/components/SessionCard";
@@ -23,6 +23,8 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import DevicesIcon from "@mui/icons-material/Devices";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import GroupIcon from "@mui/icons-material/Group";
+import StorageIcon from "@mui/icons-material/Storage";
+import MemoryIcon from "@mui/icons-material/Memory";
 
 // ── Compact section wrapper ───────────────────────────────────────────────────
 
@@ -112,6 +114,8 @@ export default function HomePage() {
   const isAdmin = me?.roles.includes("admin") ?? false;
   const [posture, setPosture] = useState<SecurityPostureData | null>(null);
   const [postureLoading, setPostureLoading] = useState(isAdmin);
+  const [health, setHealth] = useState<AdminHealthData | null>(null);
+  const [healthLoading, setHealthLoading] = useState(isAdmin);
 
   useEffect(() => {
     if (!me) return;
@@ -136,6 +140,11 @@ export default function HomePage() {
         .then(setPosture)
         .catch(() => setPosture(null))
         .finally(() => setPostureLoading(false));
+
+      api.admin.health()
+        .then(setHealth)
+        .catch(() => setHealth(null))
+        .finally(() => setHealthLoading(false));
     }
   }, [me]);
 
@@ -301,37 +310,74 @@ export default function HomePage() {
         </Section>
       </Box>
 
-      {/* ── Row 3: Admin platform security posture (admin-only) ── */}
+      {/* ── Row 3: Admin cards (admin-only) ── */}
       {isAdmin && (
-        <Section
-          title={t("adminPostureTitle")}
-          linkLabel={t("adminPostureViewAll")}
-          onLink={() => navigate("/dashboard/users")}
-        >
-          {postureLoading ? (
-            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>
-              <Skeleton variant="rounded" height={52} />
-              <Skeleton variant="rounded" height={52} />
-              <Skeleton variant="rounded" height={52} />
-            </Box>
-          ) : posture ? (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr" }, gap: 1 }}>
-              <PostureStat icon={<GroupIcon />} value={posture.total_users} label={t("adminPostureTotal")} color="default" />
-              <PostureStat
-                icon={<LockOpenIcon />}
-                value={posture.users_without_mfa}
-                label={t("adminPostureNoMfa")}
-                color={posture.users_without_mfa > 0 ? "warning" : "success"}
-              />
-              <PostureStat
-                icon={<AdminPanelSettingsIcon />}
-                value={posture.users_inactive_30d}
-                label={t("adminPostureInactive")}
-                color={posture.users_inactive_30d > 0 ? "warning" : "success"}
-              />
-            </Box>
-          ) : null}
-        </Section>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr auto" }, gap: 1.5, alignItems: "start" }}>
+
+          {/* Platform security posture */}
+          <Section
+            title={t("adminPostureTitle")}
+            linkLabel={t("adminPostureViewAll")}
+            onLink={() => navigate("/dashboard/users")}
+          >
+            {postureLoading ? (
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>
+                <Skeleton variant="rounded" height={52} />
+                <Skeleton variant="rounded" height={52} />
+                <Skeleton variant="rounded" height={52} />
+              </Box>
+            ) : posture ? (
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr" }, gap: 1 }}>
+                <PostureStat icon={<GroupIcon />} value={posture.total_users} label={t("adminPostureTotal")} color="default" />
+                <PostureStat
+                  icon={<LockOpenIcon />}
+                  value={posture.users_without_mfa}
+                  label={t("adminPostureNoMfa")}
+                  color={posture.users_without_mfa > 0 ? "warning" : "success"}
+                />
+                <PostureStat
+                  icon={<AdminPanelSettingsIcon />}
+                  value={posture.users_inactive_30d}
+                  label={t("adminPostureInactive")}
+                  color={posture.users_inactive_30d > 0 ? "warning" : "success"}
+                />
+              </Box>
+            ) : null}
+          </Section>
+
+          {/* System health */}
+          <Section title={t("healthTitle")}>
+            {healthLoading ? (
+              <Box sx={{ display: "grid", gap: 0.75 }}>
+                <Skeleton variant="rounded" height={36} width={200} />
+                <Skeleton variant="rounded" height={36} width={200} />
+              </Box>
+            ) : health ? (
+              <Box sx={{ display: "grid", gap: 0.75 }}>
+                {([
+                  { key: "database", icon: <StorageIcon />, label: t("healthDb") },
+                  { key: "redis",    icon: <MemoryIcon />,  label: t("healthRedis") },
+                ] as const).map(({ key, icon, label }) => {
+                  const svc = health[key];
+                  const ok = svc.status === "ok";
+                  return (
+                    <Box key={key} sx={{ display: "flex", alignItems: "center", gap: 1, p: 0.75, borderRadius: 1, bgcolor: "background.default", border: "1px solid", borderColor: "divider" }}>
+                      <Box sx={{ color: ok ? "success.main" : "error.main", display: "flex", "& svg": { fontSize: 16 } }}>{icon}</Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 600, lineHeight: 1 }}>{label}</Typography>
+                        <Typography variant="caption" color="text.disabled" sx={{ display: "block", fontSize: 10 }}>
+                          {t("healthPool", { total: svc.pool.total, max: svc.pool.max })}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: ok ? "success.main" : "error.main", flexShrink: 0 }} />
+                    </Box>
+                  );
+                })}
+              </Box>
+            ) : null}
+          </Section>
+
+        </Box>
       )}
     </Box>
   );

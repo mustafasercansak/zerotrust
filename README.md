@@ -102,7 +102,10 @@ ZeroTrust currently includes:
 - TOTP MFA setup, verification (with single-use backup recovery codes), disable, and MFA challenge during login
 - WebAuthn passkeys (FIDO2): register/list/remove credentials, passkey second-factor login, and passwordless (usernameless) login with discoverable credentials
 - Password reset flow with SMTP or development log mailer
-- Audit log listing and an aggregated administrator security dashboard
+- Audit log listing, CSV/JSON export (up to 10 000 rows), and an aggregated administrator security dashboard
+- Platform security posture summary on the admin home page (users without MFA, inactive users)
+- System health monitoring — `/api/v1/health` (public, load-balancer ready) and `/api/v1/admin/health` (DB + Redis pool stats)
+- Password strength indicator on all password fields (pure regex, no external dependency)
 - OIDC Identity Provider — Authorization Code + PKCE (S256, RFC 7636), refresh token grant with single-use rotating opaque tokens (RFC 6749 §6, `offline_access` scope), token revocation (RFC 7009), introspection (RFC 7662), `max_age` re-auth enforcement (OIDC Core §3.1.2.1), `prompt=none/login`, MFA step-up on consent, rate-limited endpoints, admin client management with step-up MFA
 - Turkish and English UI, with language preference stored server-side and audited on change
 - Security alert banners — persistent in-app alerts for new-device logins, session terminations, locale changes from another session, and login anomalies detected in the last 24 hours
@@ -327,8 +330,11 @@ zerotrust/
 | DELETE | `/api/v1/admin/users/{id}/sessions` | `users:update` |
 | DELETE | `/api/v1/admin/users/{id}/sessions/{sessionId}` | `users:update` |
 | GET | `/api/v1/admin/audit` | `audit:read` |
+| GET | `/api/v1/admin/audit/export?format=csv\|json` | `audit:read` — up to 10 000 rows, CSV with UTF-8 BOM |
 | GET | `/api/v1/admin/audit/trends` | `audit:read` |
-| GET | `/api/v1/admin/security-dashboard?range=7d` | `audit:read` |
+| GET | `/api/v1/admin/audit/security-dashboard?range=7d` | `audit:read` |
+| GET | `/api/v1/admin/security-posture` | `admin` role — total users, without MFA, inactive 30 d |
+| GET | `/api/v1/admin/health` | `admin` role — DB + Redis ping with pool stats |
 | GET | `/api/v1/admin/service-accounts` | `service_accounts:read` |
 | POST | `/api/v1/admin/service-accounts` | `service_accounts:create` |
 | PATCH | `/api/v1/admin/service-accounts/{id}` | `service_accounts:update` |

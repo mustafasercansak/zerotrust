@@ -336,8 +336,44 @@ func run(ctx context.Context, cfg config) error {
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		type checks struct {
+			Database string `json:"database"`
+			Redis    string `json:"redis"`
+		}
+		type healthResponse struct {
+			Status  string `json:"status"`
+			Service string `json:"service"`
+			Checks  checks `json:"checks"`
+		}
+
+		chk := checks{Database: "ok", Redis: "ok"}
+		if err := db.Ping(ctx); err != nil {
+			chk.Database = "error"
+		}
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			chk.Redis = "error"
+		}
+
+		overall := "ok"
+		if chk.Database != "ok" || chk.Redis != "ok" {
+			overall = "degraded"
+		}
+
+		status := http.StatusOK
+		if overall == "degraded" {
+			status = http.StatusServiceUnavailable
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","service":"zerotrust"}`)
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(healthResponse{
+			Status:  overall,
+			Service: "zerotrust",
+			Checks:  chk,
+		})
 	})
 
 	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -771,6 +807,64 @@ func run(ctx context.Context, cfg config) error {
 			// Security posture summary — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/security-posture", adminHandler.SecurityPosture)
 
+			// System health — admin role only (includes pool stats)
+			r.With(authmw.RequireRole("admin")).Get("/admin/health", func(w http.ResponseWriter, r *http.Request) {
+				ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+				defer cancel()
+
+				dbStatus, redisStatus := "ok", "ok"
+				if err := db.Ping(ctx); err != nil {
+					dbStatus = "error"
+				}
+				if err := rdb.Ping(ctx).Err(); err != nil {
+					redisStatus = "error"
+				}
+
+				overall := "ok"
+				if dbStatus != "ok" || redisStatus != "ok" {
+					overall = "degraded"
+				}
+
+				dbStat := db.Stat()
+				rdbStat := rdb.PoolStats()
+
+				type poolStats struct {
+					Total int32 `json:"total"`
+					Idle  int32 `json:"idle"`
+					Max   int32 `json:"max"`
+				}
+				type svcHealth struct {
+					Status string    `json:"status"`
+					Pool   poolStats `json:"pool"`
+				}
+				type adminHealthResponse struct {
+					Status   string    `json:"status"`
+					Database svcHealth `json:"database"`
+					Redis    svcHealth `json:"redis"`
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(adminHealthResponse{
+					Status: overall,
+					Database: svcHealth{
+						Status: dbStatus,
+						Pool: poolStats{
+							Total: dbStat.TotalConns(),
+							Idle:  dbStat.IdleConns(),
+							Max:   dbStat.MaxConns(),
+						},
+					},
+					Redis: svcHealth{
+						Status: redisStatus,
+						Pool: poolStats{
+							Total: int32(rdbStat.TotalConns),
+							Idle:  int32(rdbStat.IdleConns),
+							Max:   int32(rdb.Options().PoolSize),
+						},
+					},
+				})
+			})
+
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Patch("/admin/settings", settingsHandler.Update)
@@ -784,6 +878,7 @@ func run(ctx context.Context, cfg config) error {
 
 			// Audit log
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit", auditHandler.List)
+			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit/export", auditHandler.Export)
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/audit/trends", auditHandler.Trends)
 			r.With(authmw.RequirePermission("audit", "read")).Get("/admin/security-dashboard", auditHandler.SecurityDashboard)
 

@@ -6,14 +6,18 @@ import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
 import { getBezierPath, getBezierAreaPath } from "@/lib/chartUtils";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
 import ComputerIcon from "@mui/icons-material/Computer";
+import DownloadIcon from "@mui/icons-material/Download";
 import InfoIcon from "@mui/icons-material/Info";
 import PersonIcon from "@mui/icons-material/Person";
 import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
@@ -358,6 +362,8 @@ export default function AuditPage() {
   const isAdmin = me?.roles.includes("admin") ?? false;
   const [trendRefresh, setTrendRefresh] = useState(0);
   const [detailEntry, setDetailEntry] = useState<AuditEntry | null>(null);
+  const [exportAnchor, setExportAnchor] = useState<null | HTMLElement>(null);
+  const [exporting, setExporting] = useState(false);
 
   const fetcher = useCallback(async (p: PageParams) => {
     const result = await api.listAuditLog(p);
@@ -367,6 +373,24 @@ export default function AuditPage() {
 
   const handleRowClick = useCallback((params: GridRowParams<AuditEntry>) => {
     setDetailEntry(params.row);
+  }, []);
+
+  const handleExport = useCallback(async (format: "csv" | "json") => {
+    setExportAnchor(null);
+    setExporting(true);
+    try {
+      const res = await api.admin.auditExport({ format });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   }, []);
 
   const tabs = useMemo(() => [
@@ -456,6 +480,24 @@ export default function AuditPage() {
     },
   ], [t, i18n.language]);
 
+  const exportAction = isAdmin ? (
+    <>
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={<DownloadIcon />}
+        disabled={exporting}
+        onClick={(e) => setExportAnchor(e.currentTarget)}
+      >
+        {t("export")}
+      </Button>
+      <Menu anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}>
+        <MenuItem onClick={() => handleExport("csv")}>{t("exportCsv")}</MenuItem>
+        <MenuItem onClick={() => handleExport("json")}>{t("exportJson")}</MenuItem>
+      </Menu>
+    </>
+  ) : undefined;
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {isAdmin && <AuditTrendsChart refreshSignal={trendRefresh} />}
@@ -474,6 +516,7 @@ export default function AuditPage() {
           defaultPageSize={25}
           rowHeight={64}
           onRowClick={handleRowClick}
+          action={exportAction}
         />
       </Box>
 

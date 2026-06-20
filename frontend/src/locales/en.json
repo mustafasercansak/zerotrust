@@ -306,6 +306,9 @@
     "userId": "User ID",
     "anonymousActor": "Anonymous / unauthenticated request.",
     "noOutcome": "no outcome",
+    "export": "Export",
+    "exportCsv": "Download CSV",
+    "exportJson": "Download JSON",
     "actions": {
       "auth.login_success": "Signed in",
       "auth.login_failed": "Sign-in failed",
@@ -402,7 +405,11 @@
     "adminPostureViewAll": "Manage users",
     "adminPostureTotal": "Active users",
     "adminPostureNoMfa": "Users without MFA",
-    "adminPostureInactive": "Inactive 30+ days"
+    "adminPostureInactive": "Inactive 30+ days",
+    "healthTitle": "System Health",
+    "healthDb": "PostgreSQL",
+    "healthRedis": "Redis",
+    "healthPool": "{{total}} / {{max}} connections"
   },
   "securityDashboard": {
     "title": "Security Dashboard",

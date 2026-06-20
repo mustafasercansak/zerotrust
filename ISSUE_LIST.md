@@ -1336,3 +1336,85 @@ Acceptance criteria:
 - No external dependency — pure regex logic.
 
 State: CLOSED
+
+---
+
+### 59. User detail drawer on admin Users page
+
+Severity: Low
+
+Status: Admin could see per-user MFA/passkey status in the table but had no way to inspect a user's sessions, audit trail, or MFA state without leaving the page.
+
+Related files:
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+
+Acceptance criteria:
+- Clicking a user row opens a side drawer with tabbed sections: Profile, Sessions, Audit, MFA.
+- Profile tab shows avatar, account info, deactivate/reactivate button, and bulk session revoke.
+- Sessions tab lists active sessions with per-session revoke.
+- Audit tab shows the user's recent audit events.
+- MFA tab shows TOTP and passkey status.
+- Each tab loads data lazily on first open.
+
+State: CLOSED
+
+Status update:
+- `UserProfileDrawer` was already fully implemented in `UsersPage.tsx` at the time of review (4 tabs, lazy-loaded per section, row-click wired).
+- No changes required; issue documented and closed.
+
+---
+
+### 60. Audit log export (CSV / JSON)
+
+Severity: Low
+
+Status: Admins could view and filter audit events in the UI but had no way to extract the data for offline analysis, compliance reporting, or archiving.
+
+Related files:
+- [backend/internal/audit/handler.go](/home/m/projects/zerotrust/backend/internal/audit/handler.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/AuditPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/AuditPage.tsx)
+
+Acceptance criteria:
+- `GET /api/v1/admin/audit/export?format=csv|json` streams up to 10 000 entries with `Content-Disposition: attachment`.
+- CSV includes UTF-8 BOM for Excel compatibility; columns: time, action, resource, user_email, user_id, ip_address.
+- JSON returns a flat array of audit entry objects.
+- AuditPage shows an admin-only "Export" button with a CSV / JSON dropdown.
+- Supports the same action / user_id / outcome filter params as the list endpoint.
+
+State: CLOSED
+
+Status update:
+- Added `Export` handler to `audit/handler.go` reusing `List` with limit 10 000 and offset 0.
+- Registered `GET /api/v1/admin/audit/export` route in `main.go` behind `audit:read` permission.
+- Added `api.admin.auditExport(params)` in `api.ts` returning a raw `Response` for blob download.
+- Added Export button with CSV/JSON `Menu` dropdown to `AuditPage.tsx`; triggers browser file download.
+- Added `export`, `exportCsv`, `exportJson` locale keys to EN and TR audit namespaces.
+
+---
+
+### 61. System health monitoring
+
+Severity: Low
+
+Status: The public `/health` endpoint returned a static `{"status":"ok"}` with no real checks, and there was no way for admins to inspect connection pool utilisation from the UI.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/HomePage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/HomePage.tsx)
+
+Acceptance criteria:
+- Public `GET /health` pings DB and Redis with a 3-second timeout; returns `{"status":"degraded"}` + HTTP 503 if either fails.
+- Admin `GET /api/v1/admin/health` returns per-service status and pool stats (total / idle / max connections).
+- Admin home page shows a compact "System Health" card alongside the posture card with a coloured dot (green/red) per service and live pool counts.
+
+State: CLOSED
+
+Status update:
+- Enhanced `/health` handler in `main.go` to ping DB (`pgxpool.Pool.Ping`) and Redis (`rdb.Ping`) within a 3 s context; returns `status: "ok"` (200) or `"degraded"` (503).
+- Added `GET /api/v1/admin/health` route (admin role) returning per-service status + pool stats from `db.Stat()` and `rdb.PoolStats()`.
+- Added `AdminHealthData` interface and `api.admin.health()` method to `api.ts`.
+- Added "System Health" card to `HomePage.tsx` alongside the posture card in a responsive 2-column admin row; shows PostgreSQL and Redis with status dot and pool counters.
+- Added `healthTitle`, `healthDb`, `healthRedis`, `healthPool` locale keys to EN and TR homepage namespaces.
