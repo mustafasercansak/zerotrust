@@ -37,6 +37,10 @@ func (m *mockUserReader) SetRoles(ctx context.Context, userID string, roles []st
 func (m *mockUserReader) SetActive(ctx context.Context, userID string, active bool) error {
 	return nil
 }
+
+func (m *mockUserReader) BulkSetActive(_ context.Context, userIDs []string, active bool) error {
+	return nil
+}
 func (m *mockUserReader) UpdateProfile(ctx context.Context, id, fn, ln string) (*user.User, error) {
 	return nil, nil
 }

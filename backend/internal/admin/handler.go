@@ -32,6 +32,7 @@ type UserManager interface {
 	UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*user.User, error)
 	SetRoles(ctx context.Context, userID string, roles []string) error
 	SetActive(ctx context.Context, userID string, active bool) error
+	BulkSetActive(ctx context.Context, userIDs []string, active bool) error
 	FindByID(ctx context.Context, id string) (*user.User, error)
 }
 
@@ -283,6 +284,58 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 	// Deactivating a user must immediately revoke all active sessions.
 	if !req.IsActive && h.sessions != nil {
 		_ = h.sessions.RevokeAllForUser(r.Context(), userID)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type bulkStatusRequest struct {
+	UserIDs  []string `json:"user_ids"`
+	IsActive bool     `json:"is_active"`
+}
+
+// POST /api/v1/admin/users/bulk-status
+// Activates or deactivates multiple users in one call. Self-modification is excluded
+// from the set; the last-admin guard prevents locking out all admins at once.
+func (h *Handler) BulkSetStatus(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFrom(r.Context())
+
+	var req bulkStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if len(req.UserIDs) == 0 || len(req.UserIDs) > 200 {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	// Silently exclude the caller from the set — admins cannot change their own status.
+	filtered := req.UserIDs[:0]
+	for _, id := range req.UserIDs {
+		if claims == nil || id != claims.UserID {
+			filtered = append(filtered, id)
+		}
+	}
+	if len(filtered) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if err := h.userSvc.BulkSetActive(r.Context(), filtered, req.IsActive); err != nil {
+		switch {
+		case errors.Is(err, user.ErrLastAdmin):
+			writeError(w, http.StatusConflict, "last_admin")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error")
+		}
+		return
+	}
+
+	// Revoke sessions for every deactivated user.
+	if !req.IsActive && h.sessions != nil {
+		for _, id := range filtered {
+			_ = h.sessions.RevokeAllForUser(r.Context(), id)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

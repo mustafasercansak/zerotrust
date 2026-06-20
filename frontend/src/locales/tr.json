@@ -177,8 +177,8 @@
     "active": "Aktif",
     "inactive": "Pasif",
     "security": "Güvenlik",
-    "totpEnabled": "TOTP etkin",
-    "totpDisabled": "TOTP kurulmamış",
+    "totpEnabled": "Kimlik doğrulama uygulaması etkin",
+    "totpDisabled": "Kimlik doğrulama uygulaması kurulmamış",
     "passkeyCount": "{{count}} passkey",
     "createdAt": "Oluşturma",
     "updatedAt": "Değiştirilme",
@@ -211,8 +211,6 @@
     "locale": "Dil",
     "totpLabel": "TOTP (Kimlik Doğrulama Uygulaması)",
     "unnamedPasskey": "İsimsiz geçiş anahtarı",
-    "totpEnabled": "Kimlik doğrulama uygulaması etkin",
-    "totpDisabled": "Kimlik doğrulama uygulaması kurulmamış",
     "enabled": "Etkin",
     "disabled": "Devre Dışı",
     "passkeys": "Geçiş Anahtarları",
@@ -231,7 +229,14 @@
       "invalid_profile": "Ad ve soyad en fazla 80 karakter olmalıdır.",
       "mfa_required": "Bu işlem için yakın zamanda MFA doğrulaması gerekir.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
-    }
+    },
+    "bulkSelected": "{{count}} seçili",
+    "bulkActivate": "Etkinleştir",
+    "bulkDeactivate": "Devre Dışı Bırak",
+    "bulkExport": "CSV Dışa Aktar",
+    "bulkClear": "Temizle",
+    "bulkActivated": "{{count}} kullanıcı etkinleştirildi.",
+    "bulkDeactivated": "{{count}} kullanıcı devre dışı bırakıldı."
   },
   "sessions": {
     "title": "Aktif Oturumlar",
@@ -600,7 +605,19 @@
         "client_id_taken": "Bu Client ID zaten kullanımda.",
         "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
       }
-    }
+    },
+    "tabActivity": "Giriş Geçmişi",
+    "activityTitle": "Giriş Geçmişi",
+    "activityDesc": "Hesabınıza ait son güvenlik olayları.",
+    "activityEmpty": "Son güvenlik olayı bulunamadı.",
+    "activityCount": "{{total}} kayıttan {{from}}–{{to}} gösteriliyor",
+    "activityColTime": "Zaman",
+    "activityColEvent": "Olay",
+    "activityColLocation": "Konum / IP",
+    "activityColDevice": "Cihaz",
+    "activityColOutcome": "Sonuç",
+    "activityPrev": "Önceki",
+    "activityNext": "Sonraki"
   },
   "serviceAccounts": {
     "title": "Servis Hesapları",

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, type AuditEntry, type PageParams, type Session, type UserData, type UserMfaInfo } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dateUtils";
@@ -42,7 +42,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import PersonIcon from "@mui/icons-material/Person";
 import SecurityIcon from "@mui/icons-material/Security";
-import { getGridStringOperators, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
+import { getGridStringOperators, type GridColDef, type GridRowParams, type GridRowSelectionModel } from "@mui/x-data-grid";
 import { PasswordStrengthBar } from "@/components/PasswordStrengthBar";
 
 const AVAILABLE_ROLES = ["admin", "user"];
@@ -558,12 +558,22 @@ export default function UsersPage() {
   // Profile drawer
   const [drawerUser, setDrawerUser] = useState<UserData | null>(null);
 
+  // Bulk selection — GridRowSelectionModel is { type: 'include'|'exclude', ids: Set<GridRowId> }
+  const [selectionModel, setSelectionModel] = useState<GridRowSelectionModel>({ type: "include", ids: new Set() });
+  const [bulkActing, setBulkActing] = useState(false);
+  const loadedRowsRef = useRef<UserData[]>([]);
+  const selectedIds = selectionModel.type === "include" ? [...selectionModel.ids] as string[] : [];
+
   const handleRowClick = useCallback((params: GridRowParams<UserData>) => {
     setDrawerUser(params.row);
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const fetcher = useCallback((p: PageParams) => api.admin.listUsers(p), [refresh]);
+  const fetcher = useCallback(async (p: PageParams) => {
+    const result = await api.admin.listUsers(p);
+    loadedRowsRef.current = result.data;
+    return result;
+  }, [refresh]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -756,6 +766,50 @@ export default function UsersPage() {
     }
   }
 
+  async function handleBulkStatus(active: boolean) {
+    const ids = selectedIds;
+    if (ids.length === 0) return;
+    setBulkActing(true);
+    try {
+      await runWithStepUp(
+        () => api.admin.bulkSetUserStatus(ids, active),
+        active ? "user_status_update" : "user_status_update",
+      );
+      setSelectionModel({ type: "include", ids: new Set() });
+      setRefresh((n) => n + 1);
+      toast.success(active ? t("bulkActivated", { count: ids.length }) : t("bulkDeactivated", { count: ids.length }));
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") return;
+      const code = err instanceof ApiError ? err.message : "internal_error";
+      toast.error(t(`errors.${code}`, { defaultValue: t("errors.internal_error") }));
+    } finally {
+      setBulkActing(false);
+    }
+  }
+
+  function handleBulkExport(rows: UserData[]) {
+    const selected = rows.filter((r) => selectedIds.includes(r.id));
+    const header = ["email", "first_name", "last_name", "roles", "is_active", "mfa_enabled", "passkey_count", "active_sessions", "created_at"];
+    const csvRows = [
+      header.join(","),
+      ...selected.map((r) =>
+        [
+          r.email, r.first_name, r.last_name,
+          (r.roles ?? []).join(";"),
+          r.is_active, r.mfa_enabled, r.passkey_count, r.active_sessions,
+          r.created_at,
+        ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
+      ),
+    ];
+    const blob = new Blob(["﻿" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `users-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <>
       <ResourceTablePage
@@ -765,7 +819,32 @@ export default function UsersPage() {
         getRowId={(u) => u.id}
         accessDenied={!isAdmin}
         accessDeniedMessage={t("accessDenied")}
-        action={<Button variant="contained" onClick={openCreate}>+ {t("createUser")}</Button>}
+        action={
+          selectedIds.length > 0 ? (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                {t("bulkSelected", { count: selectedIds.length })}
+              </Typography>
+              <Button size="small" variant="outlined" color="success" disabled={bulkActing}
+                onClick={() => handleBulkStatus(true)}>
+                {t("bulkActivate")}
+              </Button>
+              <Button size="small" variant="outlined" color="error" disabled={bulkActing}
+                onClick={() => handleBulkStatus(false)}>
+                {t("bulkDeactivate")}
+              </Button>
+              <Button size="small" variant="outlined" disabled={bulkActing}
+                onClick={() => handleBulkExport(loadedRowsRef.current)}>
+                {t("bulkExport")}
+              </Button>
+              <Button size="small" onClick={() => setSelectionModel({ type: "include", ids: new Set() })}>
+                {t("bulkClear")}
+              </Button>
+            </Box>
+          ) : (
+            <Button variant="contained" onClick={openCreate}>+ {t("createUser")}</Button>
+          )
+        }
         refreshSignal={refresh}
         defaultSortKey="created_at"
         defaultSortDir="desc"
@@ -773,6 +852,9 @@ export default function UsersPage() {
         defaultPageSize={25}
         rowHeight={64}
         onRowClick={handleRowClick}
+        checkboxSelection
+        rowSelectionModel={selectionModel}
+        onRowSelectionModelChange={setSelectionModel}
       />
 
       {/* ── Create user dialog ── */}

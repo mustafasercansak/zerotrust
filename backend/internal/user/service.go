@@ -16,6 +16,7 @@ type store interface {
 	List(ctx context.Context, p ListParams) (ListResult, error)
 	SetRoles(ctx context.Context, userID string, roles []string) error
 	SetActive(ctx context.Context, userID string, active bool) error
+	BulkSetActive(ctx context.Context, userIDs []string, active bool) error
 	UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error)
 	GetPermissions(ctx context.Context, userID string) ([]string, error)
 	UpdatePassword(ctx context.Context, userID, passwordHash string) error
@@ -71,6 +72,10 @@ func (s *Service) SetRoles(ctx context.Context, userID string, roles []string) e
 
 func (s *Service) SetActive(ctx context.Context, userID string, active bool) error {
 	return s.repo.SetActive(ctx, userID, active)
+}
+
+func (s *Service) BulkSetActive(ctx context.Context, userIDs []string, active bool) error {
+	return s.repo.BulkSetActive(ctx, userIDs, active)
 }
 
 func (s *Service) UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error) {

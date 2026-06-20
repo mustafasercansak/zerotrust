@@ -113,6 +113,10 @@ func (f *fakeStore) SetActive(_ context.Context, userID string, active bool) err
 	return f.setActiveErr
 }
 
+func (f *fakeStore) BulkSetActive(_ context.Context, userIDs []string, active bool) error {
+	return nil
+}
+
 func (f *fakeStore) UpdateProfile(_ context.Context, userID, firstName, lastName string) (*User, error) {
 	f.updateProfileUserID = userID
 	f.updateProfileFirstName = firstName

@@ -11,10 +11,17 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/session"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/internal/webauthn"
+	middleware "github.com/zerotrust/backend/pkg/middleware"
 )
+
+func withClaims(r *http.Request, userID string) *http.Request {
+	claims := &auth.Claims{UserID: userID}
+	return r.WithContext(context.WithValue(r.Context(), middleware.ClaimsKey, claims))
+}
 
 func TestQueryInt(t *testing.T) {
 	tests := []struct {
@@ -94,21 +101,24 @@ func TestToResponseHandlesNilRoles(t *testing.T) {
 }
 
 type mockUserManager struct {
-	listResult         user.ListResult
-	listErr            error
-	registerUser       *user.User
-	registerErr        error
-	updateProfileUser  *user.User
-	updateProfileErr   error
-	setRolesErr        error
-	setActiveErr       error
-	findByIDUser       *user.User
-	findByIDErr        error
-	lastListParams     user.ListParams
-	lastSetRolesID     string
-	lastSetRoles       []string
-	lastSetActiveID    string
-	lastSetActiveValue bool
+	listResult          user.ListResult
+	listErr             error
+	registerUser        *user.User
+	registerErr         error
+	updateProfileUser   *user.User
+	updateProfileErr    error
+	setRolesErr         error
+	setActiveErr        error
+	bulkSetActiveErr    error
+	bulkSetActiveIDs    []string
+	bulkSetActiveValue  bool
+	findByIDUser        *user.User
+	findByIDErr         error
+	lastListParams      user.ListParams
+	lastSetRolesID      string
+	lastSetRoles        []string
+	lastSetActiveID     string
+	lastSetActiveValue  bool
 }
 
 func (m *mockUserManager) List(_ context.Context, p user.ListParams) (user.ListResult, error) {
@@ -143,6 +153,12 @@ func (m *mockUserManager) SetActive(_ context.Context, userID string, active boo
 	m.lastSetActiveID = userID
 	m.lastSetActiveValue = active
 	return m.setActiveErr
+}
+
+func (m *mockUserManager) BulkSetActive(_ context.Context, userIDs []string, active bool) error {
+	m.bulkSetActiveIDs = userIDs
+	m.bulkSetActiveValue = active
+	return m.bulkSetActiveErr
 }
 
 func (m *mockUserManager) FindByID(_ context.Context, id string) (*user.User, error) {
@@ -571,6 +587,140 @@ func TestGetUserMfa(t *testing.T) {
 		h.GetUserMfa(rr, req)
 		if rr.Code != http.StatusInternalServerError {
 			t.Fatalf("status=%d want=500", rr.Code)
+		}
+	})
+}
+
+func TestBulkSetStatus(t *testing.T) {
+	callerID := "caller-123"
+
+	buildReq := func(body any, claimsID string) *http.Request {
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", "/", bytes.NewReader(b))
+		if claimsID != "" {
+			req = withClaims(req, claimsID)
+		}
+		return req
+	}
+
+	t.Run("deactivates users and revokes sessions", func(t *testing.T) {
+		mgr := &mockUserManager{}
+		sess := &mockSessionManagerUnit{}
+		h := NewHandler(mgr, sess, nil, nil)
+
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{
+			"user_ids":  []string{"u1", "u2"},
+			"is_active": false,
+		}, callerID))
+
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=204", rr.Code)
+		}
+		if len(mgr.bulkSetActiveIDs) != 2 {
+			t.Fatalf("want 2 IDs, got %v", mgr.bulkSetActiveIDs)
+		}
+		if mgr.bulkSetActiveValue != false {
+			t.Fatal("expected is_active=false")
+		}
+		if sess.revokeAllCalls != 2 {
+			t.Fatalf("revokeAllCalls=%d want=2", sess.revokeAllCalls)
+		}
+	})
+
+	t.Run("activates users without revoking sessions", func(t *testing.T) {
+		mgr := &mockUserManager{}
+		sess := &mockSessionManagerUnit{}
+		h := NewHandler(mgr, sess, nil, nil)
+
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{
+			"user_ids":  []string{"u3"},
+			"is_active": true,
+		}, callerID))
+
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=204", rr.Code)
+		}
+		if sess.revokeAllCalls != 0 {
+			t.Fatalf("revokeAllCalls=%d want=0 (no revoke on activate)", sess.revokeAllCalls)
+		}
+	})
+
+	t.Run("excludes caller from set silently", func(t *testing.T) {
+		mgr := &mockUserManager{}
+		h := NewHandler(mgr, nil, nil, nil)
+
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{
+			"user_ids":  []string{callerID, "u2"},
+			"is_active": false,
+		}, callerID))
+
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=204", rr.Code)
+		}
+		for _, id := range mgr.bulkSetActiveIDs {
+			if id == callerID {
+				t.Fatal("caller should have been excluded from bulk update")
+			}
+		}
+	})
+
+	t.Run("all IDs are caller → 204 with no repo call", func(t *testing.T) {
+		mgr := &mockUserManager{}
+		h := NewHandler(mgr, nil, nil, nil)
+
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{
+			"user_ids":  []string{callerID},
+			"is_active": false,
+		}, callerID))
+
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=204", rr.Code)
+		}
+		if mgr.bulkSetActiveIDs != nil {
+			t.Fatal("BulkSetActive should not have been called")
+		}
+	})
+
+	t.Run("empty user_ids returns 400", func(t *testing.T) {
+		h := NewHandler(&mockUserManager{}, nil, nil, nil)
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{"user_ids": []string{}, "is_active": false}, ""))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=400", rr.Code)
+		}
+	})
+
+	t.Run("last_admin returns 409", func(t *testing.T) {
+		mgr := &mockUserManager{bulkSetActiveErr: user.ErrLastAdmin}
+		h := NewHandler(mgr, nil, nil, nil)
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{"user_ids": []string{"u1"}, "is_active": false}, callerID))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("status=%d want=409", rr.Code)
+		}
+	})
+
+	t.Run("repo error returns 500", func(t *testing.T) {
+		mgr := &mockUserManager{bulkSetActiveErr: errors.New("db error")}
+		h := NewHandler(mgr, nil, nil, nil)
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, buildReq(map[string]any{"user_ids": []string{"u1"}, "is_active": false}, callerID))
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want=500", rr.Code)
+		}
+	})
+
+	t.Run("invalid body returns 400", func(t *testing.T) {
+		h := NewHandler(&mockUserManager{}, nil, nil, nil)
+		req, _ := http.NewRequest("POST", "/", bytes.NewBufferString("not-json"))
+		rr := httptest.NewRecorder()
+		h.BulkSetStatus(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=400", rr.Code)
 		}
 	})
 }

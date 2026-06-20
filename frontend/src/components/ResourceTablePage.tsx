@@ -9,6 +9,7 @@ import {
   type GridColDef,
   type GridFilterModel,
   type GridPaginationModel,
+  type GridRowSelectionModel,
   type GridSortModel,
   type GridValidRowModel,
 } from "@mui/x-data-grid";
@@ -34,6 +35,9 @@ interface ResourceTablePageProps<T extends GridValidRowModel> {
   eventSourceUrl?: string;
   rowHeight?: number;
   onRowClick?: (params: import("@mui/x-data-grid").GridRowParams<T>) => void;
+  checkboxSelection?: boolean;
+  rowSelectionModel?: GridRowSelectionModel;
+  onRowSelectionModelChange?: (model: GridRowSelectionModel) => void;
 }
 
 /**
@@ -58,6 +62,9 @@ export function ResourceTablePage<T extends GridValidRowModel>({
   eventSourceUrl,
   rowHeight,
   onRowClick,
+  checkboxSelection,
+  rowSelectionModel,
+  onRowSelectionModelChange,
 }: ResourceTablePageProps<T>) {
   const { t, i18n } = useTranslation("common");
 
@@ -220,7 +227,10 @@ export function ResourceTablePage<T extends GridValidRowModel>({
             setPaginationModel((prev) => ({ ...prev, page: 0 }));
           }}
           pageSizeOptions={pageSizeOptions}
-          disableRowSelectionOnClick={!onRowClick}
+          checkboxSelection={checkboxSelection}
+          rowSelectionModel={rowSelectionModel}
+          onRowSelectionModelChange={onRowSelectionModelChange}
+          disableRowSelectionOnClick={checkboxSelection || !onRowClick}
           onRowClick={onRowClick}
           localeText={localeText}
           sx={{

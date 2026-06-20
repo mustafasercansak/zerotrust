@@ -448,6 +448,60 @@ func (r *Repository) SetRoles(ctx context.Context, userID string, roleNames []st
 	return tx.Commit(ctx)
 }
 
+// BulkSetActive activates or deactivates multiple user accounts in one transaction.
+// When deactivating, it guards against removing the last active admin.
+func (r *Repository) BulkSetActive(ctx context.Context, userIDs []string, active bool) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if !active {
+		// Count active admins that are NOT in the target set — if zero, refuse.
+		var remainingAdmins int
+		if err := tx.QueryRow(ctx, `
+			SELECT COUNT(DISTINCT u.id)
+			FROM users u
+			JOIN user_roles ur ON u.id = ur.user_id
+			JOIN roles ro ON ur.role_id = ro.id
+			WHERE ro.name = $1 AND u.is_active = true
+			  AND u.id <> ALL($2::uuid[])
+		`, adminRoleName, userIDs).Scan(&remainingAdmins); err != nil {
+			return err
+		}
+		if remainingAdmins == 0 {
+			// Check whether any of the targets are actually admins; if none are,
+			// the guard is irrelevant and we can proceed.
+			var adminTargets int
+			if err := tx.QueryRow(ctx, `
+				SELECT COUNT(DISTINCT u.id)
+				FROM users u
+				JOIN user_roles ur ON u.id = ur.user_id
+				JOIN roles ro ON ur.role_id = ro.id
+				WHERE ro.name = $1 AND u.is_active = true AND u.id = ANY($2::uuid[])
+			`, adminRoleName, userIDs).Scan(&adminTargets); err != nil {
+				return err
+			}
+			if adminTargets > 0 {
+				return ErrLastAdmin
+			}
+		}
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = ANY($2::uuid[])`,
+		active, userIDs,
+	)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // SetActive activates or deactivates a user account.
 func (r *Repository) SetActive(ctx context.Context, userID string, active bool) error {
 	tx, err := r.db.Begin(ctx)

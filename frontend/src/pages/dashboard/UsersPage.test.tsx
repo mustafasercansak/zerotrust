@@ -1058,6 +1058,194 @@ describe("UsersPage page component", () => {
     expect(capturedButtonClicks[1]).toBeDefined();
   });
 
+  it("shows bulk action toolbar when rows are selected", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
+    const html = runRender();
+
+    expect(html).toContain("bulkSelected");
+    expect(html).toContain("bulkActivate");
+    expect(html).toContain("bulkDeactivate");
+    expect(html).toContain("bulkExport");
+    expect(html).toContain("bulkClear");
+  });
+
+  it("handles bulk activate successfully", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+    const bulkSpy = vi.spyOn(api.admin, "bulkSetUserStatus").mockResolvedValue(undefined);
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u2"]) };
+    runRender();
+
+    // capturedButtonClicks[0] is bulkActivate
+    expect(capturedButtonClicks[0]).toBeDefined();
+    await capturedButtonClicks[0]();
+
+    expect(bulkSpy).toHaveBeenCalledWith(["u2"], true);
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkActivated"));
+  });
+
+  it("handles bulk deactivate successfully", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+    const bulkSpy = vi.spyOn(api.admin, "bulkSetUserStatus").mockResolvedValue(undefined);
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u2", "u3"]) };
+    runRender();
+
+    await capturedButtonClicks[1](); // bulkDeactivate
+
+    expect(bulkSpy).toHaveBeenCalledWith(["u2", "u3"], false);
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkDeactivated"));
+  });
+
+  it("handles bulk API error (last_admin)", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+    vi.spyOn(api.admin, "bulkSetUserStatus").mockRejectedValue(new ApiError("last_admin"));
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u1"]) };
+    runRender();
+
+    await capturedButtonClicks[1](); // bulkDeactivate
+
+    expect(toast.error).toHaveBeenCalledWith("errors.last_admin");
+  });
+
+  it("handles bulk mfa_required silently", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+    vi.spyOn(api.admin, "bulkSetUserStatus").mockRejectedValue(new ApiError("mfa_required"));
+    mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
+      try { return await action(); } catch { throw new ApiError("mfa_required"); }
+    });
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u2"]) };
+    runRender();
+
+    await capturedButtonClicks[0](); // bulkActivate
+
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("handles bulk clear", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
+    runRender();
+
+    capturedButtonClicks[3](); // bulkClear
+
+    expect(stateStore[11]).toEqual({ type: "include", ids: new Set() });
+  });
+
+  it("handles bulk export with selected rows", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+
+    const anchorClick = vi.fn();
+    vi.stubGlobal("document", {
+      visibilityState: "visible",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      createElement: vi.fn().mockReturnValue({ href: "", download: "", click: anchorClick }),
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn().mockReturnValue("blob:test"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    runRender();
+
+    capturedButtonClicks[2](); // bulkExport
+
+    expect(anchorClick).toHaveBeenCalled();
+  });
+
+  it("skips export when no rows match selection", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+
+    const anchorClick = vi.fn();
+    vi.stubGlobal("document", {
+      visibilityState: "visible",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      createElement: vi.fn().mockReturnValue({ href: "", download: "", click: anchorClick }),
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn().mockReturnValue("blob:test"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Select a user ID that's not in loaded rows
+    stateStore[11] = { type: "include", ids: new Set(["nonexistent-id"]) };
+    runRender();
+
+    capturedButtonClicks[2](); // bulkExport
+
+    // anchor.click is called even for an empty selection (creates empty CSV)
+    expect(anchorClick).toHaveBeenCalled();
+  });
+
   it("renders the sessions dialog loading state", async () => {
     vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
     const user = getMockUsers().data[2];
@@ -1066,7 +1254,7 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUserSessions").mockReturnValue(new Promise(() => {}));
 
     stateStore[9] = user;
-    stateStore[21] = true; // SessionsDialog.loading (sessions=20, loading=21 with 9 ResourceTablePage states)
+    stateStore[23] = true; // SessionsDialog.loading (sessions=22, loading=23; shifted +2 by selectionModel+bulkActing states)
 
     const html = runRender();
 

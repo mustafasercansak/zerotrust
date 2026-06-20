@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type AuditEntry } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { DashboardPage } from "@/components/DashboardPage";
 import SessionsPage from "./SessionsPage";
@@ -11,9 +11,15 @@ import { toast } from "sonner";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Tab from "@mui/material/Tab";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
@@ -25,6 +31,38 @@ function initials(me: { email: string; first_name?: string; last_name?: string }
   const parts = [me.first_name, me.last_name].filter((x): x is string => !!x);
   if (parts.length > 0) return parts.map((p) => p.charAt(0)).join("").slice(0, 2).toUpperCase();
   return me.email.slice(0, 2).toUpperCase();
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  "auth.login": "Login",
+  "auth.logout": "Logout",
+  "auth.refresh": "Token Refresh",
+  "auth.register": "Registration",
+  "auth.password_reset": "Password Reset",
+  "user.password_changed": "Password Changed",
+  "user.locale_changed": "Language Changed",
+  "user.profile_updated": "Profile Updated",
+  "user.avatar_uploaded": "Avatar Uploaded",
+  "user.avatar_deleted": "Avatar Deleted",
+  "user.notify_preference_updated": "Notification Preference Updated",
+  "mfa.setup": "2FA Setup",
+  "mfa.verify": "2FA Verified",
+  "mfa.disabled": "2FA Disabled",
+  "session.revoked": "Session Revoked",
+  "session.revoke_all": "All Sessions Revoked",
+  "login.anomaly": "Login Anomaly Detected",
+};
+
+function formatAction(action: string): string {
+  return ACTION_LABELS[action] ?? action.replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
 }
 
 export default function SettingsPage() {
@@ -69,9 +107,32 @@ export default function SettingsPage() {
   const [notifySecurityEmails, setNotifySecurityEmails] = useState(true);
   const [savingNotify, setSavingNotify] = useState(false);
 
+  // Activity / login history (appended last to preserve test state indices)
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyEntries, setHistoryEntries] = useState<AuditEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyTotal, setHistoryTotal] = useState(0);
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
+
+  const activityTabIndex = isAdmin ? 3 : 2;
+
+  useEffect(() => {
+    if (activeTab !== activityTabIndex) return;
+    let cancelled = false;
+    setHistoryLoading(true);
+    api.listMyAudit(25, historyPage * 25)
+      .then(({ data, total }) => {
+        if (cancelled) return;
+        setHistoryEntries(data);
+        setHistoryTotal(total);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, activityTabIndex, historyPage]);
 
   // Initialize Profile Settings Form
   useEffect(() => {
@@ -251,101 +312,118 @@ export default function SettingsPage() {
             <Tab label={t("tabProfile")} id="tab-profile" />
             <Tab label={t("tabSecurity")} id="tab-security" />
             {isAdmin && <Tab label={t("tabSystem")} id="tab-system" />}
+            <Tab label={t("tabActivity")} id="tab-activity" />
           </Tabs>
         </Box>
 
         {activeTab === 0 && (
-          <Box sx={{ display: "grid", gap: 2 }}>
-          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 3, display: "grid", gap: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("title")}</Typography>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-              <Avatar
-                src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
-                sx={{ width: 80, height: 80, fontSize: 28 }}
-              >
-                {initials(me)}
-              </Avatar>
-              <Box sx={{ display: "flex", gap: 1.5 }}>
-                <Button variant="outlined" size="small" component="label" disabled={uploadingAvatar}>
-                  {tProfile("uploadButton")}
-                  <input type="file" hidden accept="image/png, image/jpeg" onChange={handleAvatarChange} ref={fileInputRef} />
-                </Button>
-                {me.has_avatar && (
-                  <Button variant="outlined" size="small" color="error" onClick={handleAvatarDelete} disabled={uploadingAvatar}>
-                    {tProfile("deleteButton")}
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 320px" }, gap: 2, alignItems: "start" }}>
+            {/* Left column: profile info + password */}
+            <Box sx={{ display: "grid", gap: 2 }}>
+              <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 3, display: "grid", gap: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                  <Avatar
+                    src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
+                    sx={{ width: 64, height: 64, fontSize: 22, flexShrink: 0 }}
+                  >
+                    {initials(me)}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{tProfile("title")}</Typography>
+                    <Box sx={{ display: "flex", gap: 1, mt: 0.75 }}>
+                      <Button variant="outlined" size="small" component="label" disabled={uploadingAvatar}>
+                        {tProfile("uploadButton")}
+                        <input type="file" hidden accept="image/png, image/jpeg" onChange={handleAvatarChange} ref={fileInputRef} />
+                      </Button>
+                      {me.has_avatar && (
+                        <Button variant="outlined" size="small" color="error" onClick={handleAvatarDelete} disabled={uploadingAvatar}>
+                          {tProfile("deleteButton")}
+                        </Button>
+                      )}
+                    </Box>
+                  </Box>
+                </Box>
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                  <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} />
+                  <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} />
+                </Box>
+                <Box>
+                  <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
+                    {savingProfile ? tProfile("saving") : t("save")}
                   </Button>
-                )}
-              </Box>
-            </Box>
-            <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-            <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} fullWidth />
-            <Box>
-              <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
-                {savingProfile ? tProfile("saving") : t("save")}
-              </Button>
-            </Box>
-          </Paper>
-          <Paper variant="outlined" component="form" onSubmit={handlePasswordChange} sx={{ p: 3, display: "grid", gap: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("changePassword.title")}</Typography>
-            <TextField
-              label={tProfile("changePassword.currentPassword")}
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              fullWidth
-            />
-            <Box>
-              <TextField
-                label={tProfile("changePassword.newPassword")}
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                fullWidth
-              />
-              <PasswordStrengthBar password={newPassword} />
-            </Box>
-            <TextField
-              label={tProfile("changePassword.confirmPassword")}
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              fullWidth
-            />
-            <Box>
-              <Button type="submit" variant="outlined" disabled={changingPassword} sx={{ minWidth: 160 }}>
-                {changingPassword ? tProfile("changePassword.submitting") : tProfile("changePassword.submit")}
-              </Button>
-            </Box>
-          </Paper>
-          <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("localeSection")}</Typography>
-            <Typography variant="body2" color="text.secondary">{t("localeDesc")}</Typography>
-            <TextField
-              select
-              label={t("localeLabel")}
-              value={i18n.language.startsWith("tr") ? "tr" : "en"}
-              onChange={(e) => handleLocaleChange(e.target.value as "tr" | "en")}
-              sx={{ width: 220 }}
-            >
-              <MenuItem value="en">English</MenuItem>
-              <MenuItem value="tr">Türkçe</MenuItem>
-            </TextField>
-          </Paper>
-          <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("notificationsSection")}</Typography>
-            <Typography variant="body2" color="text.secondary">{t("notificationsDesc")}</Typography>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={notifySecurityEmails}
-                  onChange={(e) => handleNotifyToggle(e.target.checked)}
-                  disabled={savingNotify}
-                  color="primary"
+                </Box>
+              </Paper>
+
+              <Paper variant="outlined" component="form" onSubmit={handlePasswordChange} sx={{ p: 3, display: "grid", gap: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("changePassword.title")}</Typography>
+                <TextField
+                  label={tProfile("changePassword.currentPassword")}
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  fullWidth
                 />
-              }
-              label={t("notifySecurityEmails")}
-            />
-          </Paper>
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                  <Box>
+                    <TextField
+                      label={tProfile("changePassword.newPassword")}
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      fullWidth
+                    />
+                    <PasswordStrengthBar password={newPassword} />
+                  </Box>
+                  <TextField
+                    label={tProfile("changePassword.confirmPassword")}
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    fullWidth
+                  />
+                </Box>
+                <Box>
+                  <Button type="submit" variant="outlined" disabled={changingPassword} sx={{ minWidth: 160 }}>
+                    {changingPassword ? tProfile("changePassword.submitting") : tProfile("changePassword.submit")}
+                  </Button>
+                </Box>
+              </Paper>
+            </Box>
+
+            {/* Right column: preferences */}
+            <Box sx={{ display: "grid", gap: 2 }}>
+              <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t("localeSection")}</Typography>
+                <Typography variant="body2" color="text.secondary">{t("localeDesc")}</Typography>
+                <TextField
+                  select
+                  label={t("localeLabel")}
+                  value={i18n.language.startsWith("tr") ? "tr" : "en"}
+                  onChange={(e) => handleLocaleChange(e.target.value as "tr" | "en")}
+                  fullWidth
+                  size="small"
+                >
+                  <MenuItem value="en">English</MenuItem>
+                  <MenuItem value="tr">Türkçe</MenuItem>
+                </TextField>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t("notificationsSection")}</Typography>
+                <Typography variant="body2" color="text.secondary">{t("notificationsDesc")}</Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={notifySecurityEmails}
+                      onChange={(e) => handleNotifyToggle(e.target.checked)}
+                      disabled={savingNotify}
+                      color="primary"
+                    />
+                  }
+                  label={t("notifySecurityEmails")}
+                />
+              </Paper>
+            </Box>
           </Box>
         )}
 
@@ -353,6 +431,82 @@ export default function SettingsPage() {
           <Box>
             <SessionsPage />
           </Box>
+        )}
+
+        {activeTab === activityTabIndex && (
+          <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+            <Box sx={{ px: 3, pt: 2.5, pb: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("activityTitle")}</Typography>
+                <Typography variant="body2" color="text.secondary">{t("activityDesc")}</Typography>
+              </Box>
+              {historyTotal > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {t("activityCount", { from: historyPage * 25 + 1, to: Math.min((historyPage + 1) * 25, historyTotal), total: historyTotal })}
+                </Typography>
+              )}
+            </Box>
+            {historyLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : historyEntries.length === 0 ? (
+              <Box sx={{ py: 4, textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">{t("activityEmpty")}</Typography>
+              </Box>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{t("activityColTime")}</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>{t("activityColEvent")}</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>{t("activityColLocation")}</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>{t("activityColDevice")}</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>{t("activityColOutcome")}</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {historyEntries.map((entry) => {
+                    const outcome = entry.metadata?.outcome;
+                    const loc = entry.metadata?.location;
+                    const ci = entry.metadata?.client_info;
+                    const locationStr = [loc?.city, loc?.country].filter(Boolean).join(", ") || entry.ip_address || "—";
+                    const deviceStr = ci ? [ci.browser, ci.os].filter(Boolean).join(" / ") : (entry.user_agent?.slice(0, 40) || "—");
+                    return (
+                      <TableRow key={entry.id} hover>
+                        <TableCell sx={{ whiteSpace: "nowrap", color: "text.secondary", fontSize: 12 }}>
+                          {formatDateTime(entry.created_at)}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 500 }}>{formatAction(entry.action)}</TableCell>
+                        <TableCell sx={{ color: "text.secondary", fontSize: 12 }}>{locationStr}</TableCell>
+                        <TableCell sx={{ color: "text.secondary", fontSize: 12, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deviceStr}</TableCell>
+                        <TableCell>
+                          {outcome ? (
+                            <Chip
+                              size="small"
+                              label={outcome}
+                              color={outcome === "success" ? "success" : "error"}
+                              sx={{ height: 20, fontSize: 11, "& .MuiChip-label": { px: 0.75 } }}
+                            />
+                          ) : <Typography variant="caption" color="text.disabled">—</Typography>}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+            {historyTotal > 25 && (
+              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
+                <Button size="small" disabled={historyPage === 0} onClick={() => setHistoryPage((p) => p - 1)}>
+                  {t("activityPrev")}
+                </Button>
+                <Button size="small" disabled={(historyPage + 1) * 25 >= historyTotal} onClick={() => setHistoryPage((p) => p + 1)}>
+                  {t("activityNext")}
+                </Button>
+              </Box>
+            )}
+          </Paper>
         )}
 
         {activeTab === 2 && isAdmin && (
@@ -364,26 +518,42 @@ export default function SettingsPage() {
                 <Typography variant="body2" color="text.secondary">{t("loading")}</Typography>
               </Box>
             ) : (
-              <Box sx={{ display: "grid", gap: 3.5 }}>
-                {/* Max Sessions */}
-                <Box sx={{ display: "grid", gap: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxSessions")}</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("maxSessionsDesc")}</Typography>
-                  <TextField
-                    label={t("maxSessionsInput")}
-                    type="number"
-                    value={maxSessions}
-                    onChange={(e) => setMaxSessions(e.target.value)}
-                    sx={{ width: 160 }}
-                    slotProps={{ htmlInput: numericProps(1, 20) }}
-                  />
+              <Box sx={{ display: "grid", gap: 2.5 }}>
+                {/* Row 1: Max Sessions | Max Login Attempts */}
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                  <Box sx={{ display: "grid", gap: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxSessions")}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t("maxSessionsDesc")}</Typography>
+                    <TextField
+                      label={t("maxSessionsInput")}
+                      type="number"
+                      value={maxSessions}
+                      onChange={(e) => setMaxSessions(e.target.value)}
+                      sx={{ width: 140, mt: 0.5 }}
+                      size="small"
+                      slotProps={{ htmlInput: numericProps(1, 20) }}
+                    />
+                  </Box>
+                  <Box sx={{ display: "grid", gap: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxLoginAttempts")}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t("maxLoginAttemptsDesc")}</Typography>
+                    <TextField
+                      label={t("maxLoginAttemptsInput")}
+                      type="number"
+                      value={maxLoginAttempts}
+                      onChange={(e) => setMaxLoginAttempts(e.target.value)}
+                      sx={{ width: 140, mt: 0.5 }}
+                      size="small"
+                      slotProps={{ htmlInput: numericProps(1, 20) }}
+                    />
+                  </Box>
                 </Box>
 
-                {/* Session Timeouts */}
-                <Box sx={{ display: "grid", gap: 1 }}>
+                {/* Row 2: Session Timeouts (3 cols) */}
+                <Box sx={{ display: "grid", gap: 0.75 }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sessionTimeouts")}</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("sessionTimeoutsDesc")}</Typography>
-                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
+                  <Typography variant="body2" color="text.secondary">{t("sessionTimeoutsDesc")}</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2, mt: 0.5 }}>
                     <TextField
                       label={t("idleTimeoutInput")}
                       type="number"
@@ -414,55 +584,43 @@ export default function SettingsPage() {
                   </Box>
                 </Box>
 
-                {/* Password Complexity */}
-                <Box sx={{ display: "grid", gap: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("passwordComplexity")}</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("passwordComplexityDesc")}</Typography>
-                  <TextField
-                    select
-                    label={t("passwordComplexityInput")}
-                    value={passwordComplexity}
-                    onChange={(e) => setPasswordComplexity(e.target.value)}
-                    sx={{ width: 320 }}
-                  >
-                    <MenuItem value="low">{t("passwordComplexityLow")}</MenuItem>
-                    <MenuItem value="medium">{t("passwordComplexityMedium")}</MenuItem>
-                    <MenuItem value="strong">{t("passwordComplexityStrong")}</MenuItem>
-                  </TextField>
+                {/* Row 3: Password Complexity | Global MFA */}
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                  <Box sx={{ display: "grid", gap: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("passwordComplexity")}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t("passwordComplexityDesc")}</Typography>
+                    <TextField
+                      select
+                      label={t("passwordComplexityInput")}
+                      value={passwordComplexity}
+                      onChange={(e) => setPasswordComplexity(e.target.value)}
+                      size="small"
+                      sx={{ mt: 0.5 }}
+                      fullWidth
+                    >
+                      <MenuItem value="low">{t("passwordComplexityLow")}</MenuItem>
+                      <MenuItem value="medium">{t("passwordComplexityMedium")}</MenuItem>
+                      <MenuItem value="strong">{t("passwordComplexityStrong")}</MenuItem>
+                    </TextField>
+                  </Box>
+                  <Box sx={{ display: "grid", gap: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("globalMfaRequired")}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t("globalMfaRequiredDesc")}</Typography>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={globalMfaRequired === "true"}
+                          onChange={(e) => setGlobalMfaRequired(e.target.checked ? "true" : "false")}
+                          color="primary"
+                        />
+                      }
+                      label={t("globalMfaRequired")}
+                      sx={{ mt: 0.5 }}
+                    />
+                  </Box>
                 </Box>
 
-                {/* Max Login Attempts */}
-                <Box sx={{ display: "grid", gap: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("maxLoginAttempts")}</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("maxLoginAttemptsDesc")}</Typography>
-                  <TextField
-                    label={t("maxLoginAttemptsInput")}
-                    type="number"
-                    value={maxLoginAttempts}
-                    onChange={(e) => setMaxLoginAttempts(e.target.value)}
-                    sx={{ width: 160 }}
-                    slotProps={{ htmlInput: numericProps(1, 20) }}
-                  />
-                </Box>
-
-                {/* Global MFA */}
-                <Box sx={{ display: "grid", gap: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("globalMfaRequired")}</Typography>
-                  <Typography variant="body2" color="text.secondary">{t("globalMfaRequiredDesc")}</Typography>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={globalMfaRequired === "true"}
-                        onChange={(e) => setGlobalMfaRequired(e.target.checked ? "true" : "false")}
-                        color="primary"
-                      />
-                    }
-                    label={t("globalMfaRequired")}
-                    sx={{ mt: 1 }}
-                  />
-                </Box>
-
-                <Box sx={{ mt: 1 }}>
+                <Box>
                   <Button type="submit" variant="contained" disabled={savingSystem} sx={{ minWidth: 120 }}>
                     {savingSystem ? t("saving") : t("save")}
                   </Button>

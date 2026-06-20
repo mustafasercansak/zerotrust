@@ -1418,3 +1418,95 @@ Status update:
 - Added `AdminHealthData` interface and `api.admin.health()` method to `api.ts`.
 - Added "System Health" card to `HomePage.tsx` alongside the posture card in a responsive 2-column admin row; shows PostgreSQL and Redis with status dot and pool counters.
 - Added `healthTitle`, `healthDb`, `healthRedis`, `healthPool` locale keys to EN and TR homepage namespaces.
+
+---
+
+### 62. Backend SQL filters for the Users DataGrid
+
+Severity: Low
+
+Status: The Users page DataGrid had no column filters wired to the backend; all filtering was client-side and discarded on pagination.
+
+Related files:
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+- [frontend/src/pages/dashboard/UsersPage.test.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.test.tsx)
+
+Acceptance criteria:
+- Email column: exact-match filter (backed by SHA-256 hash lookup, no ILIKE).
+- Role column: single-select filter using MUI DataGrid's singleSelect type.
+- Filter state is sent to the backend on each query; no client-side re-filter.
+
+State: CLOSED
+
+Status update:
+- Changed DataGrid column `field: "roles"` → `field: "role"` so the filter key matches `q.Get("role")` directly.
+- Email column: `filterOperators: getGridStringOperators().filter(op => op.value === "equals")` — reflects that backend only supports exact hash match.
+- Role column: `type: "singleSelect"`, `valueOptions: AVAILABLE_ROLES` — provides dropdown UI for known roles.
+- ResourceTablePage already passes `filterModel.items` as URL params through its existing `filters` memo.
+
+---
+
+### 63. User own login history in Settings
+
+Severity: Low
+
+Status: Users had no way to review their own recent login activity from the Settings page.
+
+Related files:
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+- [frontend/src/pages/dashboard/SettingsPage.test.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.test.tsx)
+
+Acceptance criteria:
+- New "Login History" tab in Settings visible to all users.
+- Shows a table with columns: Time, Event, Location, Device, Outcome.
+- Paginated (25 per page), loads from `api.listMyAudit` with `SecurityEventsOnly` filter.
+- Non-admin users see tab at index 2; admin users see it at index 3 (System tab is conditional).
+
+State: CLOSED
+
+Status update:
+- Added `historyPage`, `historyEntries`, `historyLoading`, `historyTotal` state (indices 21–24).
+- Added computed `activityTabIndex = isAdmin ? 3 : 2` to handle conditional System tab.
+- Added `useEffect` loading `api.listMyAudit(25, historyPage * 25)` when the activity tab is active.
+- Added Login History tab with table (Time/Event/Location/Device/Outcome) and prev/next pagination.
+- Added 7 tests: admin index, non-admin index, loading state, empty state, entries render, pagination, no-fetch on other tabs.
+- Added locale keys to EN/TR: `tabActivity`, `activityTitle`, `activityDesc`, `activityEmpty`, `activityCount`, `activityColTime`, `activityColEvent`, `activityColLocation`, `activityColDevice`, `activityColOutcome`, `activityPrev`, `activityNext`.
+
+---
+
+### 64. Admin bulk user operations
+
+Severity: Low
+
+Status: Admins had to toggle user status one at a time; no way to activate/deactivate multiple users or export a filtered set.
+
+Related files:
+- [backend/internal/user/repository.go](/home/m/projects/zerotrust/backend/internal/user/repository.go)
+- [backend/internal/user/service.go](/home/m/projects/zerotrust/backend/internal/user/service.go)
+- [backend/internal/admin/handler.go](/home/m/projects/zerotrust/backend/internal/admin/handler.go)
+- [backend/internal/admin/handler_unit_test.go](/home/m/projects/zerotrust/backend/internal/admin/handler_unit_test.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/pages/dashboard/UsersPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.tsx)
+- [frontend/src/pages/dashboard/UsersPage.test.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/UsersPage.test.tsx)
+- [frontend/src/components/ResourceTablePage.tsx](/home/m/projects/zerotrust/frontend/src/components/ResourceTablePage.tsx)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+
+Acceptance criteria:
+- Checkbox selection on the Users DataGrid (up to 200 rows).
+- Bulk activate, bulk deactivate (with last-admin guard), bulk CSV export.
+- Deactivation revokes all sessions for affected users.
+- Caller is silently excluded from bulk deactivation (no self-lockout).
+- Step-up MFA required for bulk status changes.
+
+State: CLOSED
+
+Status update:
+- Added `BulkSetActive(ctx, userIDs, active)` to `user/repository.go` with last-admin guard and `UPDATE users SET is_active = $1 WHERE id = ANY($2::uuid[])` in a transaction.
+- Propagated through `user/service.go` interface and `admin/handler.go` `UserManager` interface.
+- Added `POST /api/v1/admin/users/bulk-status` route (users:update + step-up MFA), validates 1–200 IDs, silently excludes caller, revokes sessions on deactivation.
+- Added 8-subtest `TestBulkSetStatus` to `handler_unit_test.go` (fixed `withClaims` helper using `middleware.ClaimsKey`).
+- Added `checkboxSelection`, `rowSelectionModel`, `onRowSelectionModelChange` props to `ResourceTablePage`.
+- UsersPage: `GridRowSelectionModel` state, conditional bulk toolbar (Activate / Deactivate / Export CSV / Clear), client-side CSV export from `loadedRowsRef`.
+- Added `bulkSetUserStatus` to `api.ts`.
+- Added `bulkSelected`, `bulkActivate`, `bulkDeactivate`, `bulkExport`, `bulkClear`, `bulkActivated`, `bulkDeactivated` locale keys to EN/TR admin namespaces.
+- Added 8 frontend tests: toolbar visibility, activate, deactivate, error, mfa_required silent, clear, export with rows, export with no matching rows.

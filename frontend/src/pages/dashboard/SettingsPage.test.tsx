@@ -713,4 +713,141 @@ describe("SettingsPage page component", () => {
     const html = runRender();
     expect(html).toContain("changePassword.submitting");
   });
+
+  // ── Activity / Login History tab ────────────────────────────────────────────
+
+  it("renders activity tab for admin at index 3 and calls listMyAudit", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "test@example.com", first_name: "John", last_name: "Doe",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    // activityTabIndex for admin = 3
+    stateStore[0] = 3;
+    runRender();
+
+    expect(auditSpy).toHaveBeenCalledWith(25, 0);
+    // historyLoading is set to true synchronously by the effect
+    expect(stateStore[23]).toBe(true);
+  });
+
+  it("renders activity tab for non-admin at index 2 and calls listMyAudit", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    // activityTabIndex for non-admin = 2
+    stateStore[0] = 2;
+    runRender();
+
+    expect(auditSpy).toHaveBeenCalledWith(25, 0);
+  });
+
+  it("renders empty state when no activity entries", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    stateStore[0] = 2;          // activityTabIndex for non-admin
+    stateStore[22] = [];        // historyEntries = []
+    stateStore[23] = false;     // historyLoading = false
+
+    const html = runRender();
+    expect(html).toContain("activityTitle");
+    expect(html).toContain("activityEmpty");
+  });
+
+  it("renders loading spinner on activity tab while fetching", () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    vi.spyOn(api, "listMyAudit").mockReturnValue(new Promise(() => {})); // never resolves
+
+    stateStore[0] = 2;
+    stateStore[23] = true; // historyLoading = true
+
+    const html = runRender();
+    expect(html).toContain("activityTitle");
+    expect(html).toContain("CircularProgress");
+  });
+
+  it("renders history entries with action, outcome, and location", () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    const entries = [
+      {
+        id: "e1", user_id: "u456", user_email: "user@example.com",
+        action: "auth.login", resource: "session", ip_address: "1.2.3.4",
+        user_agent: "Chrome/120",
+        metadata: { outcome: "success", location: { city: "Istanbul", country: "TR" }, client_info: { browser: "Chrome", os: "Windows" } },
+        created_at: "2026-06-20T10:00:00Z",
+      },
+      {
+        id: "e2", user_id: "u456", user_email: null,
+        action: "user.password_changed", resource: "user", ip_address: null,
+        user_agent: null,
+        metadata: { outcome: "failure" },
+        created_at: "2026-06-20T09:00:00Z",
+      },
+    ];
+
+    stateStore[0] = 2;
+    stateStore[22] = entries;   // historyEntries
+    stateStore[23] = false;     // historyLoading
+
+    const html = runRender();
+    expect(html).toContain("Login");           // formatAction("auth.login")
+    expect(html).toContain("Password Changed"); // formatAction("user.password_changed")
+    expect(html).toContain("Istanbul");
+    expect(html).toContain("success");
+    expect(html).toContain("failure");
+  });
+
+  it("shows pagination controls when historyTotal > 25", () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    stateStore[0] = 2;
+    stateStore[22] = [{ id: "x", action: "auth.login", resource: "", user_id: null, user_email: null, ip_address: null, user_agent: null, metadata: null, created_at: "2026-06-20T00:00:00Z" }];
+    stateStore[23] = false;
+    stateStore[24] = 50; // historyTotal > 25 → show pagination
+
+    const html = runRender();
+    expect(html).toContain("activityPrev");
+    expect(html).toContain("activityNext");
+  });
+
+  it("does not call listMyAudit when not on activity tab", () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["user"], locale: "en",
+    } as any);
+    const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+
+    stateStore[0] = 0; // Profile tab — NOT activity tab
+    runRender();
+
+    expect(auditSpy).not.toHaveBeenCalled();
+  });
 });

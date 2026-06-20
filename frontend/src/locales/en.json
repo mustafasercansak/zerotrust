@@ -177,8 +177,8 @@
     "active": "Active",
     "inactive": "Inactive",
     "security": "Security",
-    "totpEnabled": "TOTP enabled",
-    "totpDisabled": "TOTP not set up",
+    "totpEnabled": "Authenticator app enabled",
+    "totpDisabled": "Authenticator app not set up",
     "passkeyCount": "{{count}} passkey(s)",
     "createdAt": "Created",
     "updatedAt": "Modified",
@@ -211,8 +211,6 @@
     "locale": "Language",
     "totpLabel": "TOTP (Authenticator App)",
     "unnamedPasskey": "Unnamed passkey",
-    "totpEnabled": "Authenticator app enabled",
-    "totpDisabled": "Authenticator app not set up",
     "enabled": "Enabled",
     "disabled": "Disabled",
     "passkeys": "Passkeys",
@@ -231,7 +229,14 @@
       "invalid_profile": "First and last name must be 80 characters or fewer.",
       "mfa_required": "This action requires a recent MFA verification.",
       "internal_error": "Server error. Please try again."
-    }
+    },
+    "bulkSelected": "{{count}} selected",
+    "bulkActivate": "Activate",
+    "bulkDeactivate": "Deactivate",
+    "bulkExport": "Export CSV",
+    "bulkClear": "Clear",
+    "bulkActivated": "{{count}} user(s) activated.",
+    "bulkDeactivated": "{{count}} user(s) deactivated."
   },
   "sessions": {
     "title": "Active Sessions",
@@ -600,7 +605,19 @@
         "client_id_taken": "This Client ID is already in use.",
         "internal_error": "Server error. Please try again."
       }
-    }
+    },
+    "tabActivity": "Login History",
+    "activityTitle": "Login History",
+    "activityDesc": "Recent security events for your account.",
+    "activityEmpty": "No recent security events found.",
+    "activityCount": "Showing {{from}}–{{to}} of {{total}}",
+    "activityColTime": "Time",
+    "activityColEvent": "Event",
+    "activityColLocation": "Location / IP",
+    "activityColDevice": "Device",
+    "activityColOutcome": "Outcome",
+    "activityPrev": "Previous",
+    "activityNext": "Next"
   },
   "serviceAccounts": {
     "title": "Service Accounts",

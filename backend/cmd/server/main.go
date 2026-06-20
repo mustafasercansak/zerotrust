@@ -797,6 +797,7 @@ func run(ctx context.Context, cfg config) error {
 			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
 			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Post("/admin/users/bulk-status", adminHandler.BulkSetStatus)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)

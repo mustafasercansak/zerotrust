@@ -493,6 +493,12 @@ export const api = {
         body: JSON.stringify({ is_active: isActive }),
       }),
 
+    bulkSetUserStatus: (userIds: string[], isActive: boolean) =>
+      request<void>("/api/v1/admin/users/bulk-status", {
+        method: "POST",
+        body: JSON.stringify({ user_ids: userIds, is_active: isActive }),
+      }),
+
     listUserSessions: (userId: string) =>
       request<Session[]>(`/api/v1/admin/users/${userId}/sessions`),
 
