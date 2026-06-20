@@ -97,8 +97,10 @@ const PAGES = [
   { name: "security_dashboard",  path: "/dashboard/security",          file: "security_dashboard.png",   title: "Security Dashboard",            waitFor: "text=ZeroTrust" },
   { name: "audit",               path: "/dashboard/audit",             file: "audit.png",                title: "Audit Log",                     waitFor: "text=ZeroTrust" },
   { name: "service_accounts",    path: "/dashboard/service-accounts",  file: "service_accounts.png",     title: "Service Accounts",              waitFor: "text=ZeroTrust" },
-  { name: "oidc_clients",        path: "/dashboard/oidc-clients",      file: "oidc_clients.png",         title: "OIDC Identity Provider",        waitFor: "text=ZeroTrust" },
-  { name: "settings",            path: "/dashboard/settings",          file: "settings.png",             title: "Settings",                      waitFor: "text=ZeroTrust" },
+  { name: "settings_profile",     path: "/dashboard/settings",          file: "settings_profile.png",     title: "Settings - Profile Settings",   waitFor: "text=ZeroTrust" },
+  { name: "settings_security",    path: "/dashboard/settings",          file: "settings_security.png",    title: "Settings - Security & Sessions",waitFor: "text=ZeroTrust" },
+  { name: "settings_system",      path: "/dashboard/settings",          file: "settings_system.png",      title: "Settings - System Settings",    waitFor: "text=ZeroTrust" },
+  { name: "settings_activity",    path: "/dashboard/settings",          file: "settings_activity.png",    title: "Settings - Login History",      waitFor: "text=ZeroTrust" },
 ];
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -234,14 +236,40 @@ const PAGES = [
         } catch (e) {}
       }
 
-      // For settings page, scroll down so locale selector and notifications card are visible
-      if (entry.name === "settings") {
+      // Click correct settings tab based on entry name
+      if (entry.name === "settings_profile") {
         try {
-          // Wait for the profile tab content to load
-          await page.waitForSelector('text="Language & Region"', { timeout: 5000 });
+          const tab = page.locator("#tab-profile");
+          await tab.waitFor({ state: "visible", timeout: 5000 });
+          await tab.click();
+          await page.waitForTimeout(1000);
           // Scroll down slightly to show locale + notification cards
           await page.evaluate(() => window.scrollBy(0, 200));
           await page.waitForTimeout(300);
+        } catch (e) {}
+      }
+      if (entry.name === "settings_security") {
+        try {
+          const tab = page.locator("#tab-security");
+          await tab.waitFor({ state: "visible", timeout: 5000 });
+          await tab.click();
+          await page.waitForTimeout(1000);
+        } catch (e) {}
+      }
+      if (entry.name === "settings_system") {
+        try {
+          const tab = page.locator("#tab-system");
+          await tab.waitFor({ state: "visible", timeout: 5000 });
+          await tab.click();
+          await page.waitForTimeout(1000);
+        } catch (e) {}
+      }
+      if (entry.name === "settings_activity") {
+        try {
+          const tab = page.locator("#tab-activity");
+          await tab.waitFor({ state: "visible", timeout: 5000 });
+          await tab.click();
+          await page.waitForTimeout(1000);
         } catch (e) {}
       }
 
@@ -319,9 +347,24 @@ function generateDocs() {
       description: "ZeroTrust implements the Authorization Code flow with PKCE (S256, RFC 7636). Registered clients receive an authorization code on user consent, exchange it for an Ed25519-signed ID token and access token, and use the `refresh_token` grant (RFC 6749 §6) with `offline_access` scope to obtain long-lived rotating refresh tokens. Tokens can be introspected via `POST /oauth2/introspect` (RFC 7662) and revoked via `POST /oauth2/revoke` (RFC 7009). The `max_age` parameter (OIDC Core §3.1.2.1) enforces re-authentication when a session exceeds a client-specified age. Live profile claims are available at `/oauth2/userinfo`. All consent decisions, token exchanges, rotations, introspections, and revocations are written to the audit log. The discovery document at `/.well-known/openid-configuration` advertises all supported endpoints, scopes, and signing algorithms.",
     },
     {
-      heading: "## Settings",
-      image: "images/settings.png",
-      caption: "Configure session policies, password complexity, MFA enforcement, and other system-wide security settings.",
+      heading: "## Settings — Profile Settings",
+      image: "images/settings_profile.png",
+      caption: "Manage personal profile information, upload an avatar, select language preference, and update password.",
+    },
+    {
+      heading: "## Settings — Security & Sessions",
+      image: "images/settings_security.png",
+      caption: "View and manage active browser sessions across all devices for your account.",
+    },
+    {
+      heading: "## Settings — System Settings",
+      image: "images/settings_system.png",
+      caption: "Configure session policies, password complexity, MFA enforcement, and hardware attestation requirements.",
+    },
+    {
+      heading: "## Settings — Login History",
+      image: "images/settings_activity.png",
+      caption: "Inspect security events and authentication history recorded for your account.",
     },
   ];
 

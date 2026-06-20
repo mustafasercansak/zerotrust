@@ -86,10 +86,34 @@ ZeroTrust implements the Authorization Code flow with PKCE (S256, RFC 7636). Reg
 
 ---
 
-## Settings
+## Settings — Profile Settings
 
-![Configure session policies, password complexity, MFA enforcement, and other system-wide security settings.](images/settings.png)
+![Manage personal profile information, upload an avatar, select language preference, and update password.](images/settings_profile.png)
 
-*Configure session policies, password complexity, MFA enforcement, and other system-wide security settings.*
+*Manage personal profile information, upload an avatar, select language preference, and update password.*
+
+---
+
+## Settings — Security & Sessions
+
+![View and manage active browser sessions across all devices for your account.](images/settings_security.png)
+
+*View and manage active browser sessions across all devices for your account.*
+
+---
+
+## Settings — System Settings
+
+![Configure session policies, password complexity, MFA enforcement, and hardware attestation requirements.](images/settings_system.png)
+
+*Configure session policies, password complexity, MFA enforcement, and hardware attestation requirements.*
+
+---
+
+## Settings — Login History
+
+![Inspect security events and authentication history recorded for your account.](images/settings_activity.png)
+
+*Inspect security events and authentication history recorded for your account.*
 
 ---

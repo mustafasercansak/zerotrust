@@ -1043,14 +1043,50 @@
         </article>
 
         <article class="gallery-card" data-category="account">
-          <button class="gallery-trigger" type="button" data-full="images/settings.png" data-title="Profile and notification settings" aria-label="Open profile settings screenshot">
-            <img src="images/settings.png" alt="Profile settings page with language selector, email notification toggle, and password change form" width="1440" height="813" loading="lazy" decoding="async">
+          <button class="gallery-trigger" type="button" data-full="images/settings_profile.png" data-title="Profile Settings" aria-label="Open profile settings screenshot">
+            <img src="images/settings_profile.png" alt="Profile settings page with avatar upload, language preference, and password change form" width="1440" height="813" loading="lazy" decoding="async">
             <span class="zoom-label" aria-hidden="true">↗ Expand</span>
           </button>
           <div class="gallery-body">
-            <h3>Profile &amp; Notification Settings</h3>
-            <p>Users control their display language, opt in or out of security alert emails, and change their password — all changes are server-audited.</p>
-            <ul class="tag-list"><li class="tag">Locale audit</li><li class="tag">Email alerts</li><li class="tag">i18n</li></ul>
+            <h3>Profile Settings</h3>
+            <p>Users control their personal information, select their display language, upload an avatar, and update their password.</p>
+            <ul class="tag-list"><li class="tag">Profile management</li><li class="tag">i18n</li><li class="tag">Password reset</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="account">
+          <button class="gallery-trigger" type="button" data-full="images/settings_security.png" data-title="Security & Sessions" aria-label="Open security settings screenshot">
+            <img src="images/settings_security.png" alt="Security settings page showing active sessions on different devices" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Security &amp; Sessions Settings</h3>
+            <p>Users view and manage active browser sessions across all devices, with real-time revocation support.</p>
+            <ul class="tag-list"><li class="tag">Active sessions</li><li class="tag">Revocation</li><li class="tag">Real-time</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="administration">
+          <button class="gallery-trigger" type="button" data-full="images/settings_system.png" data-title="System Settings" aria-label="Open system settings screenshot">
+            <img src="images/settings_system.png" alt="System settings page showing session timeouts, complexity rules, and MFA policies" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>System Settings</h3>
+            <p>Configure session policies, password complexity rules, MFA requirements, and physical hardware attestation policies.</p>
+            <ul class="tag-list"><li class="tag">Session policies</li><li class="tag">Password rules</li><li class="tag">Hardware keys</li></ul>
+          </div>
+        </article>
+
+        <article class="gallery-card" data-category="observability">
+          <button class="gallery-trigger" type="button" data-full="images/settings_activity.png" data-title="Settings - Login History" aria-label="Open login history screenshot">
+            <img src="images/settings_activity.png" alt="Login history settings tab showing recent events, times, and outcomes" width="1440" height="813" loading="lazy" decoding="async">
+            <span class="zoom-label" aria-hidden="true">↗ Expand</span>
+          </button>
+          <div class="gallery-body">
+            <h3>Login History &amp; Activity</h3>
+            <p>Users inspect recent security events, times, devices, locations, and outcomes recorded for their account.</p>
+            <ul class="tag-list"><li class="tag">Security events</li><li class="tag">Sign-in history</li><li class="tag">Audit trail</li></ul>
           </div>
         </article>
       </div>
@@ -1206,7 +1242,28 @@
           "Language preference changes are treated as a security signal. Each change is written to the audit log with from/to values and optionally triggers a security alert email.": "Dil tercihi değişiklikleri bir güvenlik sinyali olarak değerlendirilir. Her değişiklik kaynak/hedef değerlerle denetim günlüğüne yazılır ve isteğe bağlı olarak bir güvenlik uyarı e-postası tetikler.",
           "Open GitHub repository": "GitHub deposunu aç",
           "Built by": "Geliştiren",
-          "Source on GitHub": "GitHub'da kaynak kod"
+          "Source on GitHub": "GitHub'da kaynak kod",
+          "Profile Settings": "Profil Ayarları",
+          "Users control their personal information, select their display language, upload an avatar, and update their password.": "Kullanıcılar kişisel bilgilerini yönetir, arayüz görüntüleme dilini seçer, profil resmi yükler ve şifrelerini günceller.",
+          "Profile management": "Profil yönetimi",
+          "Password reset": "Şifre sıfırlama",
+          "Security & Sessions": "Güvenlik & Oturumlar",
+          "Security & Sessions Settings": "Güvenlik & Oturum Ayarları",
+          "Users view and manage active browser sessions across all devices, with real-time revocation support.": "Kullanıcılar tüm cihazlardaki aktif tarayıcı oturumlarını görüntüler ve gerçek zamanlı sonlandırma desteği ile yönetir.",
+          "Active sessions": "Aktif oturumlar",
+          "Revocation": "Sonlandırma",
+          "Real-time": "Gerçek zamanlı",
+          "System Settings": "Sistem Ayarları",
+          "Configure session policies, password complexity rules, MFA requirements, and physical hardware attestation policies.": "Oturum politikalarını, şifre karmaşıklık kurallarını, MFA gereksinimlerini ve fiziksel donanım doğrulama politikalarını yapılandırın.",
+          "Session policies": "Oturum politikaları",
+          "Password rules": "Şifre kuralları",
+          "Hardware keys": "Donanımsal anahtarlar",
+          "Settings - Login History": "Ayarlar - Giriş Geçmişi",
+          "Login History & Activity": "Giriş Geçmişi & Aktivite",
+          "Users inspect recent security events, times, devices, locations, and outcomes recorded for their account.": "Kullanıcılar hesapları için kaydedilen son güvenlik olaylarını, zamanlarını, cihazlarını, konumlarını ve sonuçlarını inceler.",
+          "Security events": "Güvenlik olayları",
+          "Sign-in history": "Giriş geçmişi",
+          "Audit trail": "Denetim izi"
         }
       }
     };
