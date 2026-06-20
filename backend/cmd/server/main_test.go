@@ -730,6 +730,31 @@ func TestRun_ServerStartsAndResponds(t *testing.T) {
 		t.Fatalf("health check status=%d want=200", resp.StatusCode)
 	}
 
+	// Verify health JSON structure
+	var healthBody struct {
+		Status  string `json:"status"`
+		Service string `json:"service"`
+		Checks  struct {
+			Database string `json:"database"`
+			Redis    string `json:"redis"`
+		} `json:"checks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&healthBody); err != nil {
+		t.Fatalf("decode health JSON: %v", err)
+	}
+	if healthBody.Status != "ok" {
+		t.Fatalf("health status=%q want=ok", healthBody.Status)
+	}
+	if healthBody.Service != "zerotrust" {
+		t.Fatalf("health service=%q want=zerotrust", healthBody.Service)
+	}
+	if healthBody.Checks.Database != "ok" {
+		t.Fatalf("health db check=%q want=ok", healthBody.Checks.Database)
+	}
+	if healthBody.Checks.Redis != "ok" {
+		t.Fatalf("health redis check=%q want=ok", healthBody.Checks.Redis)
+	}
+
 	metricsResp, err := client.Get("http://" + addr + "/metrics")
 	if err != nil {
 		t.Fatalf("metrics endpoint: %v", err)

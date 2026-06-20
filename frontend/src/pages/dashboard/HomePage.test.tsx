@@ -114,4 +114,25 @@ describe("HomePage component", () => {
     const html = renderToString(React.createElement(HomePage));
     expect(html).toContain("user-abc-123");
   });
+
+  it("renders adminPostureTitle and healthTitle for admin users", () => {
+    vi.mocked(useMeContext).mockReturnValue({ ...baseMeData, roles: ["admin"] });
+    const html = renderToString(React.createElement(HomePage));
+    expect(html).toContain("adminPostureTitle");
+    expect(html).toContain("healthTitle");
+  });
+
+  it("does not render adminPostureTitle or healthTitle for non-admin users", () => {
+    vi.mocked(useMeContext).mockReturnValue({ ...baseMeData, roles: ["user"] });
+    const html = renderToString(React.createElement(HomePage));
+    expect(html).not.toContain("adminPostureTitle");
+    expect(html).not.toContain("healthTitle");
+  });
+
+  it("renders health skeleton placeholders while loading for admin", () => {
+    vi.mocked(useMeContext).mockReturnValue({ ...baseMeData, roles: ["admin"] });
+    const html = renderToString(React.createElement(HomePage));
+    // health data loads async; initial render shows Skeleton elements
+    expect(html).toContain("MuiSkeleton");
+  });
 });

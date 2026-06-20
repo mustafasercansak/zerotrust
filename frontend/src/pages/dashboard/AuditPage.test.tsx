@@ -320,7 +320,7 @@ describe("AuditPage page component", () => {
     // Resolve trends as empty to hit line 67
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     html = runRender();
-    expect(html).not.toContain("svg"); // TrendsChart returns null when empty
+    expect(html).not.toContain("trendsTitle"); // TrendsChart returns null when empty
   });
 
   it("renders as non-admin showing no trends table", async () => {
@@ -358,7 +358,7 @@ describe("AuditPage page component", () => {
     runRender();
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     const html = runRender();
-    expect(html).not.toContain("svg");
+    expect(html).not.toContain("trendsTitle"); // TrendsChart returns null on fetch failure
   });
 
   it("does not update the trends chart after its refresh effect is cleaned up", async () => {
@@ -380,5 +380,23 @@ describe("AuditPage page component", () => {
     await Promise.resolve();
 
     expect(runRender()).toContain("CircularProgress");
+  });
+
+  it("renders export button for admin users", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u123", roles: ["admin"] } as any);
+    vi.spyOn(api, "listAuditLogTrends").mockResolvedValue([]);
+    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+
+    const html = runRender();
+    expect(html).toContain("export");
+  });
+
+  it("does not render export button for non-admin users", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u123", roles: ["user"] } as any);
+    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+
+    const html = runRender();
+    // export button is admin-only
+    expect(html).not.toContain(">export<");
   });
 });
