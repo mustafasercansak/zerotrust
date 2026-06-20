@@ -92,9 +92,9 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, locale str
 	err = r.db.QueryRow(ctx, `
 		INSERT INTO users (email, email_hash, password_hash, locale)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 	`, encEmail, emailHash, passwordHash, locale).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -126,9 +126,9 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 	err = tx.QueryRow(ctx, `
 		INSERT INTO users (email, email_hash, password_hash, locale)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 	`, encEmail, emailHash, passwordHash, locale).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -165,10 +165,10 @@ func (r *Repository) CreateWithRoles(ctx context.Context, email, passwordHash, l
 func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 		FROM users WHERE id = $1
 	`, id).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -195,6 +195,14 @@ func (r *Repository) UpdateLocale(ctx context.Context, userID, locale string) er
 	return err
 }
 
+func (r *Repository) UpdateNotifySecurityEmails(ctx context.Context, userID string, enabled bool) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE users SET notify_security_emails = $1, updated_at = NOW() WHERE id = $2`,
+		enabled, userID,
+	)
+	return err
+}
+
 func (r *Repository) UpdateProfile(ctx context.Context, userID, firstName, lastName string) (*User, error) {
 	encFirstName, err := r.encrypt(ctx, firstName)
 	if err != nil {
@@ -210,9 +218,9 @@ func (r *Repository) UpdateProfile(ctx context.Context, userID, firstName, lastN
 		UPDATE users
 		SET first_name = $1, last_name = $2, updated_at = NOW()
 		WHERE id = $3
-		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 	`, encFirstName, encLastName, userID).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -235,10 +243,10 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	emailHash := sha256Hex(email)
 	u := &User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		SELECT id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 		FROM users WHERE email_hash = $1
 	`, emailHash).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -561,9 +569,9 @@ func (r *Repository) UpdateAvatar(ctx context.Context, userID, key string, size 
 		UPDATE users
 		SET avatar_object_key = $1, avatar_size = $2, updated_at = NOW()
 		WHERE id = $3
-		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, is_active, created_at, updated_at
+		RETURNING id, email, first_name, last_name, avatar_object_key <> '', password_hash, locale, notify_security_emails, is_active, created_at, updated_at
 	`, key, size, userID).Scan(
-		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.HasAvatar, &u.PasswordHash, &u.Locale, &u.NotifySecurityEmails, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

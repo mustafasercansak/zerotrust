@@ -169,6 +169,45 @@ TEST_DATABASE_URL='postgres://zerotrust:password@localhost:5432/zerotrust_test?s
 go test -count=1 -p 1 ./...
 ```
 
+### Frontend Unit Tests
+
+```bash
+cd frontend && npm test
+```
+
+### E2E Tests (Playwright)
+
+E2E tests use the **system Chrome** already installed on the machine — no browser download required.
+
+**Requirements:**
+- Vite dev server running on `:3000` (started automatically if not running)
+- Backend running on `:8080`
+- Two test users without MFA: one with `user` role, one with `admin` role
+
+```bash
+cd frontend
+
+# Run all 20 E2E tests
+E2E_USER_EMAIL=e2e_user@example.com  E2E_USER_PASSWORD=yourpass \
+E2E_ADMIN_EMAIL=e2e_admin@example.com E2E_ADMIN_PASSWORD=yourpass \
+npm run test:e2e
+
+# Interactive UI mode
+npm run test:e2e:ui
+```
+
+**Test coverage:**
+
+| Suite | Tests | Requires |
+|---|---|---|
+| Login page UI | 3 | Vite only |
+| Protected route redirects | 6 | Backend |
+| Wrong credentials toast | 1 | Backend |
+| Regular user flow | 4 | Backend + user creds |
+| Admin flow | 4 | Backend + admin creds |
+
+Auth state is saved once per role via `storageState` (not repeated per test) to stay below the backend rate limit.
+
 ## Project Structure
 
 ```

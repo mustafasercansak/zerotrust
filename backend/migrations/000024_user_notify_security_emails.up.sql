@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_security_emails BOOLEAN NOT NULL DEFAULT true;

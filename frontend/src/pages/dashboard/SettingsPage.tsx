@@ -63,6 +63,14 @@ export default function SettingsPage() {
   const [adminIdleTimeout, setAdminIdleTimeout] = useState("180");
   const [absoluteTimeout, setAbsoluteTimeout] = useState("28800");
 
+  // Notification preferences — initialised from the /me response
+  const [notifySecurityEmails, setNotifySecurityEmails] = useState(true);
+  const [savingNotify, setSavingNotify] = useState(false);
+
+  useEffect(() => {
+    if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
+  }, [me]);
+
   // Initialize Profile Settings Form
   useEffect(() => {
     if (me) {
@@ -161,6 +169,20 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleNotifyToggle(enabled: boolean) {
+    setNotifySecurityEmails(enabled);
+    setSavingNotify(true);
+    try {
+      await api.updateNotifications(enabled);
+      toast.success(t("notifySecurityEmailsSaved"));
+    } catch {
+      setNotifySecurityEmails(!enabled);
+      toast.error(t("errors.internal_error"));
+    } finally {
+      setSavingNotify(false);
+    }
+  }
+
   const numericProps = (min: number, max: number) => ({
     min, max,
     onInvalid: (e: React.FormEvent<HTMLInputElement>) => {
@@ -213,7 +235,7 @@ export default function SettingsPage() {
 
   return (
     <DashboardPage>
-      <Box sx={{ width: "100%", display: "grid", gap: 3 }}>
+      <Box sx={{ width: "100%", display: "grid", gap: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={activeTab} onChange={(_, val: number) => setActiveTab(val)}>
             <Tab label={t("tabProfile")} id="tab-profile" />
@@ -223,10 +245,10 @@ export default function SettingsPage() {
         </Box>
 
         {activeTab === 0 && (
-          <Box sx={{ display: "grid", gap: 3 }}>
-          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 4, display: "grid", gap: 3 }}>
+          <Box sx={{ display: "grid", gap: 2 }}>
+          <Paper variant="outlined" component="form" onSubmit={handleProfileSave} sx={{ p: 3, display: "grid", gap: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("title")}</Typography>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
               <Avatar
                 src={me.has_avatar ? `/api/v1/users/${me.user_id}/avatar?t=${avatarTimestamp}` : undefined}
                 sx={{ width: 80, height: 80, fontSize: 28 }}
@@ -253,7 +275,7 @@ export default function SettingsPage() {
               </Button>
             </Box>
           </Paper>
-          <Paper variant="outlined" component="form" onSubmit={handlePasswordChange} sx={{ p: 4, display: "grid", gap: 3 }}>
+          <Paper variant="outlined" component="form" onSubmit={handlePasswordChange} sx={{ p: 3, display: "grid", gap: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{tProfile("changePassword.title")}</Typography>
             <TextField
               label={tProfile("changePassword.currentPassword")}
@@ -282,6 +304,21 @@ export default function SettingsPage() {
               </Button>
             </Box>
           </Paper>
+          <Paper variant="outlined" sx={{ p: 3, display: "grid", gap: 1.5 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("notificationsSection")}</Typography>
+            <Typography variant="body2" color="text.secondary">{t("notificationsDesc")}</Typography>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={notifySecurityEmails}
+                  onChange={(e) => handleNotifyToggle(e.target.checked)}
+                  disabled={savingNotify}
+                  color="primary"
+                />
+              }
+              label={t("notifySecurityEmails")}
+            />
+          </Paper>
           </Box>
         )}
 
@@ -292,7 +329,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 2 && isAdmin && (
-          <Paper variant="outlined" component="form" onSubmit={handleSystemSave} sx={{ p: 4, display: "grid", gap: 3 }}>
+          <Paper variant="outlined" component="form" onSubmit={handleSystemSave} sx={{ p: 3, display: "grid", gap: 2.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("title")}</Typography>
             {systemLoading ? (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>

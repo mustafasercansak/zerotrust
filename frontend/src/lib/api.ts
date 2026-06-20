@@ -22,6 +22,7 @@ export interface MeData {
   last_name: string;
   has_avatar: boolean;
   locale: string;
+  notify_security_emails?: boolean;
   roles: string[];
   permissions?: string[];
   created_at: string;
@@ -362,6 +363,12 @@ export const api = {
     request<void>("/api/v1/me/locale", {
       method: "PATCH",
       body: JSON.stringify({ locale }),
+    }),
+
+  updateNotifications: (notifySecurityEmails: boolean) =>
+    request<void>("/api/v1/me/notifications", {
+      method: "PATCH",
+      body: JSON.stringify({ notify_security_emails: notifySecurityEmails }),
     }),
 
   updateProfile: (payload: { first_name: string; last_name: string }) =>

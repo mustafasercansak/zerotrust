@@ -1144,3 +1144,59 @@ Status update:
 - Applied the guard before every backend test migration and destructive fixture cleanup.
 - Removed the session integration test fallback from `TEST_DATABASE_URL` to `DATABASE_URL`.
 - CI continues to use its ephemeral `zerotrust_test` PostgreSQL service, while unsafe local URLs fail before connecting.
+
+### 48. Add end-to-end test suite with Playwright
+
+State: CLOSED
+
+Severity: Medium
+
+Status: The project had comprehensive unit and integration tests but no browser-level E2E coverage.
+
+Related files:
+- [frontend/playwright.config.ts](/home/m/projects/zerotrust/frontend/playwright.config.ts)
+- [frontend/e2e/login-page.spec.ts](/home/m/projects/zerotrust/frontend/e2e/login-page.spec.ts)
+- [frontend/e2e/protected-routes.spec.ts](/home/m/projects/zerotrust/frontend/e2e/protected-routes.spec.ts)
+- [frontend/e2e/auth-flow.spec.ts](/home/m/projects/zerotrust/frontend/e2e/auth-flow.spec.ts)
+- [frontend/e2e/setup/user.setup.ts](/home/m/projects/zerotrust/frontend/e2e/setup/user.setup.ts)
+- [frontend/e2e/setup/admin.setup.ts](/home/m/projects/zerotrust/frontend/e2e/setup/admin.setup.ts)
+
+Acceptance criteria:
+- Use system Chrome (`channel: "chrome"`) to avoid Playwright browser download and Ubuntu system-library dependency issues.
+- Cover login page structure without a backend (pure UI tests).
+- Cover unauthenticated redirect to login for all protected routes.
+- Cover full auth flow: wrong credentials toast, user login/logout, sessions page, admin-only navigation.
+- Keep login attempts below the backend rate limit by using `storageState` setup projects — one login per role, not one per test.
+- Force English locale in post-login tests by intercepting `/api/v1/me` responses (server-side locale overrides localStorage).
+- Vitest must not pick up E2E files; exclude `e2e/**` in `vitest.config.ts`.
+
+Status update:
+- Added `@playwright/test` to devDependencies with `test:e2e` and `test:e2e:ui` scripts.
+- Configured Playwright to use system Chrome via `channel: "chrome"` — no browser download required on Ubuntu.
+- Pre-seeded `locale: en` in `storageState` to ensure English UI before login; post-login locale override via `/api/v1/me` route intercept.
+- Implemented three setup projects (`setup:user`, `setup:admin`, `unauthenticated`) so authenticated tests reuse saved cookies rather than logging in per test.
+- Added 20 E2E tests covering: login page UI (3), protected route redirects (6), wrong credentials (1), regular user flow (4), admin flow (4), and setup (2).
+- All 20 tests pass in 25 seconds; 375 unit tests continue to pass.
+- `e2e/.auth/` added to `.gitignore` to prevent committing session cookies.
+
+### 49. Add password change email notification and per-user notification preferences
+
+State: CLOSED
+
+Severity: Medium
+
+Status: The backend already sends security alert emails for account lockouts and login anomalies, but password change events produced no notification. Users also had no way to configure which security emails they receive.
+
+Related files:
+- [backend/internal/auth/handler.go](/home/m/projects/zerotrust/backend/internal/auth/handler.go)
+- [backend/pkg/mailer/mailer.go](/home/m/projects/zerotrust/backend/pkg/mailer/mailer.go)
+- [backend/migrations/](/home/m/projects/zerotrust/backend/migrations/)
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+
+Acceptance criteria:
+- Send a security alert email when a user successfully changes their password.
+- Add a `notify_security_emails` boolean preference to the users table (default `true`).
+- Respect the preference in all `SendSecurityAlert` call sites — do not send if user has opted out.
+- Expose the preference in the Settings page with a toggle and persist it via a new `PATCH /api/v1/me/notifications` endpoint.
+- Add backend tests for the new endpoint and the opt-out suppression logic.
+- Add frontend translations for the new toggle in both EN and TR locales.

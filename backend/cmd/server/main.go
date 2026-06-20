@@ -431,8 +431,8 @@ func run(ctx context.Context, cfg config) error {
 				w.Header().Set("Content-Type", "application/json")
 				rolesJSON, _ := json.Marshal(roles)
 				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
 			})
 
 			r.Get("/session/policy", func(w http.ResponseWriter, r *http.Request) {
@@ -515,6 +515,34 @@ func run(ctx context.Context, cfg config) error {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
 				}
+				// Notify the user that their password was changed regardless of their
+				// notification preference — this is a security-critical alert.
+				if ml != nil {
+					ip := r.RemoteAddr
+					if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+						ip = strings.SplitN(xf, ",", 2)[0]
+					}
+					_ = ml.SendSecurityAlert(r.Context(), profile.Email,
+						"password_changed", ip, "Unknown",
+						"Your ZeroTrust password was just changed. If this was not you, revoke all sessions immediately from your settings page.",
+					)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+
+			r.Patch("/me/notifications", func(w http.ResponseWriter, r *http.Request) {
+				claims := authmw.ClaimsFrom(r.Context())
+				var req struct {
+					NotifySecurityEmails bool `json:"notify_security_emails"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+					return
+				}
+				if err := userRepo.UpdateNotifySecurityEmails(r.Context(), claims.UserID, req.NotifySecurityEmails); err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
 				w.WriteHeader(http.StatusNoContent)
 			})
 
@@ -587,8 +615,8 @@ func run(ctx context.Context, cfg config) error {
 				w.Header().Set("Content-Type", "application/json")
 				rolesJSON, _ := json.Marshal(roles)
 				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
 			})
 
 			r.Get("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
@@ -635,8 +663,8 @@ func run(ctx context.Context, cfg config) error {
 				w.Header().Set("Content-Type", "application/json")
 				rolesJSON, _ := json.Marshal(roles)
 				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, rolesJSON, permsJSON)
+				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
+					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
 			})
 
 			// Session management — any authenticated user manages their own sessions

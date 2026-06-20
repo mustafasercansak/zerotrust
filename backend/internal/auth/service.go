@@ -242,8 +242,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	if hasAnomaly {
 		slog.Warn("Login anomaly detected", "user_id", u.ID, "type", anomalyType, "details", anomalyDetails)
 
-		// Send security alert email
-		if s.mailer != nil {
+		// Send security alert email (only if user has not opted out).
+		if s.mailer != nil && u.NotifySecurityEmails {
 			var locStr string
 			if s.geoip != nil {
 				if loc, err := s.geoip.Lookup(ip); err == nil {
