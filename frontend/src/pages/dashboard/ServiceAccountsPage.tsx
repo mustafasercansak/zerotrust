@@ -154,8 +154,7 @@ export default function ServiceAccountsPage() {
   const [probeLoading, setProbeLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const fetcher = useCallback((p: PageParams) => api.admin.listServiceAccounts(p), [refresh]);
+  const fetcher = useCallback((p: PageParams) => api.admin.listServiceAccounts(p), []);
 
   const tabs = useMemo(() => [
     { key: "all",      label: tCommon("filterAll") },
