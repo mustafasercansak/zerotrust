@@ -11,6 +11,11 @@
     "filterActive": "Aktif",
     "filterInactive": "Pasif",
     "filterExpired": "Süresi Dolmuş",
+    "viewSessions": "Oturumları Gör",
+    "anomalyWarning": "Son 24 saat içinde yeni veya tanınmayan bir cihazdan giriş yapıldı. Bu siz değilseniz aktif oturumlarınızı inceleyin ve erişimi hemen iptal edin.",
+    "newDeviceWarning": "Yeni cihazdan giriş tespit edildi: {{device}}. Bu siz değilseniz aktif oturumlarınızı inceleyin ve erişimi hemen iptal edin.",
+    "sessionEndedWarning": "Bir oturum sonlandırıldı: {{device}}. Bu siz değilseniz hesabınızı hemen güvenceye alın.",
+    "localeChangedWarning": "Hesabınızın dil ayarı başka bir oturumdan değiştirildi. Bu işlemi siz yapmadıysanız aktif oturumlarınızı inceleyin ve hesabınızı güvenceye alın.",
     "authBootstrap": {
       "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
       "server": "Sunucu oturumunuzu şu anda doğrulayamadı. Lütfen tekrar deneyin."

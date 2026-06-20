@@ -84,9 +84,13 @@ export default function SessionsPage() {
         const added = others.filter((s) => !prev.has(sessionDeviceKey(s)));
         const removed = [...prev.entries()].filter(([k]) => !next.has(k)).map(([, s]) => s);
         if (added.length > 0)
-          toast.warning(tEvents("newSession", { device: parseUA(added[0].user_agent, added[0].device_info) }), { duration: Infinity });
+          window.dispatchEvent(new CustomEvent("session:new_device", {
+            detail: { device: parseUA(added[0].user_agent, added[0].device_info) },
+          }));
         else if (removed.length > 0)
-          toast.info(tEvents("sessionEnded", { device: parseUA(removed[0].user_agent, removed[0].device_info) }), { duration: 5000 });
+          window.dispatchEvent(new CustomEvent("session:ended", {
+            detail: { device: parseUA(removed[0].user_agent, removed[0].device_info) },
+          }));
       }
 
       setRefresh((n) => n + 1);

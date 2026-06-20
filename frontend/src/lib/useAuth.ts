@@ -40,6 +40,8 @@ export function useAuth() {
   const [me, setMe] = useState<MeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<AuthBootstrapError | null>(null);
+  const [localeWarning, setLocaleWarning] = useState(false);
+  const [anomalyWarning, setAnomalyWarning] = useState(false);
 
   function loadMe() {
     setLoading(true);
@@ -50,12 +52,27 @@ export function useAuth() {
         // Locale is the source of truth from the server profile.
         // Changing locale goes through PATCH /api/v1/me/locale (audited).
         if (data.locale && data.locale !== i18n.language) {
+          // If this browser previously had an explicit locale set and the
+          // backend now disagrees, someone changed it from another session.
+          const stored = localStorage.getItem("locale");
+          if (stored && stored !== data.locale) {
+            setLocaleWarning(true);
+          }
           i18n.changeLanguage(data.locale);
           localStorage.setItem("locale", data.locale);
         }
         setMe(data);
         setBootstrapError(null);
         setLoading(false);
+        // Check audit log for login anomalies in the last 24 hours.
+        // Covers the case where user was away and a new device logged in.
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        api.listMyAudit(20, 0).then((result) => {
+          const hasAnomaly = result.data.some(
+            (e) => e.action === "login.anomaly" && e.created_at > since,
+          );
+          if (hasAnomaly) setAnomalyWarning(true);
+        }).catch(() => {});
       })
       .catch((err) => {
         const action = authBootstrapFailureAction(err);
@@ -74,5 +91,9 @@ export function useAuth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { me, setMe, loading, bootstrapError, retry: loadMe };
+  return {
+    me, setMe, loading, bootstrapError, retry: loadMe,
+    localeWarning, dismissLocaleWarning: () => setLocaleWarning(false),
+    anomalyWarning, dismissAnomalyWarning: () => setAnomalyWarning(false),
+  };
 }

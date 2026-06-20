@@ -1104,6 +1104,130 @@ func TestRun_AuthenticatedMeRoutes(t *testing.T) {
 		t.Fatalf("PATCH /me/password valid status=%d want=%d", pwOKResp.StatusCode, http.StatusNoContent)
 	}
 
+	// PATCH /me/notifications: invalid JSON → 400
+	notifBadResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/notifications", `not-json`))
+	if err != nil {
+		t.Fatalf("PATCH /me/notifications bad JSON: %v", err)
+	}
+	notifBadResp.Body.Close()
+	if notifBadResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PATCH /me/notifications bad JSON status=%d want=%d", notifBadResp.StatusCode, http.StatusBadRequest)
+	}
+
+	// PATCH /me/notifications: opt-out → 204
+	notifOffResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/notifications", `{"notify_security_emails":false}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/notifications false: %v", err)
+	}
+	notifOffResp.Body.Close()
+	if notifOffResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/notifications false status=%d want=%d", notifOffResp.StatusCode, http.StatusNoContent)
+	}
+
+	// GET /me reflects notify_security_emails=false
+	meAfterNotifResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me", ""))
+	if err != nil {
+		t.Fatalf("GET /me after notifications update: %v", err)
+	}
+	var meAfterNotif map[string]any
+	if err := json.NewDecoder(meAfterNotifResp.Body).Decode(&meAfterNotif); err != nil {
+		meAfterNotifResp.Body.Close()
+		t.Fatalf("decode /me after notifications: %v", err)
+	}
+	meAfterNotifResp.Body.Close()
+	if meAfterNotifResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /me after notifications status=%d want=%d", meAfterNotifResp.StatusCode, http.StatusOK)
+	}
+	if v, _ := meAfterNotif["notify_security_emails"].(bool); v {
+		t.Fatal("GET /me notify_security_emails should be false after opt-out")
+	}
+
+	// PATCH /me/notifications: opt back in → 204
+	notifOnResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/notifications", `{"notify_security_emails":true}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/notifications true: %v", err)
+	}
+	notifOnResp.Body.Close()
+	if notifOnResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/notifications true status=%d want=%d", notifOnResp.StatusCode, http.StatusNoContent)
+	}
+
+	// PATCH /me/locale: change from "en" (registered) to "tr" → 204 + audit entry
+	localeChangeResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"tr"}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/locale en→tr: %v", err)
+	}
+	localeChangeResp.Body.Close()
+	if localeChangeResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/locale en→tr status=%d want=%d", localeChangeResp.StatusCode, http.StatusNoContent)
+	}
+
+	// GET /me/audit: verify locale_changed entry exists
+	auditResp, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me/audit", ""))
+	if err != nil {
+		t.Fatalf("GET /me/audit: %v", err)
+	}
+	var auditPayload struct {
+		Entries []struct {
+			Action   string         `json:"action"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(auditResp.Body).Decode(&auditPayload); err != nil {
+		auditResp.Body.Close()
+		t.Fatalf("decode /me/audit: %v", err)
+	}
+	auditResp.Body.Close()
+	if auditResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /me/audit status=%d want=%d", auditResp.StatusCode, http.StatusOK)
+	}
+	var foundLocaleChanged bool
+	for _, e := range auditPayload.Entries {
+		if e.Action == "user.locale_changed" {
+			if e.Metadata["from"] == "en" && e.Metadata["to"] == "tr" {
+				foundLocaleChanged = true
+				break
+			}
+		}
+	}
+	if !foundLocaleChanged {
+		t.Fatal("audit log missing user.locale_changed entry with from=en to=tr")
+	}
+
+	// PATCH /me/locale: same locale → 204, no new audit entry
+	localeSameResp, err := client.Do(newAuthedRequest(http.MethodPatch, "/api/v1/me/locale", `{"locale":"tr"}`))
+	if err != nil {
+		t.Fatalf("PATCH /me/locale tr→tr: %v", err)
+	}
+	localeSameResp.Body.Close()
+	if localeSameResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /me/locale tr→tr status=%d want=%d", localeSameResp.StatusCode, http.StatusNoContent)
+	}
+
+	auditResp2, err := client.Do(newAuthedRequest(http.MethodGet, "/api/v1/me/audit", ""))
+	if err != nil {
+		t.Fatalf("GET /me/audit after same-locale: %v", err)
+	}
+	var auditPayload2 struct {
+		Entries []struct {
+			Action string `json:"action"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(auditResp2.Body).Decode(&auditPayload2); err != nil {
+		auditResp2.Body.Close()
+		t.Fatalf("decode /me/audit after same-locale: %v", err)
+	}
+	auditResp2.Body.Close()
+	var localeChangedCount int
+	for _, e := range auditPayload2.Entries {
+		if e.Action == "user.locale_changed" {
+			localeChangedCount++
+		}
+	}
+	if localeChangedCount != 1 {
+		t.Fatalf("expected exactly 1 locale_changed audit entry, got %d", localeChangedCount)
+	}
+
 	cancel()
 	select {
 	case err := <-runErr:

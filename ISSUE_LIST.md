@@ -1200,3 +1200,23 @@ Acceptance criteria:
 - Expose the preference in the Settings page with a toggle and persist it via a new `PATCH /api/v1/me/notifications` endpoint.
 - Add backend tests for the new endpoint and the opt-out suppression logic.
 - Add frontend translations for the new toggle in both EN and TR locales.
+
+State: CLOSED
+
+---
+
+### 50. Track locale changes in audit log and send security alert
+
+Severity: Medium
+
+Status: In a Zero Trust model, a user's interface language is a stable behavioural baseline. An unexpected locale switch — especially to a foreign language — can indicate account compromise. Previously, locale changes were silently persisted with no audit trail.
+
+Related files:
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+
+Acceptance criteria:
+- When `PATCH /me/locale` changes the locale to a different value, write a `user.locale_changed` entry to the audit log with `from` and `to` fields.
+- Send a `locale_changed` security alert email to the user (respecting `notify_security_emails` preference).
+- No audit entry or email is written when the submitted locale is the same as the current one.
+
+State: CLOSED

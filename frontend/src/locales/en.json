@@ -11,6 +11,11 @@
     "filterActive": "Active",
     "filterInactive": "Inactive",
     "filterExpired": "Expired",
+    "viewSessions": "View Sessions",
+    "anomalyWarning": "A sign-in from a new or unrecognised device was detected in the last 24 hours. If this wasn't you, review your active sessions and revoke access immediately.",
+    "newDeviceWarning": "New sign-in detected: {{device}}. If this wasn't you, review your active sessions and revoke access immediately.",
+    "sessionEndedWarning": "A session was terminated: {{device}}. If this wasn't you, secure your account immediately.",
+    "localeChangedWarning": "Your account's language setting was changed from another session. If this wasn't you, review your active sessions and secure your account.",
     "authBootstrap": {
       "network": "We could not reach the server. Check your connection and try again.",
       "server": "The server could not verify your session right now. Please try again."

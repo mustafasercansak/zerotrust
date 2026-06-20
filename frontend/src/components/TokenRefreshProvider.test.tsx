@@ -331,7 +331,9 @@ describe("TokenRefreshProvider component", () => {
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
       expect(listSpy).toHaveBeenCalledTimes(2);
-      expect(toast.warning).toHaveBeenCalledWith("newSession", expect.any(Object));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device" }),
+      );
     });
 
     // Trigger SSE "change" message for s4
@@ -350,7 +352,9 @@ describe("TokenRefreshProvider component", () => {
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
       expect(listSpy).toHaveBeenCalledTimes(5);
-      expect(toast.info).toHaveBeenCalledWith("sessionEnded", expect.any(Object));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:ended" }),
+      );
     });
   });
 
@@ -432,23 +436,23 @@ describe("TokenRefreshProvider component", () => {
 
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
-      expect(toast.warning).toHaveBeenLastCalledWith("newSession", expect.objectContaining({
-        description: "Firefox",
-      }));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device", detail: { device: "Firefox" } }),
+      );
     });
 
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
-      expect(toast.warning).toHaveBeenLastCalledWith("newSession", expect.objectContaining({
-        description: "Windows 11 x64",
-      }));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device", detail: { device: "Windows 11 x64" } }),
+      );
     });
 
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
-      expect(toast.warning).toHaveBeenLastCalledWith("newSession", expect.objectContaining({
-        description: "Chrome 120 — macOS 14 arm64\nIP: 10.0.0.8",
-      }));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device", detail: { device: "Chrome 120 — macOS 14 arm64 — IP: 10.0.0.8" } }),
+      );
     });
   });
 
@@ -496,16 +500,16 @@ describe("TokenRefreshProvider component", () => {
 
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
-      expect(toast.warning).toHaveBeenLastCalledWith("newSession", expect.objectContaining({
-        description: "Unknown device",
-      }));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device", detail: { device: "Unknown device" } }),
+      );
     });
 
     MockEventSource.lastInstance?.onmessage?.({ data: "change" });
     await vi.waitFor(() => {
-      expect(toast.info).toHaveBeenLastCalledWith("sessionEnded", expect.objectContaining({
-        description: "Unknown device\nIP: 8.8.8.8",
-      }));
+      expect(mockDispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:ended", detail: { device: "Unknown device — IP: 8.8.8.8" } }),
+      );
     });
   });
 

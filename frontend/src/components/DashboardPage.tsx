@@ -32,8 +32,7 @@ export function DashboardPage({
       sx={{
         display: "flex",
         flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
+        minHeight: "100%",
         px: 4,
         py: 3,
         gap: 2,

@@ -35,8 +35,10 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { i18n } = useTranslation();
-  const { me, setMe, loading, bootstrapError, retry } = useAuth();
+  const { me, setMe, loading, bootstrapError, retry, localeWarning, dismissLocaleWarning, anomalyWarning, dismissAnomalyWarning } = useAuth();
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+  const [newDeviceWarning, setNewDeviceWarning] = useState<string | null>(null);
+  const [sessionEndedWarning, setSessionEndedWarning] = useState<string | null>(null);
 
   // Defined with useCallback so useIdleTimeout receives a stable reference
   // and can be called before the conditional early-returns (Rules of Hooks).
@@ -59,6 +61,23 @@ export default function DashboardLayout() {
       window.removeEventListener("me:updated", handleMeUpdated);
     };
   }, [setMe]);
+
+  useEffect(() => {
+    const handleNewDevice = (e: Event) => {
+      const customEvent = e as CustomEvent<{ device: string }>;
+      setNewDeviceWarning(customEvent.detail.device);
+    };
+    const handleSessionEnded = (e: Event) => {
+      const customEvent = e as CustomEvent<{ device: string }>;
+      setSessionEndedWarning(customEvent.detail.device);
+    };
+    window.addEventListener("session:new_device", handleNewDevice);
+    window.addEventListener("session:ended", handleSessionEnded);
+    return () => {
+      window.removeEventListener("session:new_device", handleNewDevice);
+      window.removeEventListener("session:ended", handleSessionEnded);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -285,7 +304,54 @@ export default function DashboardLayout() {
         </Box>
 
         {/* ── Page content ──────────────────────────────────────────── */}
-        <Box component="main" sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <Box component="main" sx={{ flex: 1, minWidth: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+          {anomalyWarning && (
+            <Alert
+              severity="error"
+              onClose={dismissAnomalyWarning}
+              sx={{ borderRadius: 0, flexShrink: 0 }}
+              action={
+                <Button color="inherit" size="small" onClick={() => { dismissAnomalyWarning(); navigate("/dashboard/sessions"); }}>
+                  {tCommon("viewSessions")}
+                </Button>
+              }
+            >
+              {tCommon("anomalyWarning")}
+            </Alert>
+          )}
+          {newDeviceWarning && (
+            <Alert
+              severity="error"
+              onClose={() => setNewDeviceWarning(null)}
+              sx={{ borderRadius: 0, flexShrink: 0 }}
+              action={
+                <Button color="inherit" size="small" onClick={() => { setNewDeviceWarning(null); navigate("/dashboard/sessions"); }}>
+                  {tCommon("viewSessions")}
+                </Button>
+              }
+            >
+              {tCommon("newDeviceWarning", { device: newDeviceWarning })}
+            </Alert>
+          )}
+          {sessionEndedWarning && (
+            <Alert
+              severity="warning"
+              onClose={() => setSessionEndedWarning(null)}
+              sx={{ borderRadius: 0, flexShrink: 0 }}
+              action={
+                <Button color="inherit" size="small" onClick={() => { setSessionEndedWarning(null); navigate("/dashboard/sessions"); }}>
+                  {tCommon("viewSessions")}
+                </Button>
+              }
+            >
+              {tCommon("sessionEndedWarning", { device: sessionEndedWarning })}
+            </Alert>
+          )}
+          {localeWarning && (
+            <Alert severity="warning" onClose={dismissLocaleWarning} sx={{ borderRadius: 0, flexShrink: 0 }}>
+              {tCommon("localeChangedWarning")}
+            </Alert>
+          )}
           <Suspense
             fallback={
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>

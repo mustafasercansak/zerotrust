@@ -85,28 +85,13 @@ export default function TokenRefreshProvider({ children }: { children: React.Rea
 
         if (added.length > 0) {
           const s = added[0];
-          // Persistent toast — stays until the user manually closes it.
-          toast.warning(t("newSession"), {
-            duration: Infinity,
-            description: [
-              deviceLabel(s),
-              s.ip_address ? `IP: ${s.ip_address}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          });
+          const device = [deviceLabel(s), s.ip_address ? `IP: ${s.ip_address}` : ""].filter(Boolean).join(" — ");
+          window.dispatchEvent(new CustomEvent("session:new_device", { detail: { device } }));
           window.dispatchEvent(new Event("sessions:changed"));
         } else if (removed.length > 0) {
           const s = removed[0];
-          toast.info(t("sessionEnded"), {
-            duration: 5000,
-            description: [
-              deviceLabel(s),
-              s.ip_address ? `IP: ${s.ip_address}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          });
+          const device = [deviceLabel(s), s.ip_address ? `IP: ${s.ip_address}` : ""].filter(Boolean).join(" — ");
+          window.dispatchEvent(new CustomEvent("session:ended", { detail: { device } }));
           window.dispatchEvent(new Event("sessions:changed"));
         }
       } catch (err: unknown) {

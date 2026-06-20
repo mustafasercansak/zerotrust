@@ -468,9 +468,37 @@ func run(ctx context.Context, cfg config) error {
 					http.Error(w, `{"error":"invalid_locale"}`, http.StatusBadRequest)
 					return
 				}
+				existing, err := userRepo.FindByID(r.Context(), claims.UserID)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
 				if err := userRepo.UpdateLocale(r.Context(), claims.UserID, req.Locale); err != nil {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
+				}
+				if existing.Locale != req.Locale {
+					ip := r.RemoteAddr
+					if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+						ip = strings.SplitN(xf, ",", 2)[0]
+					}
+					uid := claims.UserID
+					_ = auditRepo.Log(r.Context(), audit.Entry{
+						UserID:    &uid,
+						Action:    "user.locale_changed",
+						Resource:  "user",
+						IPAddress: ip,
+						Metadata: map[string]any{
+							"from": existing.Locale,
+							"to":   req.Locale,
+						},
+					})
+					if ml != nil && existing.NotifySecurityEmails {
+						_ = ml.SendSecurityAlert(r.Context(), existing.Email,
+							"locale_changed", ip, "Unknown",
+							fmt.Sprintf("Your ZeroTrust interface language was changed from %q to %q. If this was not you, review your account immediately.", existing.Locale, req.Locale),
+						)
+					}
 				}
 				w.WriteHeader(http.StatusNoContent)
 			})

@@ -322,6 +322,10 @@ describe("SessionsPage page component", () => {
     const listSpy = vi.spyOn(api, "listSessions").mockImplementation(async () => {
       return mockData;
     });
+    if (!window.dispatchEvent) {
+      Object.defineProperty(window, "dispatchEvent", { value: vi.fn(), writable: true });
+    }
+    const dispatchEventSpy = vi.spyOn(window, "dispatchEvent");
 
     runRender();
     await Promise.resolve();
@@ -361,7 +365,9 @@ describe("SessionsPage page component", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(toast.warning).toHaveBeenCalled();
+    expect(dispatchEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "session:new_device" }),
+    );
 
     // 2. Remove session s3
     mockData = getSessionsMockData();
@@ -374,7 +380,9 @@ describe("SessionsPage page component", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(toast.info).toHaveBeenCalled();
+    expect(dispatchEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "session:ended" }),
+    );
   });
 
   it("handles revoking current session", async () => {

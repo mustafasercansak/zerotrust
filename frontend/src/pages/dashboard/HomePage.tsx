@@ -125,13 +125,10 @@ export default function HomePage() {
   return (
     <Box
       sx={{
-        height: "100%",
-        overflow: "auto",
         p: { xs: 2, sm: 4 },
         display: "flex",
         flexDirection: "column",
         gap: 2.5,
-        maxWidth: 780,
       }}
     >
       {/* ── Identity card ── */}
