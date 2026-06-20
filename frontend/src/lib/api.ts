@@ -41,6 +41,8 @@ export interface UserData {
   created_at: string;
   updated_at: string;
   active_sessions: number;
+  mfa_enabled: boolean;
+  passkey_count: number;
 }
 
 export class ApiError extends Error {

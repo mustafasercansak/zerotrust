@@ -190,15 +190,21 @@ export default function SessionsPage() {
         const stepUpLabel = stepUpFor
           ? tAudit(`step_up_for.${stepUpFor}`, { defaultValue: stepUpFor })
           : undefined;
+        const localeFrom = row.metadata?.from as string | undefined;
+        const localeTo = row.metadata?.to as string | undefined;
+        const localeDetail = row.action === "user.locale_changed" && localeFrom && localeTo
+          ? `${localeFrom.toUpperCase()} → ${localeTo.toUpperCase()}`
+          : undefined;
+        const subtitle = stepUpLabel ?? localeDetail;
         return (
           <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
             <Typography variant="body2">{label}</Typography>
-            {stepUpLabel && (
+            {subtitle && (
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
-                → {stepUpLabel}
+                {stepUpLabel ? "→ " : ""}{subtitle}
               </Typography>
             )}
-            {isTranslated && !stepUpLabel && (
+            {!isTranslated && !subtitle && (
               <Typography variant="caption" color="text.disabled" sx={{ fontFamily: "monospace", fontSize: 10 }}>
                 {row.action}
               </Typography>
@@ -276,38 +282,42 @@ export default function SessionsPage() {
         </Tabs>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: "hidden", display: tab === 0 ? "flex" : "none", flexDirection: "column" }}>
-        <ResourceTablePage
-          columns={sessionColumns}
-          fetcher={sessionFetcher}
-          getRowId={(s) => s.id}
-          defaultSortKey="last_used_at"
-          defaultSortDir="desc"
-          emptyMessage={t("noSessions")}
-          refreshSignal={refresh}
-          action={
-            <Button variant="outlined" color="error" size="small" onClick={handleRevokeOthers}
-              disabled={revokingAll || otherSessionCount === 0}>
-              {t("signOutOthers")}
-            </Button>
-          }
-          pageSizeOptions={[10, 25, 50]}
-          defaultPageSize={25}
-        />
-      </Box>
+      {tab === 0 && (
+        <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <ResourceTablePage
+            columns={sessionColumns}
+            fetcher={sessionFetcher}
+            getRowId={(s) => s.id}
+            defaultSortKey="last_used_at"
+            defaultSortDir="desc"
+            emptyMessage={t("noSessions")}
+            refreshSignal={refresh}
+            action={
+              <Button variant="outlined" color="error" size="small" onClick={handleRevokeOthers}
+                disabled={revokingAll || otherSessionCount === 0}>
+                {t("signOutOthers")}
+              </Button>
+            }
+            pageSizeOptions={[10, 25, 50]}
+            defaultPageSize={25}
+          />
+        </Box>
+      )}
 
-      <Box sx={{ flex: 1, overflow: "hidden", display: tab === 1 ? "flex" : "none", flexDirection: "column" }}>
-        <ResourceTablePage
-          columns={auditColumns}
-          fetcher={auditFetcher}
-          getRowId={(e) => e.id}
-          defaultSortKey="created_at"
-          defaultSortDir="desc"
-          emptyMessage={t("noHistory")}
-          pageSizeOptions={[25, 50, 100]}
-          defaultPageSize={25}
-        />
-      </Box>
+      {tab === 1 && (
+        <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <ResourceTablePage
+            columns={auditColumns}
+            fetcher={auditFetcher}
+            getRowId={(e) => e.id}
+            defaultSortKey="created_at"
+            defaultSortDir="desc"
+            emptyMessage={t("noHistory")}
+            pageSizeOptions={[25, 50, 100]}
+            defaultPageSize={25}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

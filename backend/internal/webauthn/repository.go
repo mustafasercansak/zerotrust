@@ -93,6 +93,31 @@ func (r *Repository) Count(ctx context.Context, userID string) (int, error) {
 	return n, err
 }
 
+// CountByUsers returns the passkey count per user ID for the given slice.
+func (r *Repository) CountByUsers(ctx context.Context, userIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT user_id, COUNT(*) FROM user_webauthn_credentials
+		WHERE user_id = ANY($1) GROUP BY user_id
+	`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 // UpdateOnLogin refreshes the stored credential after a successful assertion,
 // persisting the new signature counter and last-used timestamp.
 func (r *Repository) UpdateOnLogin(ctx context.Context, credentialID string, data []byte, signCount int64) error {

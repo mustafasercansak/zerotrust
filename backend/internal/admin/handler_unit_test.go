@@ -74,7 +74,7 @@ func TestToResponseHandlesNilRoles(t *testing.T) {
 		Roles:     nil,
 	}
 
-	resp := toResponse(u, 3)
+	resp := toResponse(u, 3, true, 2)
 
 	if resp.CreatedAt != "2026-01-02T03:04:05Z" {
 		t.Fatalf("created_at=%q", resp.CreatedAt)
@@ -457,6 +457,14 @@ func (m *mockMfaRepo) IsEnabledForUser(_ context.Context, _ string) (bool, error
 	return m.enabled, m.err
 }
 
+func (m *mockMfaRepo) EnabledForUsers(_ context.Context, userIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(userIDs))
+	for _, id := range userIDs {
+		out[id] = m.enabled
+	}
+	return out, m.err
+}
+
 type mockWebAuthnRepo struct {
 	creds []webauthn.CredentialMeta
 	err   error
@@ -464,6 +472,14 @@ type mockWebAuthnRepo struct {
 
 func (m *mockWebAuthnRepo) ListMeta(_ context.Context, _ string) ([]webauthn.CredentialMeta, error) {
 	return m.creds, m.err
+}
+
+func (m *mockWebAuthnRepo) CountByUsers(_ context.Context, userIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(userIDs))
+	for _, id := range userIDs {
+		out[id] = len(m.creds)
+	}
+	return out, m.err
 }
 
 func TestGetUserMfa(t *testing.T) {

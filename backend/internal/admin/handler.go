@@ -37,10 +37,12 @@ type UserManager interface {
 
 type MfaRepo interface {
 	IsEnabledForUser(ctx context.Context, userID string) (bool, error)
+	EnabledForUsers(ctx context.Context, userIDs []string) (map[string]bool, error)
 }
 
 type WebAuthnRepo interface {
 	ListMeta(ctx context.Context, userID string) ([]webauthn.CredentialMeta, error)
+	CountByUsers(ctx context.Context, userIDs []string) (map[string]int, error)
 }
 
 type Handler struct {
@@ -71,6 +73,8 @@ type userResponse struct {
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
 	ActiveSessions int      `json:"active_sessions"`
+	MfaEnabled     bool     `json:"mfa_enabled"`
+	PasskeyCount   int      `json:"passkey_count"`
 }
 
 type pagedResponse[T any] struct {
@@ -78,7 +82,7 @@ type pagedResponse[T any] struct {
 	Total int `json:"total"`
 }
 
-func toResponse(u *user.User, activeSessions int) userResponse {
+func toResponse(u *user.User, activeSessions int, mfaEnabled bool, passkeyCount int) userResponse {
 	roles := u.Roles
 	if roles == nil {
 		roles = []string{}
@@ -95,6 +99,8 @@ func toResponse(u *user.User, activeSessions int) userResponse {
 		CreatedAt:      u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:      u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		ActiveSessions: activeSessions,
+		MfaEnabled:     mfaEnabled,
+		PasskeyCount:   passkeyCount,
 	}
 }
 
@@ -114,13 +120,28 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Collect user IDs for batch security-posture lookups.
+	userIDs := make([]string, len(result.Users))
+	for i, u := range result.Users {
+		userIDs[i] = u.ID
+	}
+
+	var mfaEnabled map[string]bool
+	if h.mfa != nil {
+		mfaEnabled, _ = h.mfa.EnabledForUsers(r.Context(), userIDs)
+	}
+	var passkeyCounts map[string]int
+	if h.webauthn != nil {
+		passkeyCounts, _ = h.webauthn.CountByUsers(r.Context(), userIDs)
+	}
+
 	data := make([]userResponse, len(result.Users))
 	for i, u := range result.Users {
-		count := 0
+		sessionCount := 0
 		if result.ActiveSessions != nil {
-			count = result.ActiveSessions[u.ID]
+			sessionCount = result.ActiveSessions[u.ID]
 		}
-		data[i] = toResponse(u, count)
+		data[i] = toResponse(u, sessionCount, mfaEnabled[u.ID], passkeyCounts[u.ID])
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pagedResponse[userResponse]{Data: data, Total: result.Total})
@@ -184,7 +205,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(toResponse(u, 0))
+	json.NewEncoder(w).Encode(toResponse(u, 0, false, 0))
 }
 
 type updateRolesRequest struct {

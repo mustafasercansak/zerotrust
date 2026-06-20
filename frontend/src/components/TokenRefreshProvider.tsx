@@ -51,8 +51,12 @@ export default function TokenRefreshProvider({ children }: { children: React.Rea
   const previousSessions = useRef<Map<string, Session> | null>(null);
   const syncInProgress = useRef(false);
 
+  // Only re-run when transitioning between auth and dashboard, not on every
+  // route change — otherwise SSE reconnects and scheduleRefresh fires on every
+  // navigation, rapidly exhausting the per-user rate limit.
+  const isAuthPage = pathname.includes("/auth/");
+
   useEffect(() => {
-    const isAuthPage = pathname.includes("/auth/");
     let events: EventSource | null = null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -143,7 +147,7 @@ export default function TokenRefreshProvider({ children }: { children: React.Rea
       if (pollTimer !== null) clearInterval(pollTimer);
       cancelRefresh();
     };
-  }, [pathname, navigate, t]);
+  }, [isAuthPage, navigate, t]);
 
   return <>{children}</>;
 }

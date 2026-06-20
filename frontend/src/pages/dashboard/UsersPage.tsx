@@ -682,6 +682,33 @@ export default function UsersPage() {
         ),
     },
     {
+      field: "mfa_enabled", headerName: t("security"), minWidth: 140, flex: 0.75,
+      sortable: false, filterable: false,
+      renderCell: ({ row }) => (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, height: "100%" }}>
+          <Tooltip title={row.mfa_enabled ? t("totpEnabled") : t("totpDisabled")}>
+            <Chip
+              size="small"
+              color={row.mfa_enabled ? "success" : "default"}
+              label="TOTP"
+              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.75 } }}
+            />
+          </Tooltip>
+          {row.passkey_count > 0 && (
+            <Tooltip title={t("passkeyCount", { count: row.passkey_count })}>
+              <Chip
+                size="small"
+                color="primary"
+                icon={<SecurityIcon sx={{ fontSize: "12px !important" }} />}
+                label={row.passkey_count}
+                sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
+              />
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+    {
       field: "created_at", headerName: t("createdAt"), minWidth: 140, flex: 0.7,
       renderCell: ({ row }) => (
         <Typography variant="caption" color="text.secondary">{formatDate(row.created_at, i18n.language)}</Typography>

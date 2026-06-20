@@ -196,7 +196,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
       {error && (
         <Alert severity="error" sx={{ flexShrink: 0 }}>{error}</Alert>
       )}
-      <Box sx={{ flex: 1, minHeight: 0 }}>
+      <Box sx={{ flex: 1, minHeight: 0, height: "100%" }}>
         <DataGrid
           rowHeight={rowHeight}
           rows={rows}
@@ -224,6 +224,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
           onRowClick={onRowClick}
           localeText={localeText}
           sx={{
+            height: "100%",
             borderColor: "divider",
             bgcolor: "background.paper",
             "& .MuiDataGrid-columnHeaders": { bgcolor: "#111827" },

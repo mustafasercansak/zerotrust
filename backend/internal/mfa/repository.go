@@ -107,6 +107,30 @@ func (r *Repository) IsEnabledForUser(ctx context.Context, userID string) (bool,
 	return rec.EnabledAt != nil, nil
 }
 
+// EnabledForUsers returns a set of user IDs (from the given slice) that have TOTP enabled.
+func (r *Repository) EnabledForUsers(ctx context.Context, userIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT user_id FROM user_mfa
+		WHERE user_id = ANY($1) AND enabled_at IS NOT NULL
+	`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // SecretEnc returns the active encrypted TOTP secret, or ErrNotFound.
 func (r *Repository) SecretEnc(ctx context.Context, userID string) (string, error) {
 	rec, err := r.find(ctx, userID)
