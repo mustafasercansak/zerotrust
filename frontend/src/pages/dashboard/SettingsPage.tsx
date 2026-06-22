@@ -119,6 +119,7 @@ export default function SettingsPage() {
   // Webhook alerts state (appended last to preserve test state indices)
   const [webhookEnabled, setWebhookEnabled] = useState("false");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [testingWebhook, setTestingWebhook] = useState(false);
 
   // IP allowlist (appended last to preserve test state indices)
   const [ipAllowlist, setIpAllowlist] = useState("");
@@ -281,6 +282,22 @@ export default function SettingsPage() {
       (e.target as HTMLInputElement).setCustomValidity("");
     },
   });
+
+  async function handleTestWebhook() {
+    if (!webhookUrl) {
+      toast.info(t("webhookTestNoUrl"));
+      return;
+    }
+    setTestingWebhook(true);
+    try {
+      await api.admin.testWebhook(webhookUrl);
+      toast.success(t("webhookTestSuccess"));
+    } catch {
+      toast.error(t("webhookTestFailed"));
+    } finally {
+      setTestingWebhook(false);
+    }
+  }
 
   async function handleSystemSave(e: React.FormEvent) {
     e.preventDefault();
@@ -714,16 +731,27 @@ export default function SettingsPage() {
                       }
                       label={t("webhookEnabled")}
                     />
-                    <TextField
-                      label={t("webhookUrlInput")}
-                      type="url"
-                      value={webhookUrl}
-                      onChange={(e) => setWebhookUrl(e.target.value)}
-                      disabled={webhookEnabled !== "true"}
-                      placeholder={t("webhookUrlPlaceholder")}
-                      size="small"
-                      fullWidth
-                    />
+                    <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+                      <TextField
+                        label={t("webhookUrlInput")}
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        disabled={webhookEnabled !== "true"}
+                        placeholder={t("webhookUrlPlaceholder")}
+                        size="small"
+                        fullWidth
+                      />
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={handleTestWebhook}
+                        disabled={testingWebhook || webhookEnabled !== "true" || !webhookUrl}
+                        sx={{ whiteSpace: "nowrap", mt: "1px", height: 40 }}
+                      >
+                        {testingWebhook ? t("webhookTesting") : t("webhookTest")}
+                      </Button>
+                    </Box>
                   </Box>
                 </Box>
 

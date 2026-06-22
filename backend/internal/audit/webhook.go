@@ -67,6 +67,16 @@ func isHighRiskEvent(e Entry) bool {
 	return false
 }
 
+// TestWebhook sends a synthetic test payload to url to verify delivery.
+func (r *Repository) TestWebhook(ctx context.Context, url string) error {
+	return r.sendWebhook(ctx, url, Entry{
+		Action:    "system.webhook_test",
+		Resource:  "settings",
+		IPAddress: "0.0.0.0",
+		Metadata:  map[string]any{"outcome": "success", "note": "This is a test alert from ZeroTrust."},
+	})
+}
+
 // sendWebhook dispatches the audit log details to a Slack-compatible webhook URL.
 func (r *Repository) sendWebhook(ctx context.Context, url string, e Entry) error {
 	outcome := "success"

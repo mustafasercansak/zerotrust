@@ -874,6 +874,28 @@ func run(ctx context.Context, cfg config) error {
 			// System settings — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/settings", settingsHandler.List)
 			r.With(authmw.RequireRole("admin"), stepUpMFA).Patch("/admin/settings", settingsHandler.Update)
+			r.With(authmw.RequireRole("admin")).Post("/admin/settings/webhook/test", func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					URL string `json:"url"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if body.URL == "" {
+					body.URL = settingsCache.GetString(r.Context(), "webhook_url", "")
+				}
+				if body.URL == "" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]string{"error": "webhook_url_required"})
+					return
+				}
+				if err := auditRepo.TestWebhook(r.Context(), body.URL); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					json.NewEncoder(w).Encode(map[string]string{"error": "webhook_delivery_failed"})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
 
 			// OIDC Clients — admin role only
 			r.With(authmw.RequireRole("admin")).Get("/admin/oidc/clients", oidcHandler.ListClients)

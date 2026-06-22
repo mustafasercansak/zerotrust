@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
 // Mock react-router-dom and react-i18next
@@ -159,6 +159,7 @@ describe("SettingsPage page component", () => {
     capturedSwitchChanges.length = 0;
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.info).mockClear();
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     mockRunWithStepUp.mockClear();
     mockRunWithStepUp.mockImplementation(async (action: any) => action());
@@ -849,5 +850,71 @@ describe("SettingsPage page component", () => {
     runRender();
 
     expect(auditSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Webhook test button ─────────────────────────────────────────────────────
+
+  it("calls testWebhook and shows success toast on delivery", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const testSpy = vi.spyOn(api.admin, "testWebhook").mockResolvedValue(undefined);
+
+    stateStore[0] = 2;   // System tab
+    stateStore[10] = false; // systemLoading = false so content renders
+    stateStore[26] = "true";
+    stateStore[27] = "https://hooks.slack.com/services/test";
+    runRender();
+
+    // On the system tab the only onClick button is the webhook test button
+    expect(capturedButtonClicks[0]).toBeDefined();
+    await capturedButtonClicks[0]();
+
+    expect(testSpy).toHaveBeenCalledWith("https://hooks.slack.com/services/test");
+    expect(toast.success).toHaveBeenCalledWith("webhookTestSuccess");
+  });
+
+  it("shows error toast when testWebhook delivery fails", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "testWebhook").mockRejectedValue(new ApiError("webhook_delivery_failed"));
+
+    stateStore[0] = 2;
+    stateStore[10] = false;
+    stateStore[26] = "true";
+    stateStore[27] = "https://hooks.slack.com/services/test";
+    runRender();
+
+    await capturedButtonClicks[0]();
+
+    expect(toast.error).toHaveBeenCalledWith("webhookTestFailed");
+  });
+
+  it("shows info toast and skips API call when testWebhook URL is empty", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const testSpy = vi.spyOn(api.admin, "testWebhook");
+
+    stateStore[0] = 2;
+    stateStore[10] = false;
+    stateStore[26] = "true";
+    stateStore[27] = ""; // no URL
+    runRender();
+
+    await capturedButtonClicks[0]();
+
+    expect(testSpy).not.toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalledWith("webhookTestNoUrl");
   });
 });

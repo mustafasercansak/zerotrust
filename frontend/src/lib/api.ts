@@ -584,6 +584,12 @@ export const api = {
         body: JSON.stringify(patch),
       }),
 
+    testWebhook: (url?: string) =>
+      request<void>("/api/v1/admin/settings/webhook/test", {
+        method: "POST",
+        body: JSON.stringify({ url: url ?? "" }),
+      }),
+
     listOidcClients: () =>
       request<OidcClient[]>("/api/v1/admin/oidc/clients"),
 

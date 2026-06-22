@@ -186,6 +186,42 @@ func TestSendWebhook(t *testing.T) {
 	}
 }
 
+func TestTestWebhook(t *testing.T) {
+	var receivedAction string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload SlackPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+			for _, f := range payload.Attachments[0].Fields {
+				if f.Title == "Action" {
+					receivedAction = f.Value
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	repo := NewRepository(nil)
+	if err := repo.TestWebhook(context.Background(), server.URL); err != nil {
+		t.Fatalf("TestWebhook returned error: %v", err)
+	}
+	if receivedAction != "system.webhook_test" {
+		t.Errorf("expected action system.webhook_test, got %q", receivedAction)
+	}
+}
+
+func TestTestWebhook_DeliveryFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	repo := NewRepository(nil)
+	if err := repo.TestWebhook(context.Background(), server.URL); err == nil {
+		t.Fatal("expected error on non-2xx response, got nil")
+	}
+}
+
 func TestRepository_LogTriggersWebhookAsynchronously(t *testing.T) {
 	pool, ctx, repo, _ := setupTestDB(t)
 	defer pool.Close()

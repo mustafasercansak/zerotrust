@@ -541,10 +541,12 @@ Acceptance criteria:
 - Provide buttons to revoke a specific session or "log out from all other devices".
 
 Status update:
-- Converted `SettingsPage.tsx` into a tabbed user settings panel accessible to all authenticated users.
+- Converted `SettingsPage.ects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/Settingtsx` into a tabbed user settings panel accessible to all authenticated users.
 - Embedded the Profile card (name changes, avatar uploads/deletions) directly inside the **Profile Settings** tab.
 - Rendered the reusable `<SessionsPage />` component inside the **Security & Sessions** tab, enabling self-revocation.
-- Kept the **System Settings** tab (concurrent session configurations) admin-only.
+- Kept the **System Settings** tab (concurrent session configurations) admin-only.ects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/Setting
 - Exceeded criteria by removing the layout modal dialog and routing user profile links to settings, creating a cohesive user security dashboard.
 
 ---
@@ -561,7 +563,8 @@ Related files:
 
 Acceptance criteria:
 - Integrate search inputs and filters (filter by user, IP address, action name, or outcome).
-- Render visual analytics charts (e.g., success vs. failure ratios over time) to easily spot brute-force attacks or access anomalies.
+- Render visual analytics charts (e.g., success vs. failure ratios over time) to easily spot bruteects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/Setting-force attacks or access anomalies.
 
 Status update:
 - Extended the backend repository and handler with dynamic `outcome` query parameters and a database query summarizing success/failure trends for the last 7 days.
@@ -1510,3 +1513,33 @@ Status update:
 - Added `bulkSetUserStatus` to `api.ts`.
 - Added `bulkSelected`, `bulkActivate`, `bulkDeactivate`, `bulkExport`, `bulkClear`, `bulkActivated`, `bulkDeactivated` locale keys to EN/TR admin namespaces.
 - Added 8 frontend tests: toolbar visibility, activate, deactivate, error, mfa_required silent, clear, export with rows, export with no matching rows.
+
+---
+
+### 65. Webhook test button for admin settings
+
+State: CLOSED
+
+Severity: Low
+
+Status: Admins could configure a Slack/Mattermost webhook URL but had no way to verify delivery without triggering a real security event.
+
+Related files:
+- [backend/internal/audit/webhook.go](/home/m/projects/zerotrust/backend/internal/audit/webhook.go)
+- [backend/cmd/server/main.go](/home/m/projects/zerotrust/backend/cmd/server/main.go)
+- [frontend/src/lib/api.ts](/home/m/projects/zerotrust/frontend/src/lib/api.ts)
+- [frontend/src/pages/dashboard/SettingsPage.tsx](/home/m/projects/zerotrust/frontend/src/pages/dashboard/SettingsPage.tsx)
+
+Acceptance criteria:
+- `POST /api/v1/admin/settings/webhook/test` sends a synthetic `system.webhook_test` payload to the configured or request-provided URL.
+- Returns 204 on delivery success, 422 on failure, 400 if no URL is configured.
+- "Send Test" button appears inline next to the webhook URL field, only enabled when a URL is entered.
+- Success and failure toast notifications in EN/TR.
+
+Status update:
+- Added exported `TestWebhook(ctx, url)` method on `audit.Repository` dispatching a synthetic test payload.
+- Added `POST /api/v1/admin/settings/webhook/test` route (admin-only) in `main.go` using configured or request-provided URL.
+- Added `api.admin.testWebhook(url?)` in `api.ts`.
+- Added "Send Test" button inline in SettingsPage webhook row with loading state.
+- Added EN/TR locale keys: `webhookTest`, `webhookTesting`, `webhookTestSuccess`, `webhookTestFailed`, `webhookTestNoUrl`.
+- Added `TestTestWebhook` and `TestTestWebhook_DeliveryFailure` unit tests.
