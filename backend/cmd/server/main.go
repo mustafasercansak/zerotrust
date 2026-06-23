@@ -471,10 +471,17 @@ func run(ctx context.Context, cfg config) error {
 					perms = []string{}
 				}
 				w.Header().Set("Content-Type", "application/json")
-				rolesJSON, _ := json.Marshal(roles)
-				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
+				json.NewEncoder(w).Encode(map[string]any{
+					"user_id":                profile.ID,
+					"email":                  profile.Email,
+					"first_name":             profile.FirstName,
+					"last_name":              profile.LastName,
+					"has_avatar":             profile.HasAvatar,
+					"locale":                 profile.Locale,
+					"notify_security_emails": profile.NotifySecurityEmails,
+					"roles":                  roles,
+					"permissions":            perms,
+				})
 			})
 
 			r.Get("/session/policy", func(w http.ResponseWriter, r *http.Request) {
@@ -520,16 +527,12 @@ func run(ctx context.Context, cfg config) error {
 					return
 				}
 				if existing.Locale != req.Locale {
-					ip := r.RemoteAddr
-					if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-						ip = strings.SplitN(xf, ",", 2)[0]
-					}
 					uid := claims.UserID
 					_ = auditRepo.Log(r.Context(), audit.Entry{
 						UserID:    &uid,
 						Action:    "user.locale_changed",
 						Resource:  "user",
-						IPAddress: ip,
+						IPAddress: authmw.ClientIP(r),
 						Metadata: map[string]any{
 							"from":    existing.Locale,
 							"to":     req.Locale,
@@ -538,7 +541,7 @@ func run(ctx context.Context, cfg config) error {
 					})
 					if ml != nil && existing.NotifySecurityEmails {
 						_ = ml.SendSecurityAlert(r.Context(), existing.Email,
-							"locale_changed", ip, "Unknown",
+							"locale_changed", authmw.ClientIP(r), "Unknown",
 							fmt.Sprintf("Your ZeroTrust interface language was changed from %q to %q. If this was not you, review your account immediately.", existing.Locale, req.Locale),
 						)
 					}
@@ -573,7 +576,9 @@ func run(ctx context.Context, cfg config) error {
 
 				complexity := settingsCache.GetString(r.Context(), "password_complexity", "low")
 				if err := validation.PasswordWithComplexity(req.NewPassword, complexity); err != nil {
-					http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 					return
 				}
 
@@ -586,16 +591,15 @@ func run(ctx context.Context, cfg config) error {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return
 				}
+				// Revoke all sessions so any stolen session cannot outlive the password
+				// change. Consistent with the password-reset-via-email flow.
+				_ = sessionRepo.RevokeAllForUser(r.Context(), claims.UserID)
 				// Notify the user that their password was changed regardless of their
 				// notification preference — this is a security-critical alert.
 				if ml != nil {
-					ip := r.RemoteAddr
-					if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-						ip = strings.SplitN(xf, ",", 2)[0]
-					}
 					_ = ml.SendSecurityAlert(r.Context(), profile.Email,
-						"password_changed", ip, "Unknown",
-						"Your ZeroTrust password was just changed. If this was not you, revoke all sessions immediately from your settings page.",
+						"password_changed", authmw.ClientIP(r), "Unknown",
+						"Your ZeroTrust password was just changed. If this was not you, contact your administrator immediately.",
 					)
 				}
 				w.WriteHeader(http.StatusNoContent)
@@ -684,10 +688,17 @@ func run(ctx context.Context, cfg config) error {
 					perms = []string{}
 				}
 				w.Header().Set("Content-Type", "application/json")
-				rolesJSON, _ := json.Marshal(roles)
-				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
+				json.NewEncoder(w).Encode(map[string]any{
+					"user_id":                profile.ID,
+					"email":                  profile.Email,
+					"first_name":             profile.FirstName,
+					"last_name":              profile.LastName,
+					"has_avatar":             profile.HasAvatar,
+					"locale":                 profile.Locale,
+					"notify_security_emails": profile.NotifySecurityEmails,
+					"roles":                  roles,
+					"permissions":            perms,
+				})
 			})
 
 			r.Get("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
@@ -732,10 +743,17 @@ func run(ctx context.Context, cfg config) error {
 					perms = []string{}
 				}
 				w.Header().Set("Content-Type", "application/json")
-				rolesJSON, _ := json.Marshal(roles)
-				permsJSON, _ := json.Marshal(perms)
-				fmt.Fprintf(w, `{"user_id":%q,"email":%q,"first_name":%q,"last_name":%q,"has_avatar":%t,"locale":%q,"notify_security_emails":%t,"roles":%s,"permissions":%s}`,
-					profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.HasAvatar, profile.Locale, profile.NotifySecurityEmails, rolesJSON, permsJSON)
+				json.NewEncoder(w).Encode(map[string]any{
+					"user_id":                profile.ID,
+					"email":                  profile.Email,
+					"first_name":             profile.FirstName,
+					"last_name":              profile.LastName,
+					"has_avatar":             profile.HasAvatar,
+					"locale":                 profile.Locale,
+					"notify_security_emails": profile.NotifySecurityEmails,
+					"roles":                  roles,
+					"permissions":            perms,
+				})
 			})
 
 			// Session management — any authenticated user manages their own sessions

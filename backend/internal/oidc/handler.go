@@ -228,6 +228,19 @@ func (h *Handler) Consent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Look up client and validate redirect_uri before using it in any redirect,
+	// including the denial path. Without this, a caller could supply an arbitrary
+	// redirect_uri and turn the denial response into an open redirect.
+	client, err := h.clientRepo.FindByClientID(r.Context(), req.ClientID)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
+		return
+	}
+	if !client.ValidateRedirectURI(req.RedirectURI) {
+		http.Error(w, `{"error":"invalid_redirect_uri"}`, http.StatusBadRequest)
+		return
+	}
+
 	if !req.Approved {
 		h.logAudit(r.Context(), audit.Entry{
 			UserID:    &claims.UserID,
@@ -250,11 +263,6 @@ func (h *Handler) Consent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate scopes against client allowed scopes
-	client, err := h.clientRepo.FindByClientID(r.Context(), req.ClientID)
-	if err != nil {
-		http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
-		return
-	}
 	if !client.ValidateScope(req.Scopes) {
 		http.Error(w, `{"error":"invalid_scope"}`, http.StatusBadRequest)
 		return
@@ -272,7 +280,9 @@ func (h *Handler) Consent(w http.ResponseWriter, r *http.Request) {
 		req.Nonce,
 	)
 	if err != nil {
-		http.Error(w, `{"error":"server_error","error_description":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "server_error", "error_description": err.Error()})
 		return
 	}
 
@@ -367,10 +377,13 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	json.NewEncoder(w).Encode(resp)
 }
 
-// UserInfo returns OIDC UserInfo claims
+// UserInfo returns OIDC UserInfo claims, filtered to the scopes granted in the
+// access token (OIDC Core §5.3). Tokens that carry no scope claim (e.g. internal
+// browser session tokens) receive the full response for backward compatibility.
 func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -391,16 +404,30 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]any{
-		"sub":            u.ID,
-		"name":           strings.TrimSpace(u.FirstName + " " + u.LastName),
-		"given_name":     u.FirstName,
-		"family_name":    u.LastName,
-		"email":          u.Email,
-		"email_verified": true,
-		"locale":         u.Locale,
-		"roles":          u.Roles,
-		"groups":         u.Roles,
+	// Build scope lookup map. Empty Scopes means the token is an internal browser
+	// session token that pre-dates scope tracking; return full info for compat.
+	scopeSet := make(map[string]bool, len(claims.Scopes))
+	for _, s := range claims.Scopes {
+		scopeSet[s] = true
+	}
+	oidcToken := len(scopeSet) > 0
+
+	resp := map[string]any{"sub": u.ID}
+
+	includeProfile := !oidcToken || scopeSet["profile"]
+	includeEmail := !oidcToken || scopeSet["email"]
+
+	if includeProfile {
+		resp["name"] = strings.TrimSpace(u.FirstName + " " + u.LastName)
+		resp["given_name"] = u.FirstName
+		resp["family_name"] = u.LastName
+		resp["locale"] = u.Locale
+		resp["roles"] = u.Roles
+		resp["groups"] = u.Roles
+	}
+	if includeEmail {
+		resp["email"] = u.Email
+		resp["email_verified"] = true
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -121,6 +121,7 @@ func TestSendWebhook(t *testing.T) {
 	defer server.Close()
 
 	repo := NewRepository(nil)
+	repo.SetWebhookClient(http.DefaultClient)
 	ctx := context.Background()
 	userID := "user-123"
 	entry := Entry{
@@ -202,6 +203,7 @@ func TestTestWebhook(t *testing.T) {
 	defer server.Close()
 
 	repo := NewRepository(nil)
+	repo.SetWebhookClient(http.DefaultClient)
 	if err := repo.TestWebhook(context.Background(), server.URL); err != nil {
 		t.Fatalf("TestWebhook returned error: %v", err)
 	}
@@ -217,8 +219,37 @@ func TestTestWebhook_DeliveryFailure(t *testing.T) {
 	defer server.Close()
 
 	repo := NewRepository(nil)
+	repo.SetWebhookClient(http.DefaultClient)
 	if err := repo.TestWebhook(context.Background(), server.URL); err == nil {
 		t.Fatal("expected error on non-2xx response, got nil")
+	}
+}
+
+func TestValidateWebhookURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"loopback rejected", "http://127.0.0.1/hook", true},
+		{"localhost rejected", "http://localhost/hook", true},
+		{"private 10.x rejected", "http://10.0.0.1/hook", true},
+		{"private 192.168.x rejected", "http://192.168.1.1/hook", true},
+		{"private 172.16.x rejected", "http://172.16.0.1/hook", true},
+		{"link-local rejected", "http://169.254.169.254/hook", true},
+		{"file scheme rejected", "file:///etc/passwd", true},
+		{"ftp scheme rejected", "ftp://example.com/hook", true},
+		{"empty URL rejected", "", true},
+		{"no hostname rejected", "http:///hook", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWebhookURL(tc.url)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateWebhookURL(%q) error=%v wantErr=%v", tc.url, err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -239,6 +270,7 @@ func TestRepository_LogTriggersWebhookAsynchronously(t *testing.T) {
 
 	reader := &mockSettingsReader{enabled: true, url: server.URL}
 	repo.SetSettingsReader(reader)
+	repo.SetWebhookClient(http.DefaultClient)
 
 	entry := Entry{
 		Action:    "admin.user.status_update",

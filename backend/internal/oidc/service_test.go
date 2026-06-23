@@ -190,6 +190,7 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 			FirstName: "Alice",
 			LastName:  "Smith",
 			Locale:    "en",
+			IsActive:  true,
 		},
 	})
 
@@ -307,7 +308,7 @@ func TestExchangeRefreshToken(t *testing.T) {
 		t.Fatalf("keystore: %v", err)
 	}
 
-	u := &user.User{ID: "u99", Email: "refresh@example.com", Locale: "en"}
+	u := &user.User{ID: "u99", Email: "refresh@example.com", Locale: "en", IsActive: true}
 	userSvc := user.NewService(&mockUserReader{user: u})
 	refreshStore := NewRefreshTokenStore(rdb)
 	svc := NewService(nil, nil, userSvc, ks, "https://issuer.example.com", refreshStore)
@@ -423,6 +424,61 @@ func TestHasScope(t *testing.T) {
 	}
 }
 
+// TestExchangeCode_InactiveUser verifies that a deactivated user cannot exchange
+// an authorization code for tokens, even with a valid code and PKCE verifier.
+func TestExchangeCode_InactiveUser(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	inactive := &user.User{ID: "u-inactive", Email: "inactive@example.com", Locale: "en", IsActive: false}
+	codeStore := NewAuthCodeStore(rdb)
+	svc := NewService(nil, codeStore, user.NewService(&mockUserReader{user: inactive}), ks, "https://issuer.example.com", nil)
+
+	session := &AuthCodeSession{
+		Code: "code-inactive", UserID: inactive.ID, ClientID: "c1",
+		RedirectURI:         "http://localhost/cb",
+		Scopes:              []string{"openid"},
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
+		AuthTime:            time.Now(),
+	}
+	codeStore.Save(context.Background(), session)
+
+	_, err := svc.ExchangeCode(context.Background(), "code-inactive", "c1", "", "http://localhost/cb", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	if err != ErrInvalidGrant {
+		t.Errorf("expected ErrInvalidGrant for inactive user on code exchange, got %v", err)
+	}
+}
+
+// TestExchangeRefreshToken_InactiveUser verifies that a deactivated user cannot
+// obtain new tokens via a previously issued OIDC refresh token.
+func TestExchangeRefreshToken_InactiveUser(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	inactive := &user.User{ID: "u-inactive-rt", Email: "rt@example.com", Locale: "en", IsActive: false}
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, nil, user.NewService(&mockUserReader{user: inactive}), ks, "https://issuer.example.com", refreshStore)
+
+	rt, _ := refreshStore.Save(context.Background(), &OIDCRefreshSession{
+		UserID:   inactive.ID,
+		ClientID: "c1",
+		Scopes:   []string{"openid", "offline_access"},
+		AuthTime: time.Now(),
+	})
+
+	_, err := svc.ExchangeRefreshToken(context.Background(), rt, "c1", "", nil)
+	if err != ErrInvalidGrant {
+		t.Errorf("expected ErrInvalidGrant for inactive user on refresh exchange, got %v", err)
+	}
+}
+
 func TestExchangeCode_NoRefreshWithoutOfflineAccess(t *testing.T) {
 	mr, _ := miniredis.Run()
 	defer mr.Close()
@@ -430,7 +486,7 @@ func TestExchangeCode_NoRefreshWithoutOfflineAccess(t *testing.T) {
 	defer rdb.Close()
 
 	ks, _ := auth.LoadOrGenerateKeyStore("", "")
-	u := &user.User{ID: "u1", Email: "u@example.com", Locale: "en"}
+	u := &user.User{ID: "u1", Email: "u@example.com", Locale: "en", IsActive: true}
 	codeStore := NewAuthCodeStore(rdb)
 	refreshStore := NewRefreshTokenStore(rdb)
 	svc := NewService(nil, codeStore, user.NewService(&mockUserReader{user: u}), ks, "https://issuer.example.com", refreshStore)

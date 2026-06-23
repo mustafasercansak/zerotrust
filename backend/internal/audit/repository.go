@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -36,10 +37,11 @@ type SettingsReader interface {
 }
 
 type Repository struct {
-	db        *pgxpool.Pool
-	secClient encrypter
-	locator   IPLocator
-	settings  SettingsReader
+	db            *pgxpool.Pool
+	secClient     encrypter
+	locator       IPLocator
+	settings      SettingsReader
+	webhookClient *http.Client
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
@@ -56,6 +58,12 @@ func (r *Repository) SetIPLocator(fn IPLocator) {
 
 func (r *Repository) SetSettingsReader(s SettingsReader) {
 	r.settings = s
+}
+
+// SetWebhookClient overrides the HTTP client used for webhook dispatch.
+// Intended for tests that need to target a local httptest.Server.
+func (r *Repository) SetWebhookClient(c *http.Client) {
+	r.webhookClient = c
 }
 
 func (r *Repository) Log(ctx context.Context, e Entry) error {

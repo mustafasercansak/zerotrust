@@ -1543,3 +1543,331 @@ Status update:
 - Added "Send Test" button inline in SettingsPage webhook row with loading state.
 - Added EN/TR locale keys: `webhookTest`, `webhookTesting`, `webhookTestSuccess`, `webhookTestFailed`, `webhookTestNoUrl`.
 - Added `TestTestWebhook` and `TestTestWebhook_DeliveryFailure` unit tests.
+
+---
+
+## OIDC Security Audit (2026-06-23)
+
+Findings from a manual security review of the OIDC provider surface (authorization code flow, token exchange, UserInfo, revocation, introspection, EndSession, PKCE, refresh token rotation, consent step-up MFA, audit logging). No auth-bypass or token-forgery path was found. The items below were hardening fixes ranked by impact.
+
+### 66. OIDC UserInfo endpoint did not enforce granted scopes
+
+State: CLOSED
+
+Severity: Medium
+
+Status: The `/oauth2/userinfo` endpoint always returned all user fields (name, email, locale, roles) regardless of which scopes (`openid`, `profile`, `email`) were granted in the access token. A client that only requested `openid` should not receive `email` or `profile` claims.
+
+Related files:
+- [backend/internal/oidc/service.go](backend/internal/oidc/service.go)
+- [backend/internal/oidc/handler.go](backend/internal/oidc/handler.go)
+- [backend/internal/oidc/security_test.go](backend/internal/oidc/security_test.go)
+
+Acceptance criteria:
+- OIDC access tokens carry the granted scope list.
+- UserInfo filters claims: `profile` scope gates name/given_name/family_name/locale/roles; `email` scope gates email/email_verified; `sub` is always returned.
+- Internal browser-session tokens (no scope claim) continue to receive full info for backward compatibility.
+
+Status update:
+- Added `Scopes: session.Scopes` to the OIDC access token claims in `ExchangeCode`.
+- Added `Scopes: scopes` to the OIDC access token claims in `ExchangeRefreshToken` so the scope survives rotation.
+- Rewrote `UserInfo` to build a scope set from `claims.Scopes` and conditionally include profile and email fields.
+- Added `TestUserInfo_ScopeFiltering` (4 sub-tests: openid-only, openid+email, openid+profile, all) and `TestUserInfo_ScopeInAccessToken` (scope preserved through refresh rotation) in `security_test.go`.
+
+### 67. JSON injection in OIDC Consent server-error response
+
+State: CLOSED
+
+Severity: Low
+
+Status: The `Consent` handler built its server-error response via string concatenation (`"...\"" + err.Error() + "\""`) instead of `json.Marshal`. An error message containing a double-quote or backslash would produce malformed JSON.
+
+Related files:
+- [backend/internal/oidc/handler.go](backend/internal/oidc/handler.go)
+- [backend/internal/oidc/security_test.go](backend/internal/oidc/security_test.go)
+
+Status update:
+- Replaced string concatenation with `json.NewEncoder(w).Encode(map[string]string{...})` so all error fields are properly escaped.
+- Added `TestConsent_ServerErrorJSON` verifying that the response is always valid JSON.
+
+### 70. SSRF via admin webhook URL (no internal-address check)
+
+State: CLOSED
+
+Severity: High
+
+Status: The `sendWebhook` function dispatched HTTP requests to any URL provided by an admin — including `http://169.254.169.254/` (AWS IMDS), `http://localhost:6379/` (Redis), internal microservices, and other private-range endpoints. The `/admin/settings/webhook/test` endpoint also accepted a caller-supplied URL, making the attack trivially reachable by any admin.
+
+Related files:
+- [backend/internal/audit/webhook.go](backend/internal/audit/webhook.go)
+- [backend/internal/audit/repository.go](backend/internal/audit/repository.go)
+- [backend/internal/audit/webhook_test.go](backend/internal/audit/webhook_test.go)
+
+Acceptance criteria:
+- Reject non-http/https schemes (file://, ftp://, etc.).
+- Resolve the target hostname and reject any address that is loopback, private, link-local, or unspecified.
+- Existing tests must continue to pass (test servers use loopback — bypass via injectable `webhookClient`).
+
+Status update:
+- Added `validateWebhookURL` in `webhook.go`: parses scheme (must be http/https), resolves hostname via `net.LookupHost`, rejects loopback/private/link-local/unspecified addresses.
+- `sendWebhook` calls `validateWebhookURL` before constructing the HTTP request when no test client is injected.
+- Added `webhookClient *http.Client` field and `SetWebhookClient` setter to `Repository`; when set (tests only), the SSRF guard is skipped so `httptest.Server` targets work.
+- Added `TestValidateWebhookURL` with 10 sub-cases covering loopback, private ranges, link-local (169.254.x), and forbidden schemes.
+
+### 69. Spoofable client IP in MFA, WebAuthn, and inline locale/password handlers
+
+State: CLOSED
+
+Severity: Medium
+
+Status: Four code sites read `X-Forwarded-For` directly without going through the `TrustedClientIP` middleware, making the IP address used in audit log entries and security-alert emails trivially spoofable by any client. When deployed behind a reverse proxy the `TrustedClientIP` middleware already rewrites `r.RemoteAddr` to the real client IP, so any additional XFF reads are both redundant and unsafe.
+
+Related files:
+- [backend/internal/mfa/handler.go](backend/internal/mfa/handler.go)
+- [backend/internal/webauthn/handler.go](backend/internal/webauthn/handler.go)
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- All IP extraction in request handlers uses `authmw.ClientIP(r)` (which reads the `r.RemoteAddr` already resolved by the middleware) instead of raw `X-Forwarded-For`.
+- No package-local `clientIP()` function duplicates proxy-header logic.
+
+Status update:
+- Replaced the `clientIP()` helper bodies in `mfa/handler.go` and `webauthn/handler.go` with `return authmw.ClientIP(r)` and removed the now-unused `strings` import from `mfa/handler.go`.
+- Replaced the two inline XFF extractions in the locale-change and password-change handlers in `main.go` with `authmw.ClientIP(r)`.
+- Build and all affected package tests pass.
+
+### 68. Missing Pragma: no-cache on OIDC token endpoint
+
+State: CLOSED
+
+Severity: Low
+
+Status: RFC 6749 §5.1 requires both `Cache-Control: no-store` and `Pragma: no-cache` on token responses. The `Cache-Control` header was present but `Pragma` was absent.
+
+Related files:
+- [backend/internal/oidc/handler.go](backend/internal/oidc/handler.go)
+- [backend/internal/oidc/security_test.go](backend/internal/oidc/security_test.go)
+
+Status update:
+- Added `w.Header().Set("Pragma", "no-cache")` alongside the existing `Cache-Control: no-store` in the Token handler.
+- Added `TestToken_PragmaHeader` asserting both headers are present on a successful code exchange response.
+
+### 73. Open redirect in OIDC consent denial path
+
+State: CLOSED
+
+Severity: High
+
+Status: The `Consent` handler validated `redirect_uri` against the client's registered URIs only on the approval path (`req.Approved = true`). On the denial path (`!req.Approved`), the handler used `req.RedirectURI` directly from the request body — a user-controlled field — without any validation. An authenticated attacker could POST `{"approved": false, "redirect_uri": "https://evil.com"}` and receive `{"redirect_url": "https://evil.com?error=access_denied"}` which the frontend then uses to navigate, redirecting the victim to an arbitrary external site.
+
+Related files:
+- [backend/internal/oidc/handler.go](backend/internal/oidc/handler.go)
+- [backend/internal/oidc/security_test.go](backend/internal/oidc/security_test.go)
+
+Acceptance criteria:
+- Client lookup and `ValidateRedirectURI` run before the `if !req.Approved` branch.
+- A denial with an unregistered `redirect_uri` returns a 4xx error, not a redirect.
+
+Status update:
+- Moved `h.clientRepo.FindByClientID` and `client.ValidateRedirectURI` to execute before the `!req.Approved` branch so both approval and denial paths share the same redirect-URI guard.
+- Removed the now-duplicated `FindByClientID` call from the approval path (reuses the `client` variable).
+- Added `TestConsent_DenialOpenRedirect` with two sub-tests: unregistered URI rejected (non-200), registered URI returns correct `access_denied` redirect with state preserved.
+- All OIDC and full-suite tests pass.
+
+### 72. DPoP replay protection bypassable by omitting the jti claim
+
+State: CLOSED
+
+Severity: Medium
+
+Status: `ValidateDPoPProofWithJTI` never checked that the `jti` claim was present. When a proof was submitted without a `jti`, `claims.Jti` was an empty string. `ConsumeDPoPProof` explicitly skips the Redis `SetNX` check when `jti == ""`, so the proof passed all validation and replay detection was silently bypassed. RFC 9449 §4.2 mandates `jti` in every DPoP proof, and this omission allowed an attacker to replay the same DPoP proof indefinitely (within the 2-minute `iat` skew window) to obtain additional access tokens.
+
+Related files:
+- [backend/internal/auth/dpop.go](backend/internal/auth/dpop.go)
+- [backend/internal/auth/dpop_test.go](backend/internal/auth/dpop_test.go)
+
+Acceptance criteria:
+- A DPoP proof with an empty or absent `jti` claim is rejected before replay checking.
+- Existing valid proofs (those with a non-empty `jti`) continue to pass.
+
+Status update:
+- Added `if claims.Jti == "" { return "", "", errors.New("missing jti claim in DPoP proof") }` in `ValidateDPoPProofWithJTI`, after signature and claim-type validation but before the `iat` window check.
+- Added test case 17 to `TestDPoPValidationFailures`: a proof with `Jti = ""` must return an error.
+- All DPoP tests pass; full build passes.
+
+### 78. Demo OAuth2 client with documented plaintext secret in migration
+
+State: OPEN
+
+Severity: Low
+
+`migrations/000023_oauth2_clients.up.sql` seeds a `demo-client` row with a comment that reads `-- Secret is "demo-secret"`. The plaintext secret is in the migration file's commit history and is trivially known to anyone with repository access. Additionally, one of the registered redirect URIs is `https://oauth.pstmn.io/v1/callback`, a public Postman endpoint that any attacker can receive callbacks on. If this migration is applied to a production database, the demo client is a permanently open authorization path: knowing the secret and pointing to Postman's callback is sufficient to complete an OAuth2 authorization code exchange against real users (scopes: `openid`, `profile`, `email`).
+
+Related files:
+- [backend/migrations/000023_oauth2_clients.up.sql](backend/migrations/000023_oauth2_clients.up.sql)
+
+Acceptance criteria:
+- The migration comment no longer reveals the plaintext secret.
+- A clear warning is present that this client must be removed before production deployment.
+- A companion down-migration or post-deploy script removes the demo-client row in production.
+
+Status update:
+- Removed the `-- Secret is "demo-secret"` comment; replaced with a `DEVELOPMENT ONLY` warning that the row and its known secret must be deleted before production deployment.
+- Created `backend/migrations/000027_remove_demo_client.up.sql` (DELETE the demo-client row) and `backend/migrations/000027_remove_demo_client.down.sql` (re-inserts for dev rollback only).
+- Issue closed; apply migration 000027 as part of any production deployment.
+
+### 77. MFAChallenge and RefreshTokens do not check user account status
+
+State: CLOSED
+
+Severity: Medium
+
+Two paths in `auth/service.go` fetched the user with `FindByID` but did not check `u.IsActive`:
+
+1. **`MFAChallenge`**: Called after TOTP is verified. If a user is deactivated between the initial password check (where `IsActive` is enforced) and TOTP completion (within the 5-minute pending-token window), they could still receive a token pair.
+
+2. **`RefreshTokens`**: Called on every session refresh. A deactivated user's sessions would continue to refresh until the idle timeout or absolute session expiry naturally terminated them — up to 8 hours with default settings.
+
+The WebAuthn finish path (line 600, same file) already had `if err != nil || !u.IsActive`, but these two paths did not mirror it.
+
+Related files:
+- [backend/internal/auth/service.go](backend/internal/auth/service.go)
+- [backend/internal/auth/service_test.go](backend/internal/auth/service_test.go)
+- [backend/internal/auth/service_refresh_policy_test.go](backend/internal/auth/service_refresh_policy_test.go)
+
+Acceptance criteria:
+- A user deactivated mid-login cannot complete TOTP and receive tokens.
+- A deactivated user's next refresh attempt is rejected immediately.
+- Active users are unaffected.
+
+Status update:
+- Added `|| !u.IsActive` to the `FindByID` guards in both `MFAChallenge` and `RefreshTokens`.
+- Updated test users in `service_test.go` and `service_refresh_policy_test.go` to set `IsActive: true`.
+- All 20 packages pass.
+
+### 76. OIDC code exchange and refresh do not check user account status
+
+State: CLOSED
+
+Severity: Medium
+
+`ExchangeCode` and `ExchangeRefreshToken` in `oidc/service.go` called `userSvc.FindByID` to fetch the user but never checked `u.IsActive`. An administrator who deactivates a user account (setting `is_active = false`) expects that user to immediately lose all access. The main auth service correctly enforces this on login and session refresh (`!u.IsActive → ErrInactiveUser`), but the OIDC code paths did not, allowing a deactivated user to continue exchanging authorization codes and rotating OIDC refresh tokens until all their tokens expired naturally.
+
+Related files:
+- [backend/internal/oidc/service.go](backend/internal/oidc/service.go)
+- [backend/internal/oidc/service_test.go](backend/internal/oidc/service_test.go)
+
+Acceptance criteria:
+- A deactivated user (IsActive=false) cannot exchange an authorization code for tokens.
+- A deactivated user cannot exchange a refresh token for a new access token.
+- Active users are unaffected.
+
+Status update:
+- Added `|| !u.IsActive` to both `FindByID` error guards in `ExchangeCode` and `ExchangeRefreshToken`.
+- Added `TestExchangeCode_InactiveUser` and `TestExchangeRefreshToken_InactiveUser` to `service_test.go`.
+- Updated all pre-existing test users in `service_test.go` and `security_test.go` to set `IsActive: true` (zero value defaults to false, which broke existing tests).
+- All 20 packages pass.
+
+### 75. SSRF via DNS rebinding in webhook dispatch
+
+State: CLOSED
+
+Severity: Medium
+
+`sendWebhook` called `validateWebhookURL` (which resolves the hostname and checks all IPs) and then passed the URL to `http.Client.Do`, which resolves the hostname a second time independently. An attacker who controls a DNS server could serve a legitimate public IP during the `validateWebhookURL` call, then immediately change the record to a private address (e.g., `10.0.0.1`, `169.254.x.x`) before the HTTP client's internal resolver runs. Because DNS caches at the OS level may expire between the two calls, the TCP connection could land on a private host — a classic DNS-rebinding SSRF bypass.
+
+Related files:
+- [backend/internal/audit/webhook.go](backend/internal/audit/webhook.go)
+
+Acceptance criteria:
+- IP validation is enforced at connection time (just before TCP dial), not only during a pre-check that may be stale.
+- A hostname that resolves to a private IP at dial time is rejected even if it resolved to a public IP during the pre-check.
+
+Status update:
+- Added `ssrfSafeTransport()`: a custom `http.Transport` whose `DialContext` calls `net.DefaultResolver.LookupHost` immediately before each TCP dial and rejects the connection if any resolved IP is loopback, private, link-local, or unspecified. This closes the DNS-rebinding window.
+- `validateWebhookURL` is retained as a fast pre-check on URL format + scheme; the transport provides the binding guarantee.
+- Injected the safe transport into the production `http.Client` in `sendWebhook`.
+- Tests still pass; injected test client continues to bypass SSRF checks as intended.
+
+### 74. Missing per-user brute-force protection on /mfa/disable and /mfa/step-up
+
+State: CLOSED
+
+Severity: Medium
+
+The `RequireRecentMFA` middleware enforces a 5-attempt / 10-minute per-user lockout on TOTP codes submitted through the `X-MFA-Code` header path. The dedicated `/mfa/disable` and `/mfa/step-up` endpoints did not apply any equivalent per-user lockout. Only the shared `protectedRL` limit (300 req/min per user across all authenticated routes) provided any guard. An attacker with a valid session could exhaust the TOTP code space against these two endpoints at a rate limited only by the shared per-user bucket, without triggering the stricter code-level lockout that protects the middleware path.
+
+TOTP's 30-second rotation makes a full brute-force very low probability (~0.015% per window), but defense-in-depth with a hard per-user lockout prevents sustained guessing within a session.
+
+Related files:
+- [backend/internal/mfa/handler.go](backend/internal/mfa/handler.go)
+
+Acceptance criteria:
+- After 5 consecutive wrong codes on `/mfa/disable`, the user's disable flow is locked for 10 minutes (429).
+- After 5 consecutive wrong codes on `/mfa/step-up`, the same counter used by `RequireRecentMFA` is incremented, locking both paths.
+- A correct code clears the failure counter on both endpoints.
+- Redis unavailability fails open (no lockout, operation continues).
+
+Status update:
+- Added helpers in `mfa/handler.go`: `mfaAttemptsExceeded`, `recordMFAFailure`, `clearMFAFailures` (each nil-safe for `rdb`).
+- `mfaStepUpAttemptsKey` uses the same `"mfa:stepup:fails:<userID>"` key as `RequireRecentMFA` so failed attempts via either path share one counter.
+- `mfaDisableAttemptsKey` uses `"mfa:disable:fails:<userID>"`.
+- Both `Disable` and `StepUp` handlers check lockout before validating code, record failure on bad code, clear on success.
+- All 20 test packages pass.
+
+### 71. Invalid JSON encoding in profile and avatar update handlers
+
+State: CLOSED
+
+Severity: Low
+
+Status: Three inline handlers in `main.go` serialised the updated profile response using either Go's `fmt.Fprintf` with `%q` verb or raw string concatenation, neither of which produces guaranteed-valid JSON. Go's `%q` verb emits `\a` and `\v` escapes that JSON parsers must reject per RFC 8259; string concatenation breaks if the interpolated string contains a double-quote. In practice, password-validation error codes are safe sentinel strings and user names rarely contain C0 control characters, but the pattern was fragile and inconsistent with the rest of the codebase.
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- All JSON responses are encoded via `json.NewEncoder` or `json.Marshal`, never via `fmt.Fprintf %q` or string concatenation.
+
+Status update:
+- Replaced all three `fmt.Fprintf(...%q...)` profile responses (PATCH `/me/profile`, POST `/me/avatar`, DELETE `/me/avatar`) with `json.NewEncoder(w).Encode(map[string]any{...})`.
+- Replaced the string-concatenated password-complexity error (`{"error":"` + err.Error() + `"}`) in PATCH `/me/password` with `json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})`.
+- Removed now-unused intermediate `rolesJSON`/`permsJSON` variables from all three avatar/profile handlers.
+
+### 79. Self-service password change did not revoke existing sessions
+
+State: CLOSED
+
+Severity: Medium
+
+`PATCH /me/password` updated the password hash and sent a security alert email, but left all active sessions alive. An attacker who had obtained a valid session cookie (via XSS, network interception, or device theft) could survive a password change for up to 8 hours (the absolute session timeout). The password-reset-via-email flow already atomically revokes all sessions in the same transaction; the self-service path was inconsistent.
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- After a successful password update, all sessions for that user are immediately revoked.
+- The user must re-authenticate with the new password on all devices.
+- Active users are unaffected (no change to the behavior when the user is not changing their password).
+
+Status update:
+- Added `_ = sessionRepo.RevokeAllForUser(r.Context(), claims.UserID)` in `main.go` immediately after `userSvc.UpdatePassword` in the `PATCH /me/password` handler.
+- Updated the security alert email body to remove the "revoke sessions" self-service suggestion (since sessions are now automatically revoked).
+- All 20 packages pass.
+
+### 80. Self-service password change was not a critical audit event
+
+State: CLOSED
+
+Severity: Low
+
+`PATCH /me/password` fell through the `classifyRoute` function in `audit.go` with no specific action name, so the audit middleware logged it as `"PATCH /api/v1/me/password"` with `critical: false`. A non-critical event is written asynchronously in a background goroutine, meaning the event could be lost if the process crashes immediately after the write. A password change is a security-critical operation and should be logged synchronously with a stable semantic action name.
+
+Related files:
+- [backend/pkg/middleware/audit.go](backend/pkg/middleware/audit.go)
+
+Status update:
+- Added `PATCH /api/v1/me/password` to `classifyRoute` as `user.password_changed` with `critical: true`.
+- The audit write is now synchronous (bounded-timeout context, same as other critical events).
+- All 20 packages pass.
+- Build passes with no errors.

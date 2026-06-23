@@ -122,7 +122,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 	}
 
 	u, err := s.userSvc.FindByID(ctx, session.UserID)
-	if err != nil {
+	if err != nil || !u.IsActive {
 		return nil, ErrInvalidGrant
 	}
 
@@ -136,6 +136,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 		Locale:      u.Locale,
 		Roles:       u.Roles,
 		Permissions: []string{}, // intentionally empty: OIDC access tokens are issued to external clients and must not carry internal RBAC permissions
+		Scopes:      session.Scopes, // granted OAuth2 scopes, used by UserInfo to filter the response
 		SubType:     auth.SubTypeUser,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,
@@ -267,7 +268,7 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 	}
 
 	u, err := s.userSvc.FindByID(ctx, sess.UserID)
-	if err != nil {
+	if err != nil || !u.IsActive {
 		return nil, ErrInvalidGrant
 	}
 
@@ -279,6 +280,7 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 		Locale:      u.Locale,
 		Roles:       u.Roles,
 		Permissions: []string{},
+		Scopes:      scopes, // granted OAuth2 scopes, used by UserInfo to filter the response
 		SubType:     auth.SubTypeUser,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,

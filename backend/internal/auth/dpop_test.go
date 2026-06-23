@@ -189,6 +189,14 @@ func TestDPoPValidationFailures(t *testing.T) {
 	if _, err = auth.ValidateDPoPProof(proof, "POST", "/api/v1/other"); err == nil {
 		t.Error("expected error for URI mismatch, got nil")
 	}
+
+	// 17. Missing jti — replay protection must not be bypassable by omitting the claim
+	noJtiClaims := stdClaims()
+	noJtiClaims.Jti = ""
+	proof = generateCustomProof(map[string]any{"typ": "dpop+jwt", "jwk": stdJWK}, noJtiClaims)
+	if _, err = auth.ValidateDPoPProof(proof, "POST", "/api/v1/auth/token"); err == nil {
+		t.Error("expected error for missing jti, got nil")
+	}
 }
 
 func TestValidateHTU(t *testing.T) {

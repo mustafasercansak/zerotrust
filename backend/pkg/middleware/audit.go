@@ -337,6 +337,11 @@ func auditEventFor(method, path string) auditEvent {
 		event.critical = true
 		return event
 	}
+	if method == http.MethodPatch && path == "/api/v1/me/password" {
+		event.action = "user.password_changed"
+		event.critical = true
+		return event
+	}
 	return event
 }
 

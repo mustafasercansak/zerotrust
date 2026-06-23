@@ -9,8 +9,9 @@ CREATE TABLE oauth2_clients (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Seed a demo OAuth2 Client for development/testing
--- Secret is "demo-secret"
+-- DEVELOPMENT ONLY: seed a demo OAuth2 client for local testing.
+-- This client and its known secret MUST be deleted before production deployment.
+-- Use the admin UI or a post-migration script to remove the demo-client row.
 INSERT INTO oauth2_clients (client_id, client_secret_hash, name, redirect_uris, allowed_scopes)
 VALUES (
     'demo-client',

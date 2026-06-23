@@ -129,6 +129,10 @@ func ValidateDPoPProofWithJTI(tokenStr string, expectedMethod string, expectedUR
 		return "", "", errors.New("invalid token claims")
 	}
 
+	if claims.Jti == "" {
+		return "", "", errors.New("missing jti claim in DPoP proof")
+	}
+
 	now := time.Now().Unix()
 	// Allow 2-minute skew
 	if claims.Iat < now-120 || claims.Iat > now+120 {

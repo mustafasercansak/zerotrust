@@ -36,11 +36,10 @@ func (h *Handler) ConfigureNotifier(n notifier) {
 	h.notif = n
 }
 
+// clientIP returns the real client IP, which TrustedClientIP middleware has
+// already resolved from proxy headers and written back into r.RemoteAddr.
 func clientIP(r *http.Request) string {
-	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-		return strings.SplitN(xf, ",", 2)[0]
-	}
-	return r.RemoteAddr
+	return authmw.ClientIP(r)
 }
 
 // POST /api/v1/webauthn/register/begin — start passkey registration.

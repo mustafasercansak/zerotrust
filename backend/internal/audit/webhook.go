@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -77,8 +80,76 @@ func (r *Repository) TestWebhook(ctx context.Context, url string) error {
 	})
 }
 
+// validateWebhookURL rejects URLs that could be used for Server-Side Request
+// Forgery (SSRF). It requires an http/https scheme and ensures the target
+// hostname resolves only to public, non-loopback, non-private addresses.
+func validateWebhookURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid webhook URL: %w", err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return errors.New("webhook URL scheme must be http or https")
+	}
+	hostname := u.Hostname()
+	if hostname == "" {
+		return errors.New("webhook URL has no hostname")
+	}
+	addrs, err := net.LookupHost(hostname)
+	if err != nil {
+		return fmt.Errorf("cannot resolve webhook hostname %q: %w", hostname, err)
+	}
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("webhook URL resolves to a private or internal address (%s)", addr)
+		}
+	}
+	return nil
+}
+
+// ssrfSafeTransport returns an http.Transport whose DialContext validates every
+// resolved IP address at connection time. This closes the DNS-rebinding window
+// that exists when validateWebhookURL and http.Client.Do resolve the hostname
+// independently: an attacker-controlled DNS server could return a public IP
+// during validation, then switch to a private IP for the real TCP dial.
+func ssrfSafeTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve webhook host %q: %w", host, err)
+			}
+			for _, a := range addrs {
+				ip := net.ParseIP(a)
+				if ip == nil {
+					continue
+				}
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+					return nil, fmt.Errorf("webhook host %q resolves to private/internal address %s", host, a)
+				}
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
+		},
+	}
+}
+
 // sendWebhook dispatches the audit log details to a Slack-compatible webhook URL.
 func (r *Repository) sendWebhook(ctx context.Context, url string, e Entry) error {
+	// Skip SSRF check only when a test client has been explicitly injected.
+	if r.webhookClient == nil {
+		if err := validateWebhookURL(url); err != nil {
+			return err
+		}
+	}
+
 	outcome := "success"
 	if e.Metadata != nil {
 		if o, ok := e.Metadata["outcome"].(string); ok {
@@ -137,7 +208,10 @@ func (r *Repository) sendWebhook(ctx context.Context, url string, e Entry) error
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := r.webhookClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second, Transport: ssrfSafeTransport()}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("dispatch webhook request: %w", err)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -37,15 +36,55 @@ func NewHandler(svc mfaService, rdb *redis.Client, recentWindow time.Duration) *
 	return &Handler{svc: svc, rdb: rdb, recentWindow: recentWindow}
 }
 
+const (
+	mfaMaxFailedAttempts = 5
+	mfaAttemptWindow     = 10 * time.Minute
+)
+
+// mfaStepUpAttemptsKey intentionally matches the key used by RequireRecentMFA
+// so that failed attempts from this handler and the middleware share one counter.
+func mfaStepUpAttemptsKey(userID string) string { return "mfa:stepup:fails:" + userID }
+func mfaDisableAttemptsKey(userID string) string { return "mfa:disable:fails:" + userID }
+
+func mfaAttemptsExceeded(ctx context.Context, rdb *redis.Client, key string) bool {
+	if rdb == nil {
+		return false
+	}
+	n, err := rdb.Get(ctx, key).Int()
+	if err != nil {
+		return false
+	}
+	return n >= mfaMaxFailedAttempts
+}
+
+func recordMFAFailure(ctx context.Context, rdb *redis.Client, key string) {
+	if rdb == nil {
+		return
+	}
+	n, err := rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return
+	}
+	if n == 1 {
+		rdb.Expire(ctx, key, mfaAttemptWindow)
+	}
+}
+
+func clearMFAFailures(ctx context.Context, rdb *redis.Client, key string) {
+	if rdb == nil {
+		return
+	}
+	rdb.Del(ctx, key)
+}
+
 func (h *Handler) ConfigureNotifier(n notifier) {
 	h.notif = n
 }
 
+// clientIP returns the real client IP, which TrustedClientIP middleware has
+// already resolved from proxy headers and written back into r.RemoteAddr.
 func clientIP(r *http.Request) string {
-	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-		return strings.SplitN(xf, ",", 2)[0]
-	}
-	return r.RemoteAddr
+	return authmw.ClientIP(r)
 }
 
 // POST /api/v1/mfa/setup — generate a new TOTP secret as a pending candidate.
@@ -128,10 +167,17 @@ func (h *Handler) Disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	disableFailKey := mfaDisableAttemptsKey(claims.UserID)
+	if mfaAttemptsExceeded(r.Context(), h.rdb, disableFailKey) {
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+		return
+	}
 	if err := h.svc.Disable(r.Context(), claims.UserID, req.Code); err != nil {
+		recordMFAFailure(r.Context(), h.rdb, disableFailKey)
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
 	}
+	clearMFAFailures(r.Context(), h.rdb, disableFailKey)
 
 	if h.notif != nil {
 		_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
@@ -177,10 +223,17 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	stepUpFailKey := mfaStepUpAttemptsKey(claims.UserID)
+	if mfaAttemptsExceeded(r.Context(), h.rdb, stepUpFailKey) {
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+		return
+	}
 	if !h.svc.Validate(r.Context(), claims.UserID, req.Code) {
+		recordMFAFailure(r.Context(), h.rdb, stepUpFailKey)
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
 	}
+	clearMFAFailures(r.Context(), h.rdb, stepUpFailKey)
 	if req.Reason != "" {
 		if extras := authmw.AuditExtrasFrom(r.Context()); extras != nil {
 			extras.Set("step_up_for", req.Reason)

@@ -180,7 +180,7 @@ func TestRefreshTokens_SucceedsWithinIdleWindow(t *testing.T) {
 		rotateLastActive: now.Add(-2 * time.Minute),
 		rotateExpiresAt:  now.Add(2 * time.Hour),
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}, IsActive: true}, store, nil)
 
 	pair, err := svc.RefreshTokens(context.Background(), "refresh-token", "127.0.0.1", "ua", map[string]string{"browser": "test"})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestRefreshTokens_RejectsWhenIdleTimeoutExceeded(t *testing.T) {
 		rotateLastActive: now.Add(-6 * time.Minute),
 		rotateExpiresAt:  now.Add(2 * time.Hour),
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}, IsActive: true}, store, nil)
 
 	_, err := svc.RefreshTokens(context.Background(), "refresh-token", "127.0.0.1", "ua", nil)
 	if !errors.Is(err, ErrInvalidToken) {
@@ -213,7 +213,7 @@ func TestRefreshTokens_AdminUsesStricterIdleTimeout(t *testing.T) {
 		rotateLastActive: now.Add(-4 * time.Minute),
 		rotateExpiresAt:  now.Add(2 * time.Hour),
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "admin1", Email: "admin@example.com", Locale: "en", Roles: []string{"admin"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "admin1", Email: "admin@example.com", Locale: "en", Roles: []string{"admin"}, IsActive: true}, store, nil)
 
 	_, err := svc.RefreshTokens(context.Background(), "refresh-token", "127.0.0.1", "ua", nil)
 	if !errors.Is(err, ErrInvalidToken) {
@@ -228,7 +228,7 @@ func TestRefreshTokens_RejectsWhenAbsoluteExpiryPassed(t *testing.T) {
 		rotateLastActive: now.Add(-1 * time.Minute),
 		rotateExpiresAt:  now.Add(-1 * time.Second),
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}, IsActive: true}, store, nil)
 
 	_, err := svc.RefreshTokens(context.Background(), "refresh-token", "127.0.0.1", "ua", nil)
 	if !errors.Is(err, ErrInvalidToken) {
@@ -244,7 +244,7 @@ func TestRefreshTokens_PreservesAbsoluteExpiryAcrossRotation(t *testing.T) {
 		rotateLastActive: now.Add(-2 * time.Minute),
 		rotateExpiresAt:  abs,
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}, IsActive: true}, store, nil)
 
 	_, err := svc.RefreshTokens(context.Background(), "refresh-token", "127.0.0.1", "ua", nil)
 	if err != nil {
@@ -262,7 +262,7 @@ func TestRefreshTokens_ConcurrentOnlyOneSucceeds(t *testing.T) {
 		lastActiveAt:   now.Add(-1 * time.Minute),
 		currentExpires: now.Add(2 * time.Hour),
 	}
-	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}}, store, nil)
+	svc := newRefreshPolicyService(t, &user.User{ID: "u1", Email: "u1@example.com", Locale: "en", Roles: []string{"viewer"}, IsActive: true}, store, nil)
 
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {

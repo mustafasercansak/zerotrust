@@ -501,7 +501,7 @@ func (s *Service) MFAChallenge(ctx context.Context, pendingToken, totpCode strin
 	}
 
 	u, err := s.users.FindByID(ctx, userID)
-	if err != nil {
+	if err != nil || !u.IsActive {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -670,7 +670,7 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken, ip, ua string
 	err := s.sessions.RotateSession(ctx, tokenHash,
 		func(userID string, lastActiveAt, currentExpiresAt time.Time) (string, string, string, map[string]string, time.Time, error) {
 			u, err := s.users.FindByID(ctx, userID)
-			if err != nil {
+			if err != nil || !u.IsActive {
 				return "", "", "", nil, time.Time{}, ErrInvalidToken
 			}
 

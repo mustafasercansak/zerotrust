@@ -197,8 +197,9 @@ func TestMFAChallenge(t *testing.T) {
 	}
 
 	mockUser := &user.User{
-		ID:    "u1",
-		Email: "test@example.com",
+		ID:       "u1",
+		Email:    "test@example.com",
+		IsActive: true,
 	}
 	usersReader := &testUserReader{byID: map[string]*user.User{"u1": mockUser}}
 	mfaChecker := &testMFAChecker{valid: true}
