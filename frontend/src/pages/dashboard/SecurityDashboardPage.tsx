@@ -342,7 +342,7 @@ export default function SecurityDashboardPage() {
         </Box>
         <Box sx={{ display: "flex", gap: 0.75 }}>
           {ranges.map((value) => (
-            <Button key={value} size="small" variant={range === value ? "contained" : "outlined"} onClick={() => setRange(value)}>
+            <Button key={value} size="small" variant={range === value ? "contained" : "outlined"} onClick={() => setRange(value)} data-testid={`range-button-${value}`}>
               {t(`ranges.${value}`)}
             </Button>
           ))}

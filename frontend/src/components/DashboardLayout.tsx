@@ -221,6 +221,7 @@ export default function DashboardLayout() {
                 component={Link}
                 to={to}
                 selected={pathname === to}
+                data-testid={`nav-${to === "/dashboard" ? "home" : to.replace("/dashboard/", "")}`}
                 sx={{
                   borderRadius: 1.25,
                   mb: 0.75,
@@ -274,7 +275,7 @@ export default function DashboardLayout() {
               </Avatar>
               <Box sx={{ minWidth: 0, textAlign: "left" }}>
                 <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>{displayName(me)}</Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>{me.email}</Typography>
+                <Typography variant="caption" color="text.secondary" noWrap data-testid="sidebar-user-email">{me.email}</Typography>
               </Box>
             </Button>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
@@ -296,6 +297,7 @@ export default function DashboardLayout() {
               onClick={handleLogout}
               color="inherit"
               size="small"
+              data-testid="logout-button"
               sx={{ justifyContent: "flex-start", px: 0 }}
             >
               {tCommon("logout")}

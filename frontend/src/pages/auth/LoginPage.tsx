@@ -243,7 +243,7 @@ export default function LoginPage() {
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value)}
               placeholder={isSetup ? "000000" : "000000 or xxxx-xxxx-xxxx"}
-              slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" } } }}
+              slotProps={{ htmlInput: { maxLength: 14, style: { textAlign: "center", fontFamily: "monospace" }, "data-testid": "mfa-code-input" } }}
             />
           )}
           {showTotp && (
@@ -277,6 +277,7 @@ export default function LoginPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           fullWidth
+          slotProps={{ htmlInput: { "data-testid": "login-email-input" } }}
         />
         <TextField
           label={t("password")}
@@ -285,6 +286,7 @@ export default function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           fullWidth
+          slotProps={{ htmlInput: { "data-testid": "login-password-input" } }}
           helperText={
             <MuiLink component={Link} to="/auth/forgot-password" underline="hover" variant="caption">
               {t("forgotLink")}

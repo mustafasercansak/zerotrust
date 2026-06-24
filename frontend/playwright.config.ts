@@ -39,7 +39,14 @@ export default defineConfig({
     // Unauthenticated tests (no setup dependency)
     {
       name: "unauthenticated",
-      testMatch: ["login-page.spec.ts", "protected-routes.spec.ts"],
+      testMatch: [
+        "login-page.spec.ts",
+        "protected-routes.spec.ts",
+        "password-reset.spec.ts",
+        "consent.spec.ts",
+        "dashboard.spec.ts",
+        "admin-pages.spec.ts",
+      ],
     },
 
     // Authenticated tests reuse the saved cookies

@@ -180,7 +180,7 @@ export default function HomePage() {
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap>{name}</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap data-testid="homepage-user-name">{name}</Typography>
             <VerifiedUserIcon color="success" sx={{ fontSize: 15 }} />
           </Box>
           {name !== me.email && (
@@ -224,6 +224,7 @@ export default function HomePage() {
                   color={mfaEnabled ? "success" : "warning"}
                   label={mfaEnabled ? t("enabled") : t("disabled")}
                   sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.75 } }}
+                  data-testid="homepage-mfa-chip"
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: 10 }}>
                   {mfaEnabled ? t("mfaEnabled") : t("mfaDisabled")}

@@ -141,14 +141,14 @@ export default function SessionsPage() {
       renderCell: ({ row }) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, height: "100%" }}>
           <Typography variant="body2">{parseUA(row.user_agent, row.device_info)}</Typography>
-          {row.is_current && <Chip size="small" color="primary" label={t("thisDevice")} />}
+          {row.is_current && <Chip size="small" color="primary" label={t("thisDevice")} data-testid="chip-current-session" />}
         </Box>
       ),
     },
     {
       field: "ip_address", headerName: t("ip"), flex: 0.8, minWidth: 150,
       renderCell: ({ row }) => (
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }} data-testid="session-ip">
           {row.ip_address || "—"}
         </Typography>
       ),
@@ -277,8 +277,8 @@ export default function SessionsPage() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, flexShrink: 0 }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)}>
-          <Tab label={t("tabActiveSessions")} />
-          <Tab label={t("tabLoginHistory")} />
+          <Tab label={t("tabActiveSessions")} data-testid="tab-active-sessions" />
+          <Tab label={t("tabLoginHistory")} data-testid="tab-login-history" />
         </Tabs>
       </Box>
 

@@ -349,10 +349,10 @@ export default function SettingsPage() {
       <Box sx={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", minHeight: 0, gap: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={activeTab} onChange={(_, val: number) => setActiveTab(val)}>
-            <Tab label={t("tabProfile")} id="tab-profile" />
-            <Tab label={t("tabSecurity")} id="tab-security" />
-            {isAdmin && <Tab label={t("tabSystem")} id="tab-system" />}
-            <Tab label={t("tabActivity")} id="tab-activity" />
+            <Tab label={t("tabProfile")} id="tab-profile" data-testid="tab-profile-settings" />
+            <Tab label={t("tabSecurity")} id="tab-security" data-testid="tab-security-sessions" />
+            {isAdmin && <Tab label={t("tabSystem")} id="tab-system" data-testid="tab-system-settings" />}
+            <Tab label={t("tabActivity")} id="tab-activity" data-testid="tab-login-activity" />
           </Tabs>
         </Box>
 
@@ -384,8 +384,8 @@ export default function SettingsPage() {
                   </Box>
                 </Box>
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-                  <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} />
-                  <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} />
+                  <TextField label={tProfile("firstName")} value={firstName} onChange={(e) => setFirstName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80, "data-testid": "settings-first-name" } }} />
+                  <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80, "data-testid": "settings-last-name" } }} />
                 </Box>
                 <Box>
                   <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
@@ -402,6 +402,7 @@ export default function SettingsPage() {
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   fullWidth
+                  slotProps={{ htmlInput: { "data-testid": "settings-current-password" } }}
                 />
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
                   <Box>
@@ -411,6 +412,7 @@ export default function SettingsPage() {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       fullWidth
+                      slotProps={{ htmlInput: { "data-testid": "settings-new-password" } }}
                     />
                     <PasswordStrengthBar password={newPassword} />
                   </Box>
@@ -420,6 +422,7 @@ export default function SettingsPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     fullWidth
+                    slotProps={{ htmlInput: { "data-testid": "settings-confirm-password" } }}
                   />
                 </Box>
                 <Box>

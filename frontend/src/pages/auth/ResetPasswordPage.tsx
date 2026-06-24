@@ -58,6 +58,7 @@ export default function ResetPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               fullWidth
+              slotProps={{ htmlInput: { "data-testid": "new-password-input" } }}
             />
             <PasswordStrengthBar password={password} />
           </Box>
@@ -68,6 +69,7 @@ export default function ResetPasswordPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             fullWidth
+            slotProps={{ htmlInput: { "data-testid": "confirm-password-input" } }}
           />
           {visibleError && <Alert severity="error">{visibleError}</Alert>}
           <Button type="submit" variant="contained" disabled={loading || !token}>

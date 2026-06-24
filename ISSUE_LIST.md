@@ -1697,7 +1697,7 @@ Status update:
 
 ### 78. Demo OAuth2 client with documented plaintext secret in migration
 
-State: OPEN
+State: CLOSED
 
 Severity: Low
 

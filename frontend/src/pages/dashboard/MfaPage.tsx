@@ -106,8 +106,8 @@ export default function MfaPage() {
           <Box sx={{ alignItems: { xs: "stretch", md: "center" }, display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) auto" } }}>
             <Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sectionTitle")}</Typography>
-                <Chip size="small" color="success" label={t("statusEnabled")} />
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }} data-testid="mfa-section-title">{t("sectionTitle")}</Typography>
+                <Chip size="small" color="success" label={t("statusEnabled")} data-testid="mfa-status-chip" />
               </Box>
               <Typography variant="body2" color="text.secondary">{t("enabledDesc")}</Typography>
             </Box>
@@ -116,7 +116,7 @@ export default function MfaPage() {
           <Box component="form" onSubmit={handleDisable} sx={{ alignItems: { xs: "stretch", sm: "center" }, display: "flex", flexWrap: "wrap", gap: 1.5 }}>
             <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 280px" }}>{t("disablePrompt")}</Typography>
             {codeField}
-            <Button type="submit" color="error" variant="contained" disabled={submitting || code.length !== 6}>
+            <Button type="submit" color="error" variant="contained" disabled={submitting || code.length !== 6} data-testid="mfa-disable-button">
               {t("disableButton")}
             </Button>
           </Box>
@@ -127,12 +127,12 @@ export default function MfaPage() {
         <Paper variant="outlined" sx={{ alignItems: { xs: "stretch", md: "center" }, display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) auto" }, px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider" }}>
           <Box>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sectionTitle")}</Typography>
-              <Chip size="small" variant="outlined" label={t("statusDisabled")} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }} data-testid="mfa-section-title">{t("sectionTitle")}</Typography>
+              <Chip size="small" variant="outlined" label={t("statusDisabled")} data-testid="mfa-status-chip" />
             </Box>
             <Typography variant="body2" color="text.secondary">{t("disabledDesc")}</Typography>
           </Box>
-          <Button onClick={handleSetup} variant="contained" disabled={submitting} sx={{ justifySelf: { md: "end" }, minWidth: 160 }}>
+          <Button onClick={handleSetup} variant="contained" disabled={submitting} data-testid="mfa-enable-button" sx={{ justifySelf: { md: "end" }, minWidth: 160 }}>
             {t("setupButton")}
           </Button>
         </Paper>
@@ -141,8 +141,8 @@ export default function MfaPage() {
       {status === "unsupported" && (
         <Paper variant="outlined" sx={{ px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("sectionTitle")}</Typography>
-            <Chip size="small" variant="outlined" color="warning" label={t("statusDisabled")} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }} data-testid="mfa-section-title">{t("sectionTitle")}</Typography>
+            <Chip size="small" variant="outlined" color="warning" label={t("statusDisabled")} data-testid="mfa-status-chip" />
           </Box>
           <Typography variant="body2" color="text.secondary">{t("unsupportedDesc")}</Typography>
         </Paper>

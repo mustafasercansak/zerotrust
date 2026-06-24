@@ -488,6 +488,7 @@ export default function AuditPage() {
         startIcon={<DownloadIcon />}
         disabled={exporting}
         onClick={(e) => setExportAnchor(e.currentTarget)}
+        data-testid="export-button"
       >
         {t("export")}
       </Button>

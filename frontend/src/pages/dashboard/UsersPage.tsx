@@ -841,7 +841,7 @@ export default function UsersPage() {
               </Button>
             </Box>
           ) : (
-            <Button variant="contained" onClick={openCreate}>+ {t("createUser")}</Button>
+            <Button variant="contained" onClick={openCreate} data-testid="create-user-button">+ {t("createUser")}</Button>
           )
         }
         refreshSignal={refresh}

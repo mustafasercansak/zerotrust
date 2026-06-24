@@ -112,7 +112,7 @@ export default function PasskeysSection() {
             }}
           />
         </Box>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }} data-testid="passkeys-section-title">
           {t("passkeys.title")}
         </Typography>
         {supported && (
