@@ -917,4 +917,59 @@ describe("SettingsPage page component", () => {
     expect(testSpy).not.toHaveBeenCalled();
     expect(toast.info).toHaveBeenCalledWith("webhookTestNoUrl");
   });
+
+  // ── IP / Country allowlist settings ─────────────────────────────────────────
+
+  it("initializes ip_allowlist and country_allowlist from settings API response", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      ip_allowlist: "10.0.0.0/8,192.168.1.1",
+      country_allowlist: "TR,US",
+      webhook_url: "https://hooks.slack.com/services/xyz",
+      webhook_enabled: "true",
+    });
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stateStore[29]).toBe("10.0.0.0/8,192.168.1.1"); // ipAllowlist
+    expect(stateStore[30]).toBe("TR,US");                   // countryAllowlist
+    expect(stateStore[27]).toBe("https://hooks.slack.com/services/xyz"); // webhookUrl
+    expect(stateStore[26]).toBe("true");                    // webhookEnabled
+  });
+
+  it("includes ip_allowlist and country_allowlist in system settings save payload", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const updateSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
+
+    stateStore[0] = 2;        // System tab
+    stateStore[6] = "5";      // maxSessions (valid: 1-20)
+    stateStore[9] = "5";      // maxLoginAttempts (valid: 1-20)
+    stateStore[10] = false;   // systemLoading = false → content renders
+    stateStore[16] = "300";   // idleTimeout (valid: 60-3600)
+    stateStore[17] = "180";   // adminIdleTimeout (valid: 60-1800)
+    stateStore[18] = "28800"; // absoluteTimeout (valid: 1800-172800)
+    stateStore[29] = "10.0.0.1,172.16.0.0/12"; // ipAllowlist
+    stateStore[30] = "TR,DE"; // countryAllowlist
+
+    runRender();
+    expect(capturedSubmits[capturedSubmits.length - 1]).toBeDefined();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+
+    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ip_allowlist: "10.0.0.1,172.16.0.0/12",
+      country_allowlist: "TR,DE",
+    }));
+  });
 });

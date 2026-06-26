@@ -5,6 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
 import { toast } from "sonner";
 import { renderToString } from "react-dom/server";
+import { isWebAuthnSupported, performAssertion } from "@/lib/webauthn";
 
 const mockNavigate = vi.fn();
 const mockSearchParams = new URLSearchParams();
@@ -37,6 +38,10 @@ vi.mock("sonner", () => ({
 }));
 vi.mock("qrcode.react", () => ({
   QRCodeSVG: () => React.createElement("div", null, "QRCode"),
+}));
+vi.mock("@/lib/webauthn", () => ({
+  isWebAuthnSupported: vi.fn().mockReturnValue(false),
+  performAssertion: vi.fn(),
 }));
 
 // State Mocking System
@@ -82,6 +87,8 @@ let capturedOnChangePassword: any = null;
 let capturedOnChangeTotpCode: any = null;
 let capturedOnChangeCodesSaved: any = null;
 let capturedBackButtonClick: any = null;
+let capturedPasswordlessClick: any = null;
+let capturedPasskeyMFAClick: any = null;
 
 vi.mock("@mui/material/Box", () => ({
   default: (props: any) => {
@@ -120,6 +127,12 @@ vi.mock("@mui/material/Button", () => ({
   default: (props: any) => {
     if (props.color === "inherit") {
       capturedBackButtonClick = props.onClick;
+    } else if (props.variant === "outlined" && props.type === "button") {
+      // "Sign in with a passkey" on the credentials screen
+      capturedPasswordlessClick = props.onClick;
+    } else if (props.type === "button" && props.variant === "contained") {
+      // "Use a passkey" on the MFA screen
+      capturedPasskeyMFAClick = props.onClick;
     }
     return React.createElement("button", { type: props.type, onClick: props.onClick }, props.children);
   },
@@ -138,7 +151,10 @@ describe("LoginPage component", () => {
     capturedOnChangeTotpCode = null;
     capturedOnChangeCodesSaved = null;
     capturedBackButtonClick = null;
+    capturedPasswordlessClick = null;
+    capturedPasskeyMFAClick = null;
     vi.clearAllMocks();
+    vi.mocked(isWebAuthnSupported).mockReturnValue(false);
     vi.useFakeTimers();
 
     vi.stubGlobal("window", {
@@ -438,6 +454,150 @@ describe("LoginPage component", () => {
     });
     await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
     expect(stateStore[6]).toEqual([]);
+  });
+
+  // ── Passwordless login (credentials screen) ───────────────────────────────
+
+  it("renders Sign in with passkey button only when WebAuthn is supported", () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(false);
+    let html = runRender();
+    expect(html).not.toContain("signInWithPasskey");
+
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    html = runRender();
+    expect(html).toContain("signInWithPasskey");
+    expect(capturedPasswordlessClick).toBeDefined();
+  });
+
+  it("handlePasswordlessLogin: navigates to dashboard on success", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    const fakeOptions = { publicKey: { timeout: 60000 }, ceremony_id: "c-1" };
+    const fakeAssertion = { id: "assert-1" };
+    vi.spyOn(api, "webauthnPasswordlessBegin").mockResolvedValue(fakeOptions as any);
+    vi.mocked(performAssertion).mockResolvedValue(fakeAssertion as any);
+    vi.spyOn(api, "webauthnPasswordlessFinish").mockResolvedValue({ ok: true });
+
+    runRender();
+    await capturedPasswordlessClick();
+
+    expect(api.webauthnPasswordlessBegin).toHaveBeenCalled();
+    expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
+    expect(api.webauthnPasswordlessFinish).toHaveBeenCalledWith("c-1", fakeAssertion);
+    expect(scheduleRefresh).toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("handlePasswordlessLogin: caps ceremony timeout to 60 s", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    const fakeOptions = { publicKey: { timeout: 300000 }, ceremony_id: "c-2" };
+    vi.spyOn(api, "webauthnPasswordlessBegin").mockResolvedValue(fakeOptions as any);
+    vi.mocked(performAssertion).mockResolvedValue({} as any);
+    vi.spyOn(api, "webauthnPasswordlessFinish").mockResolvedValue({ ok: true });
+
+    runRender();
+    await capturedPasswordlessClick();
+
+    expect(fakeOptions.publicKey.timeout).toBe(60000);
+  });
+
+  it("handlePasswordlessLogin: shows passkey_unavailable toast on NotAllowedError", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    vi.spyOn(api, "webauthnPasswordlessBegin").mockResolvedValue({ publicKey: { timeout: 60000 }, ceremony_id: "c-3" } as any);
+    const notAllowed = Object.assign(new Error("Not allowed"), { name: "NotAllowedError" });
+    vi.mocked(performAssertion).mockRejectedValue(notAllowed);
+
+    runRender();
+    await capturedPasswordlessClick();
+
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.passkey_unavailable"));
+  });
+
+  it("handlePasswordlessLogin: sets retryAfter on rate_limit_exceeded", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    vi.spyOn(api, "webauthnPasswordlessBegin").mockRejectedValue(
+      new ApiError("rate_limit_exceeded", 45, 429)
+    );
+
+    runRender();
+    await capturedPasswordlessClick();
+
+    expect(stateStore[10]).toBe(45);
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+  });
+
+  it("handlePasswordlessLogin: shows generic error toast on other failures", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    vi.spyOn(api, "webauthnPasswordlessBegin").mockRejectedValue(new Error("network error"));
+
+    runRender();
+    await capturedPasswordlessClick();
+
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
+  });
+
+  // ── Passkey as MFA second factor ───────────────────────────────────────────
+
+  it("renders Use a passkey button on MFA screen when webauthnEnabled is true", () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    stateStore[0] = "mfa";
+    stateStore[12] = true; // webauthnEnabled
+
+    const html = runRender();
+    expect(html).toContain("usePasskey");
+    expect(capturedPasskeyMFAClick).toBeDefined();
+  });
+
+  it("handlePasskeyLogin: navigates to dashboard on success during MFA stage", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-tok-xyz";
+    stateStore[12] = true; // webauthnEnabled
+
+    const fakeOptions = { publicKey: { challenge: "xyz" } };
+    const fakeAssertion = { id: "assert-mfa" };
+    vi.spyOn(api, "webauthnLoginBegin").mockResolvedValue(fakeOptions as any);
+    vi.mocked(performAssertion).mockResolvedValue(fakeAssertion as any);
+    vi.spyOn(api, "webauthnLoginFinish").mockResolvedValue({ ok: true } as any);
+
+    runRender();
+    await capturedPasskeyMFAClick();
+
+    expect(api.webauthnLoginBegin).toHaveBeenCalledWith("mfa-tok-xyz");
+    expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
+    expect(api.webauthnLoginFinish).toHaveBeenCalledWith("mfa-tok-xyz", fakeAssertion);
+    expect(scheduleRefresh).toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("handlePasskeyLogin: sets retryAfter on rate_limit_exceeded during MFA", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-tok";
+    stateStore[12] = true;
+
+    vi.spyOn(api, "webauthnLoginBegin").mockRejectedValue(
+      new ApiError("rate_limit_exceeded", 20, 429)
+    );
+
+    runRender();
+    await capturedPasskeyMFAClick();
+
+    expect(stateStore[10]).toBe(20);
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+  });
+
+  it("handlePasskeyLogin: shows generic error toast on failure during MFA", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    stateStore[0] = "mfa";
+    stateStore[3] = "mfa-tok";
+    stateStore[12] = true;
+
+    vi.spyOn(api, "webauthnLoginBegin").mockRejectedValue(new Error("hw error"));
+
+    runRender();
+    await capturedPasskeyMFAClick();
+
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
   });
 
   it("evaluates MFA button disabled branches fully", () => {
