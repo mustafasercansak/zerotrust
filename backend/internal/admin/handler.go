@@ -250,7 +250,10 @@ func (h *Handler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 	}
 	// Deauthorise existing sessions immediately so new roles take effect.
 	if h.sessions != nil {
-		_ = h.sessions.RevokeAllForUser(r.Context(), userID)
+		if err := h.sessions.RevokeAllForUser(r.Context(), userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -287,7 +290,10 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// Deactivating a user must immediately revoke all active sessions.
 	if !req.IsActive && h.sessions != nil {
-		_ = h.sessions.RevokeAllForUser(r.Context(), userID)
+		if err := h.sessions.RevokeAllForUser(r.Context(), userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -338,7 +344,10 @@ func (h *Handler) BulkSetStatus(w http.ResponseWriter, r *http.Request) {
 	// Revoke sessions for every deactivated user.
 	if !req.IsActive && h.sessions != nil {
 		for _, id := range filtered {
-			_ = h.sessions.RevokeAllForUser(r.Context(), id)
+			if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error")
+				return
+			}
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)

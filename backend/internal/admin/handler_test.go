@@ -191,6 +191,16 @@ func TestHandler_UpdateRoles(t *testing.T) {
 	if rrBad.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("Expected 422 Unprocessable Entity, got %d", rrBad.Code)
 	}
+
+	mockSessions.revokeAllErr = true
+	bodyRevokeFail := `{"roles": ["viewer"]}`
+	reqRevokeFail, _ := http.NewRequest("PATCH", "/api/v1/admin/users/"+u.ID+"/roles", bytes.NewBufferString(bodyRevokeFail))
+	reqRevokeFail = reqRevokeFail.WithContext(context.WithValue(reqRevokeFail.Context(), chi.RouteCtxKey, rctx))
+	rrRevokeFail := httptest.NewRecorder()
+	h.UpdateRoles(rrRevokeFail, reqRevokeFail)
+	if rrRevokeFail.Code != http.StatusInternalServerError {
+		t.Fatalf("Expected 500 when role update cannot revoke sessions, got %d", rrRevokeFail.Code)
+	}
 }
 
 func TestHandler_SetStatus(t *testing.T) {

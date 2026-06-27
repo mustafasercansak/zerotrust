@@ -100,7 +100,7 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 
 	if err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE action = 'auth.login_success'),
-		       COUNT(*) FILTER (WHERE action = 'auth.login_failed'),
+		       COUNT(*) FILTER (WHERE action IN ('auth.login_failed', 'auth.login_blocked')),
 		       COUNT(*) FILTER (WHERE action = 'auth.login_failed' AND metadata->>'reason' = 'account_locked'),
 		       COUNT(*) FILTER (WHERE action = 'login.anomaly'),
 		       COALESCE(AVG((metadata->>'risk_score')::numeric) FILTER (WHERE action IN ('auth.login_success', 'auth.login_blocked')), 0)
@@ -127,7 +127,7 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT %s AS bucket,
 		       COUNT(*) FILTER (WHERE action = 'auth.login_success'),
-		       COUNT(*) FILTER (WHERE action = 'auth.login_failed'),
+		       COUNT(*) FILTER (WHERE action IN ('auth.login_failed', 'auth.login_blocked')),
 		       COALESCE(AVG((metadata->>'risk_score')::numeric) FILTER (WHERE action IN ('auth.login_success', 'auth.login_blocked')), 0)
 		FROM audit_logs
 		WHERE created_at >= $1

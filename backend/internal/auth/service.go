@@ -141,7 +141,7 @@ var (
 	ErrInactiveUser       = errors.New("user_inactive")
 	// ErrDPoPReplay is returned when a DPoP proof's jti has already been used
 	// within the replay window. (ISSUE_LIST #35)
-	ErrDPoPReplay = errors.New("dpop_proof_replay")
+	ErrDPoPReplay      = errors.New("dpop_proof_replay")
 	ErrHighRiskBlocked = errors.New("high_risk_blocked")
 )
 
@@ -257,11 +257,11 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		return nil, ErrInvalidCredentials
 	}
 
-	// Password correct — clear lockout counters regardless of MFA outcome.
-	s.clearFailedAttempts(ctx, email)
-
 	// Risk score calculation
 	riskScore, anomalyType, anomalyDetails := s.calculateRiskScore(ctx, u.ID, u.Email, ip, ua, deviceInfo)
+	// Password correct — clear lockout counters after risk scoring so recent
+	// failed attempts can still contribute to adaptive authentication.
+	s.clearFailedAttempts(ctx, email)
 	riskBasedAuthEnabled := false
 	riskThresholdMfa := 40
 	riskThresholdBlock := 80
@@ -310,6 +310,9 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	forceTOTPSetup := s.mfa != nil && (globalMFARequired || riskMFARequired) && !totpEnabled && !webauthnEnabled
 
 	if totpEnabled || webauthnEnabled || forceTOTPSetup {
+		if s.rdb == nil {
+			return nil, errors.New("mfa_pending_store_unavailable")
+		}
 		token, err := generateOpaqueToken()
 		if err != nil {
 			return nil, err
@@ -337,10 +340,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			"setup_url":      setupURL,
 			"recovery_codes": recoveryCodes,
 		})
-		if s.rdb != nil {
-			if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
-				return nil, err
-			}
+		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
+			return nil, err
 		}
 		return &LoginResult{
 			MFARequired:      true,

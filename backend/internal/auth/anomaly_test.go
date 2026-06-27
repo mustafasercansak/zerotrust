@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/user"
 	"github.com/zerotrust/backend/pkg/geoip"
 )
@@ -96,7 +98,7 @@ func TestLogin_ImpossibleTravel(t *testing.T) {
 	store := &testAnomalySessionStore{sessions: sessions}
 	ks, _ := LoadOrGenerateKeyStore("", "")
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
-	
+
 	g := geoip.NewService("")
 	m := &testAnomalyMailer{}
 	svc.ConfigureSecurityAnomalies(g, m)
@@ -141,7 +143,7 @@ func TestLogin_NewDevice(t *testing.T) {
 	store := &testAnomalySessionStore{sessions: sessions}
 	ks, _ := LoadOrGenerateKeyStore("", "")
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
-	
+
 	g := geoip.NewService("")
 	m := &testAnomalyMailer{}
 	svc.ConfigureSecurityAnomalies(g, m)
@@ -267,7 +269,7 @@ func TestLogin_RiskBasedAuthBlock(t *testing.T) {
 	ks, _ := LoadOrGenerateKeyStore("", "")
 	setts := &testAnomalySettings{enabled: "true", mfa: 40, block: 80}
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, setts)
-	
+
 	g := geoip.NewService("")
 	svc.ConfigureSecurityAnomalies(g, nil)
 
@@ -285,7 +287,7 @@ type testAnomalyMFAChecker struct {
 	enabled bool
 }
 
-func (c *testAnomalyMFAChecker) IsEnabled(_ context.Context, _ string) bool { return c.enabled }
+func (c *testAnomalyMFAChecker) IsEnabled(_ context.Context, _ string) bool   { return c.enabled }
 func (c *testAnomalyMFAChecker) Validate(_ context.Context, _, _ string) bool { return true }
 func (c *testAnomalyMFAChecker) Setup(_ context.Context, _, _, _ string) (string, string, []string, error) {
 	return "url", "secret", []string{"code1"}, nil
@@ -293,6 +295,14 @@ func (c *testAnomalyMFAChecker) Setup(_ context.Context, _, _, _ string) (string
 func (c *testAnomalyMFAChecker) VerifyAndEnable(_ context.Context, _, _ string) error { return nil }
 
 func TestLogin_RiskBasedAuthAdaptiveMFA(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
 	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true}
 	reader := &dummyUserReader{u: u}
 
@@ -310,8 +320,8 @@ func TestLogin_RiskBasedAuthAdaptiveMFA(t *testing.T) {
 	ks, _ := LoadOrGenerateKeyStore("", "")
 	setts := &testAnomalySettings{enabled: "true", mfa: 20, block: 90}
 	mfaChecker := &testAnomalyMFAChecker{enabled: false} // User does not have MFA enabled
-	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, mfaChecker, setts)
-	
+	svc := NewService(reader, store, &testServiceAccountStore{}, rdb, ks, mfaChecker, setts)
+
 	g := geoip.NewService("")
 	svc.ConfigureSecurityAnomalies(g, nil)
 
@@ -328,5 +338,44 @@ func TestLogin_RiskBasedAuthAdaptiveMFA(t *testing.T) {
 	}
 	if res.MFASetupSecret != "secret" {
 		t.Errorf("expected MFA setup force-trigger secret, got %q", res.MFASetupSecret)
+	}
+}
+
+func TestLogin_RiskScoreIncludesRecentFailedAttemptsBeforeClearing(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	const email = "risk-fails@example.com"
+	u := &user.User{ID: "user-1", Email: email, IsActive: true}
+	reader := &dummyUserReader{u: u}
+	store := &testAnomalySessionStore{}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	setts := &testAnomalySettings{enabled: "true", mfa: 20, block: 100}
+	mfaChecker := &testAnomalyMFAChecker{enabled: true}
+	svc := NewService(reader, store, &testServiceAccountStore{}, rdb, ks, mfaChecker, setts)
+
+	svc.recordFailedAttempt(context.Background(), email, "1.1.1.1")
+	svc.recordFailedAttempt(context.Background(), email, "1.1.1.1")
+
+	res, err := svc.Login(context.Background(), email, "pass", "1.2.3.4", "Chrome", nil)
+	if err != nil {
+		t.Fatalf("unexpected login error: %v", err)
+	}
+	if res.RiskScore != 30 {
+		t.Fatalf("expected risk score 30 from two recent failures, got %d", res.RiskScore)
+	}
+	if res.AnomalyType != "multiple_failed_attempts" {
+		t.Fatalf("expected multiple_failed_attempts reason, got %q", res.AnomalyType)
+	}
+	if !res.MFARequired {
+		t.Fatal("expected adaptive MFA to be required")
+	}
+	if mr.Exists(failKey(email)) {
+		t.Fatal("expected failed-attempt counter to be cleared after successful password check")
 	}
 }

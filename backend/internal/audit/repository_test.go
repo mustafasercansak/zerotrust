@@ -187,6 +187,17 @@ func TestRepository_SecurityDashboard(t *testing.T) {
 		},
 		{
 			UserID:    &uid,
+			Action:    "auth.login_blocked",
+			IPAddress: "198.51.100.20",
+			Metadata: map[string]any{
+				"outcome":    "failure",
+				"reason":     "high_risk_blocked",
+				"risk_score": 90,
+				"location":   map[string]any{"country": "Germany"},
+			},
+		},
+		{
+			UserID:    &uid,
 			Action:    "login.anomaly",
 			IPAddress: "8.8.8.8",
 			Metadata:  map[string]any{"outcome": "success", "anomaly_type": "new_device"},
@@ -211,7 +222,7 @@ func TestRepository_SecurityDashboard(t *testing.T) {
 	if result.Range != "7d" || len(result.AuthActivity) != 7 {
 		t.Fatalf("unexpected range data: %+v", result)
 	}
-	if result.Metrics.SuccessfulLogins != 1 || result.Metrics.FailedLogins != 2 ||
+	if result.Metrics.SuccessfulLogins != 1 || result.Metrics.FailedLogins != 3 ||
 		result.Metrics.Lockouts != 1 || result.Metrics.Anomalies != 1 ||
 		result.Metrics.ActiveSessions != 1 {
 		t.Fatalf("unexpected metrics: %+v", result.Metrics)
@@ -224,6 +235,9 @@ func TestRepository_SecurityDashboard(t *testing.T) {
 	}
 	if len(result.FailedLoginIPs) != 1 || result.FailedLoginIPs[0].Count != 2 {
 		t.Fatalf("unexpected failed login IPs: %+v", result.FailedLoginIPs)
+	}
+	if len(result.BlockedCountries) != 1 || result.BlockedCountries[0].Name != "Germany" {
+		t.Fatalf("unexpected blocked countries: %+v", result.BlockedCountries)
 	}
 
 	result24h, err := repo.SecurityDashboard(ctx, "24h")
