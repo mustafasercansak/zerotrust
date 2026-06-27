@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func TestAuthenticate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to register user: %v", err)
 	}
-	tokenPair, _ := auth.GenerateTokenPair(ks, "session1", u.ID, u.Email, u.Roles, []string{}, time.Hour)
+	tokenPair, _ := auth.GenerateTokenPair(ks, u.ID, u.Email, "en", u.Roles, []string{}, time.Hour)
 
 	req3 := httptest.NewRequest("GET", "/", nil)
 	req3.Header.Set("Authorization", "Bearer "+tokenPair.AccessToken)
@@ -107,4 +108,122 @@ func TestAuthenticate(t *testing.T) {
 	if rr5.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for revoked session")
 	}
+}
+
+type mockSettings struct {
+	ipAllowlist      string
+	countryAllowlist string
+	deviceTrust      string
+}
+
+func (m *mockSettings) GetInt(_ context.Context, _ string, defaultVal int) int {
+	return defaultVal
+}
+func (m *mockSettings) GetString(_ context.Context, key string, defaultVal string) string {
+	if key == "ip_allowlist" {
+		return m.ipAllowlist
+	}
+	if key == "country_allowlist" {
+		return m.countryAllowlist
+	}
+	return defaultVal
+}
+func (m *mockSettings) GetBool(_ context.Context, key string, defaultVal bool) bool {
+	if key == "device_trust_enabled" {
+		return m.deviceTrust == "true"
+	}
+	return defaultVal
+}
+
+func TestCAE(t *testing.T) {
+	dbURL := testdb.URL(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	defer pool.Close()
+
+	userRepo := user.NewRepository(pool)
+	userSvc := user.NewService(userRepo)
+	sessionRepo := session.NewRepository(pool, nil)
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+
+	mockSetts := &mockSettings{}
+	authSvc := auth.NewService(userSvc, sessionRepo, nil, rdb, ks, nil, mockSetts)
+
+	handler := middleware.Authenticate(ks, authSvc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Register user
+	pool.Exec(ctx, "TRUNCATE TABLE users CASCADE")
+	u, err := userSvc.Register(ctx, "cae_test@example.com", "passW0rd123!", "en")
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+	tokenPair, _ := auth.GenerateTokenPair(ks, u.ID, u.Email, "en", u.Roles, []string{}, time.Hour)
+
+	// 1. Valid user works
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "127.0.0.1"
+	req.Header.Set("Authorization", "Bearer "+tokenPair.AccessToken)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	// 2. User deactivated in DB immediately rejects request
+	_, err = pool.Exec(ctx, "UPDATE users SET is_active = false WHERE id = $1", u.ID)
+	if err != nil {
+		t.Fatalf("failed to deactivate user: %v", err)
+	}
+
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req)
+	if rr2.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for inactive user, got %d", rr2.Code)
+	}
+	if !strings.Contains(rr2.Body.String(), "user_inactive") {
+		t.Errorf("expected user_inactive error message, got %s", rr2.Body.String())
+	}
+
+	// Reactivate user for next checks
+	pool.Exec(ctx, "UPDATE users SET is_active = true WHERE id = $1", u.ID)
+
+	// 3. Changed user roles immediately rejects request
+	err = userSvc.SetRoles(ctx, u.ID, []string{"admin"})
+	if err != nil {
+		t.Fatalf("failed to update user roles: %v", err)
+	}
+
+	rr3 := httptest.NewRecorder()
+	handler.ServeHTTP(rr3, req)
+	if rr3.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for changed roles, got %d", rr3.Code)
+	}
+
+	// Restore roles
+	userSvc.SetRoles(ctx, u.ID, []string{})
+
+	// 4. IP Allowlist change immediately blocks requests
+	mockSetts.ipAllowlist = "10.0.0.0/8" // Allow only private range
+	rr4 := httptest.NewRecorder()
+	handler.ServeHTTP(rr4, req) // coming from 127.0.0.1 (not in 10.0.0.0/8)
+	if rr4.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for blocked IP allowlist, got %d", rr4.Code)
+	}
+	if !strings.Contains(rr4.Body.String(), "ip_not_allowed") {
+		t.Errorf("expected ip_not_allowed error message, got %s", rr4.Body.String())
+	}
+
+	mockSetts.ipAllowlist = "" // reset
 }

@@ -217,6 +217,9 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		if allowlist := s.settings.GetString(ctx, "country_allowlist", ""); !isCountryAllowed(ip, allowlist, s.geoip) {
 			return nil, ErrCountryNotAllowed
 		}
+		if !isDeviceAllowed(ctx, deviceInfo, s.settings) {
+			return nil, ErrDeviceNotAllowed
+		}
 	}
 
 	if err := s.checkLockout(ctx, email); err != nil {
@@ -587,6 +590,9 @@ func (s *Service) WebAuthnPasswordlessFinish(ctx context.Context, ceremonyID str
 		if allowlist := s.settings.GetString(ctx, "country_allowlist", ""); !isCountryAllowed(ip, allowlist, s.geoip) {
 			return nil, ErrCountryNotAllowed
 		}
+		if !isDeviceAllowed(ctx, deviceInfo, s.settings) {
+			return nil, ErrDeviceNotAllowed
+		}
 	}
 
 	if s.webauthn == nil {
@@ -918,4 +924,75 @@ func hasAdminRole(roles []string) bool {
 		}
 	}
 	return false
+}
+
+// EvaluateAccess checks compliance with current system settings and entity configurations.
+func (s *Service) EvaluateAccess(ctx context.Context, claims *Claims, ip, ua string, deviceInfo map[string]string) error {
+	// 1. Session Revocation / Blocklist check
+	if s.IsRevoked(ctx, claims.ID) {
+		return ErrInvalidToken
+	}
+
+	// 2. IP and Country checks (if settings are available)
+	if s.settings != nil {
+		if allowlist := s.settings.GetString(ctx, "ip_allowlist", ""); !isIPAllowed(ip, allowlist) {
+			return ErrIPNotAllowed
+		}
+		if allowlist := s.settings.GetString(ctx, "country_allowlist", ""); !isCountryAllowed(ip, allowlist, s.geoip) {
+			return ErrCountryNotAllowed
+		}
+		if !isDeviceAllowed(ctx, deviceInfo, s.settings) {
+			return ErrDeviceNotAllowed
+		}
+	}
+
+	// 3. User or Service Account entity check
+	if claims.SubType == SubTypeUser {
+		if s.users != nil {
+			u, err := s.users.FindByID(ctx, claims.UserID)
+			if err != nil {
+				return ErrInvalidToken
+			}
+			if !u.IsActive {
+				return ErrInactiveUser
+			}
+			// Compare roles
+			if !stringSlicesEqual(claims.Roles, u.Roles) {
+				return ErrInvalidToken
+			}
+		}
+	} else if claims.SubType == SubTypeService {
+		if s.saSvc != nil {
+			sa, err := s.saSvc.FindByClientID(ctx, claims.ClientID)
+			if err != nil {
+				return ErrInvalidToken
+			}
+			if !sa.IsActive {
+				return ErrInvalidToken
+			}
+			// Compare scopes
+			if !stringSlicesEqual(claims.Scopes, sa.Scopes) {
+				return ErrInvalidToken
+			}
+		}
+	}
+
+	return nil
+}
+
+func stringSlicesEqual(s1, s2 []string) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+	m := make(map[string]int)
+	for _, v := range s1 {
+		m[v]++
+	}
+	for _, v := range s2 {
+		if m[v] == 0 {
+			return false
+		}
+		m[v]--
+	}
+	return true
 }

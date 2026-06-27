@@ -1,0 +1,10 @@
+INSERT INTO system_settings (key, value) VALUES ('device_trust_enabled', 'false');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_allowed_os', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_os_version_mac', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_os_version_win', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_allowed_browsers', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_browser_version_chrome', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_browser_version_safari', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_browser_version_firefox', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_min_browser_version_edge', '');
+INSERT INTO system_settings (key, value) VALUES ('device_trust_block_mobile', 'false');

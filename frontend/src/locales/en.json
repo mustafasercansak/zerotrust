@@ -88,7 +88,8 @@
       "webauthn_failed": "Passkey sign-in was cancelled or failed.",
       "passkey_unavailable": "No passkey was found on this device, or the request was cancelled.",
       "ip_not_allowed": "Sign-in is not allowed from your current IP address.",
-      "country_not_allowed": "Sign-in is not allowed from your current country or region."
+      "country_not_allowed": "Sign-in is not allowed from your current country or region.",
+      "device_not_allowed": "Sign-in is not allowed from your current device posture."
     },
     "usePasskey": "Use a passkey",
     "signInWithPasskey": "Sign in with a passkey",
@@ -541,6 +542,27 @@
     "tabSystem": "System Settings",
     "requireHardwareAttestation": "Require Hardware Security Keys (FIDO2)",
     "requireHardwareAttestationDesc": "Only permit registration of physical security keys (reject software and browser passkeys).",
+    "deviceTrust": "Device Trust / Posture Assessment",
+    "deviceTrustDesc": "Restrict access to devices running allowed operating systems and browser versions.",
+    "deviceTrustEnabled": "Enable Device Trust Validation",
+    "deviceTrustAllowedOs": "Allowed Operating Systems (comma-separated)",
+    "deviceTrustAllowedOsPlaceholder": "Windows, macOS, Linux",
+    "deviceTrustMinOsMac": "Min macOS Version",
+    "deviceTrustMinOsMacPlaceholder": "13.0.0",
+    "deviceTrustMinOsWin": "Min Windows Version",
+    "deviceTrustMinOsWinPlaceholder": "10.0",
+    "deviceTrustAllowedBrowsers": "Allowed Browsers (comma-separated)",
+    "deviceTrustAllowedBrowsersPlaceholder": "Chrome, Safari, Firefox",
+    "deviceTrustMinBrowserChrome": "Min Chrome Version",
+    "deviceTrustMinBrowserChromePlaceholder": "120.0",
+    "deviceTrustMinBrowserSafari": "Min Safari Version",
+    "deviceTrustMinBrowserSafariPlaceholder": "17.0",
+    "deviceTrustMinBrowserFirefox": "Min Firefox Version",
+    "deviceTrustMinBrowserFirefoxPlaceholder": "115.0",
+    "deviceTrustMinBrowserEdge": "Min Edge Version",
+    "deviceTrustMinBrowserEdgePlaceholder": "120.0",
+    "deviceTrustBlockMobile": "Block Mobile Devices",
+    "deviceTrustBlockMobileDesc": "Reject sign-ins from iOS, Android, or other mobile platforms.",
     "ipAllowlist": "IP Allowlist",
     "ipAllowlistDesc": "Restrict logins to these IP addresses or CIDR ranges. Leave empty to allow all IPs. One entry per line or comma-separated.",
     "ipAllowlistInput": "Allowed IPs / CIDRs",
@@ -601,7 +623,8 @@
     "errors": {
       "internal_error": "Server error. Please try again.",
       "invalid_value": "Invalid value.",
-      "unknown_setting": "Unknown setting key."
+      "unknown_setting": "Unknown setting key.",
+      "device_not_allowed": "Your device is not allowed access by the system administrator."
     },
     "oidc": {
       "title": "OIDC Identity Provider Configuration",

@@ -88,7 +88,8 @@
       "webauthn_failed": "Geçiş anahtarıyla oturum açma iptal edildi veya başarısız oldu.",
       "passkey_unavailable": "Bu cihazda geçiş anahtarı bulunamadı veya istek iptal edildi.",
       "ip_not_allowed": "Mevcut IP adresinizden oturum açmaya izin verilmiyor.",
-      "country_not_allowed": "Bulunduğunuz ülke veya bölgeden oturum açmaya izin verilmiyor."
+      "country_not_allowed": "Bulunduğunuz ülke veya bölgeden oturum açmaya izin verilmiyor.",
+      "device_not_allowed": "Mevcut cihazınızın güvenlik profilinden ötürü oturum açmaya izin verilmiyor."
     },
     "usePasskey": "Geçiş anahtarı kullan",
     "signInWithPasskey": "Geçiş anahtarıyla giriş yap",
@@ -541,6 +542,27 @@
     "tabSystem": "Sistem Ayarları",
     "requireHardwareAttestation": "Donanımsal Güvenlik Anahtarı Zorunluluğu (FIDO2)",
     "requireHardwareAttestationDesc": "Yalnızca fiziksel güvenlik anahtarlarının kaydedilmesine izin ver (yazılımsal ve tarayıcı geçiş anahtarlarını reddet).",
+    "deviceTrust": "Cihaz Güvenlik Analizi (Device Trust)",
+    "deviceTrustDesc": "Erişimi yalnızca izin verilen işletim sistemlerine ve tarayıcı sürümlerine sahip cihazlarla sınırlandırın.",
+    "deviceTrustEnabled": "Cihaz Güvenlik Analizini Etkinleştir",
+    "deviceTrustAllowedOs": "İzin Verilen İşletim Sistemleri (virgülle ayrılmış)",
+    "deviceTrustAllowedOsPlaceholder": "Windows, macOS, Linux",
+    "deviceTrustMinOsMac": "Minimum macOS Sürümü",
+    "deviceTrustMinOsMacPlaceholder": "13.0.0",
+    "deviceTrustMinOsWin": "Minimum Windows Sürümü",
+    "deviceTrustMinOsWinPlaceholder": "10.0",
+    "deviceTrustAllowedBrowsers": "İzin Verilen Tarayıcılar (virgülle ayrılmış)",
+    "deviceTrustAllowedBrowsersPlaceholder": "Chrome, Safari, Firefox",
+    "deviceTrustMinBrowserChrome": "Minimum Chrome Sürümü",
+    "deviceTrustMinBrowserChromePlaceholder": "120.0",
+    "deviceTrustMinBrowserSafari": "Minimum Safari Sürümü",
+    "deviceTrustMinBrowserSafariPlaceholder": "17.0",
+    "deviceTrustMinBrowserFirefox": "Minimum Firefox Sürümü",
+    "deviceTrustMinBrowserFirefoxPlaceholder": "115.0",
+    "deviceTrustMinBrowserEdge": "Minimum Edge Sürümü",
+    "deviceTrustMinBrowserEdgePlaceholder": "120.0",
+    "deviceTrustBlockMobile": "Mobil Cihazları Engelle",
+    "deviceTrustBlockMobileDesc": "iOS, Android ve diğer mobil platformlardan gelen oturum açma isteklerini reddet.",
     "ipAllowlist": "IP İzin Listesi",
     "ipAllowlistDesc": "Oturum açmayı yalnızca bu IP adresleri veya CIDR aralıklarıyla sınırlandırın. Tüm IP'lere izin vermek için boş bırakın. Satır başına bir giriş veya virgülle ayrılmış.",
     "ipAllowlistInput": "İzin Verilen IP'ler / CIDR'ler",
@@ -601,7 +623,8 @@
     "errors": {
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin.",
       "invalid_value": "Geçersiz değer.",
-      "unknown_setting": "Bilinmeyen ayar anahtarı."
+      "unknown_setting": "Bilinmeyen ayar anahtarı.",
+      "device_not_allowed": "Cihazınız sistem yöneticisi tarafından belirlenen güvenlik politikalarına uymuyor."
     },
     "oidc": {
       "title": "OIDC Kimlik Sağlayıcı Yapılandırması",

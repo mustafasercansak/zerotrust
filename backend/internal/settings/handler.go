@@ -93,6 +93,36 @@ var allowedKeys = map[string]func(string) bool{
 		}
 		return true
 	},
+	"device_trust_enabled": func(v string) bool {
+		return v == "true" || v == "false"
+	},
+	"device_trust_allowed_os": func(v string) bool {
+		return true
+	},
+	"device_trust_min_os_version_mac": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_min_os_version_win": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_allowed_browsers": func(v string) bool {
+		return true
+	},
+	"device_trust_min_browser_version_chrome": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_min_browser_version_safari": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_min_browser_version_firefox": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_min_browser_version_edge": func(v string) bool {
+		return isVersionString(v)
+	},
+	"device_trust_block_mobile": func(v string) bool {
+		return v == "true" || v == "false"
+	},
 }
 
 type Handler struct {
@@ -152,4 +182,22 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func isVersionString(v string) bool {
+	if v == "" {
+		return true
+	}
+	parts := strings.Split(v, ".")
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, r := range p {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }

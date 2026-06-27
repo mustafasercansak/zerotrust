@@ -200,7 +200,7 @@ func TestHandler_OAuthFlow_Integration(t *testing.T) {
 	_, err = pool.Exec(ctx, `
 		INSERT INTO oauth2_clients (client_id, client_secret_hash, name, redirect_uris, allowed_scopes)
 		VALUES ($1, $2, $3, $4, $5)
-	`, "test-client-id", clientSecretHash, "Test Client", []string{"http://localhost/callback"}, []string{"openid", "profile"})
+	`, "test-client-id", clientSecretHash, "Test Client", []string{"http://localhost/callback"}, []string{"openid", "profile", "email"})
 	if err != nil {
 		t.Fatalf("insert client failed: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestHandler_OAuthFlow_Integration(t *testing.T) {
 		Value: tokenStr.AccessToken,
 	}
 
-	req, _ := http.NewRequest("GET", "/oauth2/authorize?client_id=test-client-id&redirect_uri=http://localhost/callback&response_type=code&scope=openid+profile&state=abc", nil)
+	req, _ := http.NewRequest("GET", "/oauth2/authorize?client_id=test-client-id&redirect_uri=http://localhost/callback&response_type=code&scope=openid+profile+email&state=abc", nil)
 	req.AddCookie(cookie)
 	// Mock a dummy authSvc to bypass IsRevoked check
 	dummyAuthSvc := auth.NewService(userSvc, &mockSessionRepo{}, &testServiceAccountStore{}, rdb, ks, nil, nil)
@@ -262,7 +262,7 @@ func TestHandler_OAuthFlow_Integration(t *testing.T) {
 	consentReqBody, _ := json.Marshal(ConsentRequest{
 		ClientID:     "test-client-id",
 		RedirectURI:  "http://localhost/callback",
-		Scopes:       []string{"openid", "profile"},
+		Scopes:       []string{"openid", "profile", "email"},
 		State:        "abc",
 		Approved:     true,
 	})

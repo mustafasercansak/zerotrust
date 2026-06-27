@@ -148,7 +148,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
+	clientInfo := req.ClientInfo
+	if len(clientInfo) == 0 {
+		clientInfo = parseXClientInfo(r)
+	}
+
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), clientInfo)
 	if err != nil {
 		var lockedErr *AccountLockedError
 		switch {
@@ -158,7 +163,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, "account_locked", http.StatusTooManyRequests, req.ClientInfo),
+				Metadata:  authMetadata(req.Email, "account_locked", http.StatusTooManyRequests, clientInfo),
 			}, true)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -172,7 +177,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, "ip_not_allowed", http.StatusForbidden, req.ClientInfo),
+				Metadata:  authMetadata(req.Email, "ip_not_allowed", http.StatusForbidden, clientInfo),
 			}, true)
 			writeError(w, http.StatusForbidden, "ip_not_allowed")
 		case errors.Is(err, ErrCountryNotAllowed):
@@ -181,16 +186,25 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, "country_not_allowed", http.StatusForbidden, req.ClientInfo),
+				Metadata:  authMetadata(req.Email, "country_not_allowed", http.StatusForbidden, clientInfo),
 			}, true)
 			writeError(w, http.StatusForbidden, "country_not_allowed")
+		case errors.Is(err, ErrDeviceNotAllowed):
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/login",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata(req.Email, "device_not_allowed", http.StatusForbidden, clientInfo),
+			}, true)
+			writeError(w, http.StatusForbidden, "device_not_allowed")
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
 			h.logAudit(r.Context(), audit.Entry{
 				Action:    "auth.login_failed",
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, err.Error(), http.StatusUnauthorized, req.ClientInfo),
+				Metadata:  authMetadata(req.Email, err.Error(), http.StatusUnauthorized, clientInfo),
 			}, true)
 			writeError(w, http.StatusUnauthorized, err.Error())
 		default:
@@ -400,7 +414,8 @@ func (h *Handler) WebAuthnPasswordlessFinish(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	pair, err := h.authSvc.WebAuthnPasswordlessFinish(r.Context(), req.CeremonyID, req.Credential, r.RemoteAddr, r.Header.Get("User-Agent"), nil)
+	clientInfo := parseXClientInfo(r)
+	pair, err := h.authSvc.WebAuthnPasswordlessFinish(r.Context(), req.CeremonyID, req.Credential, r.RemoteAddr, r.Header.Get("User-Agent"), clientInfo)
 	if err != nil {
 		if errors.Is(err, ErrIPNotAllowed) {
 			h.logAudit(r.Context(), audit.Entry{
@@ -422,6 +437,17 @@ func (h *Handler) WebAuthnPasswordlessFinish(w http.ResponseWriter, r *http.Requ
 				Metadata:  statusMetadata("country_not_allowed", http.StatusForbidden),
 			}, true)
 			writeError(w, http.StatusForbidden, "country_not_allowed")
+			return
+		}
+		if errors.Is(err, ErrDeviceNotAllowed) {
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/webauthn/passwordless/finish",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata("", "device_not_allowed", http.StatusForbidden, clientInfo),
+			}, true)
+			writeError(w, http.StatusForbidden, "device_not_allowed")
 			return
 		}
 		h.logAudit(r.Context(), audit.Entry{
@@ -546,17 +572,34 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientInfo := req.ClientInfo
+	if len(clientInfo) == 0 {
+		clientInfo = parseXClientInfo(r)
+	}
+
 	h.logAudit(r.Context(), audit.Entry{
 		UserID:    &u.ID,
 		Action:    "auth.register",
 		Resource:  "/api/v1/auth/register",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
-		Metadata:  authMetadata(req.Email, "", http.StatusCreated, req.ClientInfo),
+		Metadata:  authMetadata(req.Email, "", http.StatusCreated, clientInfo),
 	}, false)
 
-	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), req.ClientInfo)
+	result, err := h.authSvc.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.Header.Get("User-Agent"), clientInfo)
 	if err != nil {
+		if errors.Is(err, ErrIPNotAllowed) {
+			writeError(w, http.StatusForbidden, "ip_not_allowed")
+			return
+		}
+		if errors.Is(err, ErrCountryNotAllowed) {
+			writeError(w, http.StatusForbidden, "country_not_allowed")
+			return
+		}
+		if errors.Is(err, ErrDeviceNotAllowed) {
+			writeError(w, http.StatusForbidden, "device_not_allowed")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
@@ -781,4 +824,16 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func parseXClientInfo(r *http.Request) map[string]string {
+	raw := r.Header.Get("X-Client-Info")
+	if raw == "" {
+		return nil
+	}
+	var clientInfo map[string]string
+	if err := json.Unmarshal([]byte(raw), &clientInfo); err != nil {
+		return nil
+	}
+	return clientInfo
 }

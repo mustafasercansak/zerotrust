@@ -61,7 +61,7 @@ vi.mock("react", async (importOriginal) => {
           stateStore[idx] = newVal;
         }
       };
-      if (callIdx >= 35) {
+      if (callIdx >= 55) {
         callIdx = 0;
       }
       return [stateStore[idx], stateSetters[idx]];

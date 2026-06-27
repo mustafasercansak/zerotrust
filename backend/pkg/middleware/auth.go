@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -32,7 +33,23 @@ func Authenticate(ks *auth.KeyStore, authSvc *auth.Service) func(http.Handler) h
 				return
 			}
 
-			if authSvc.IsRevoked(r.Context(), claims.ID) {
+			if err := authSvc.EvaluateAccess(r.Context(), claims, r.RemoteAddr, r.Header.Get("User-Agent"), parseXClientInfo(r)); err != nil {
+				if errors.Is(err, auth.ErrDeviceNotAllowed) {
+					writeError(w, http.StatusForbidden, "device_not_allowed")
+					return
+				}
+				if errors.Is(err, auth.ErrIPNotAllowed) {
+					writeError(w, http.StatusForbidden, "ip_not_allowed")
+					return
+				}
+				if errors.Is(err, auth.ErrCountryNotAllowed) {
+					writeError(w, http.StatusForbidden, "country_not_allowed")
+					return
+				}
+				if errors.Is(err, auth.ErrInactiveUser) {
+					writeError(w, http.StatusUnauthorized, "user_inactive")
+					return
+				}
 				writeError(w, http.StatusUnauthorized, "invalid_token")
 				return
 			}
@@ -83,4 +100,16 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func parseXClientInfo(r *http.Request) map[string]string {
+	raw := r.Header.Get("X-Client-Info")
+	if raw == "" {
+		return nil
+	}
+	var clientInfo map[string]string
+	if err := json.Unmarshal([]byte(raw), &clientInfo); err != nil {
+		return nil
+	}
+	return clientInfo
 }

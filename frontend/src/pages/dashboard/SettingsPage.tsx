@@ -127,6 +127,18 @@ export default function SettingsPage() {
   // Country allowlist (appended last to preserve test state indices)
   const [countryAllowlist, setCountryAllowlist] = useState("");
 
+  // Device Trust / Posture settings states
+  const [deviceTrustEnabled, setDeviceTrustEnabled] = useState("false");
+  const [deviceTrustAllowedOs, setDeviceTrustAllowedOs] = useState("");
+  const [deviceTrustMinOsVersionMac, setDeviceTrustMinOsVersionMac] = useState("");
+  const [deviceTrustMinOsVersionWin, setDeviceTrustMinOsVersionWin] = useState("");
+  const [deviceTrustAllowedBrowsers, setDeviceTrustAllowedBrowsers] = useState("");
+  const [deviceTrustMinBrowserVersionChrome, setDeviceTrustMinBrowserVersionChrome] = useState("");
+  const [deviceTrustMinBrowserVersionSafari, setDeviceTrustMinBrowserVersionSafari] = useState("");
+  const [deviceTrustMinBrowserVersionFirefox, setDeviceTrustMinBrowserVersionFirefox] = useState("");
+  const [deviceTrustMinBrowserVersionEdge, setDeviceTrustMinBrowserVersionEdge] = useState("");
+  const [deviceTrustBlockMobile, setDeviceTrustBlockMobile] = useState("false");
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
@@ -173,6 +185,16 @@ export default function SettingsPage() {
         setIdleTimeout(s["session_idle_timeout_seconds"] ?? "300");
         setAdminIdleTimeout(s["session_idle_timeout_seconds_admin"] ?? "180");
         setAbsoluteTimeout(s["session_absolute_timeout_seconds"] ?? "28800");
+        setDeviceTrustEnabled(s["device_trust_enabled"] ?? "false");
+        setDeviceTrustAllowedOs(s["device_trust_allowed_os"] ?? "");
+        setDeviceTrustMinOsVersionMac(s["device_trust_min_os_version_mac"] ?? "");
+        setDeviceTrustMinOsVersionWin(s["device_trust_min_os_version_win"] ?? "");
+        setDeviceTrustAllowedBrowsers(s["device_trust_allowed_browsers"] ?? "");
+        setDeviceTrustMinBrowserVersionChrome(s["device_trust_min_browser_version_chrome"] ?? "");
+        setDeviceTrustMinBrowserVersionSafari(s["device_trust_min_browser_version_safari"] ?? "");
+        setDeviceTrustMinBrowserVersionFirefox(s["device_trust_min_browser_version_firefox"] ?? "");
+        setDeviceTrustMinBrowserVersionEdge(s["device_trust_min_browser_version_edge"] ?? "");
+        setDeviceTrustBlockMobile(s["device_trust_block_mobile"] ?? "false");
       })
       .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
@@ -326,6 +348,16 @@ export default function SettingsPage() {
         session_idle_timeout_seconds: String(idle),
         session_idle_timeout_seconds_admin: String(adminIdle),
         session_absolute_timeout_seconds: String(absolute),
+        device_trust_enabled: deviceTrustEnabled,
+        device_trust_allowed_os: deviceTrustAllowedOs,
+        device_trust_min_os_version_mac: deviceTrustMinOsVersionMac,
+        device_trust_min_os_version_win: deviceTrustMinOsVersionWin,
+        device_trust_allowed_browsers: deviceTrustAllowedBrowsers,
+        device_trust_min_browser_version_chrome: deviceTrustMinBrowserVersionChrome,
+        device_trust_min_browser_version_safari: deviceTrustMinBrowserVersionSafari,
+        device_trust_min_browser_version_firefox: deviceTrustMinBrowserVersionFirefox,
+        device_trust_min_browser_version_edge: deviceTrustMinBrowserVersionEdge,
+        device_trust_block_mobile: deviceTrustBlockMobile,
       }), "settings_update");
       toast.success(t("saved"));
     } catch (err) {
@@ -680,6 +712,121 @@ export default function SettingsPage() {
                       sx={{ mt: 0.5 }}
                     />
                   </Box>
+                </Box>
+
+                {/* Device Trust / Posture Assessment Section */}
+                <Box sx={{ display: "grid", gap: 2, p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: 2, bgcolor: "action.hover" }}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.95rem" }}>{t("deviceTrust")}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{t("deviceTrustDesc")}</Typography>
+                  </Box>
+                  
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={deviceTrustEnabled === "true"}
+                        onChange={(e) => setDeviceTrustEnabled(e.target.checked ? "true" : "false")}
+                        color="primary"
+                      />
+                    }
+                    label={t("deviceTrustEnabled")}
+                  />
+
+                  {deviceTrustEnabled === "true" && (
+                    <Box sx={{ display: "grid", gap: 2.5, mt: 1 }}>
+                      {/* OS and Mobile Block */}
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                        <TextField
+                          label={t("deviceTrustAllowedOs")}
+                          value={deviceTrustAllowedOs}
+                          onChange={(e) => setDeviceTrustAllowedOs(e.target.value)}
+                          placeholder={t("deviceTrustAllowedOsPlaceholder")}
+                          size="small"
+                          fullWidth
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-allowed-os" } }}
+                        />
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={deviceTrustBlockMobile === "true"}
+                              onChange={(e) => setDeviceTrustBlockMobile(e.target.checked ? "true" : "false")}
+                              color="primary"
+                            />
+                          }
+                          label={t("deviceTrustBlockMobile")}
+                        />
+                      </Box>
+
+                      {/* OS Min Versions */}
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                        <TextField
+                          label={t("deviceTrustMinOsMac")}
+                          value={deviceTrustMinOsVersionMac}
+                          onChange={(e) => setDeviceTrustMinOsVersionMac(e.target.value)}
+                          placeholder={t("deviceTrustMinOsMacPlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-os-mac" } }}
+                        />
+                        <TextField
+                          label={t("deviceTrustMinOsWin")}
+                          value={deviceTrustMinOsVersionWin}
+                          onChange={(e) => setDeviceTrustMinOsVersionWin(e.target.value)}
+                          placeholder={t("deviceTrustMinOsWinPlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-os-win" } }}
+                        />
+                      </Box>
+
+                      {/* Allowed Browsers */}
+                      <Box sx={{ display: "grid", gap: 0.75 }}>
+                        <TextField
+                          label={t("deviceTrustAllowedBrowsers")}
+                          value={deviceTrustAllowedBrowsers}
+                          onChange={(e) => setDeviceTrustAllowedBrowsers(e.target.value)}
+                          placeholder={t("deviceTrustAllowedBrowsersPlaceholder")}
+                          size="small"
+                          fullWidth
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-allowed-browsers" } }}
+                        />
+                      </Box>
+
+                      {/* Browser Min Versions */}
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(4, 1fr)" }, gap: 2 }}>
+                        <TextField
+                          label={t("deviceTrustMinBrowserChrome")}
+                          value={deviceTrustMinBrowserVersionChrome}
+                          onChange={(e) => setDeviceTrustMinBrowserVersionChrome(e.target.value)}
+                          placeholder={t("deviceTrustMinBrowserChromePlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-browser-chrome" } }}
+                        />
+                        <TextField
+                          label={t("deviceTrustMinBrowserSafari")}
+                          value={deviceTrustMinBrowserVersionSafari}
+                          onChange={(e) => setDeviceTrustMinBrowserVersionSafari(e.target.value)}
+                          placeholder={t("deviceTrustMinBrowserSafariPlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-browser-safari" } }}
+                        />
+                        <TextField
+                          label={t("deviceTrustMinBrowserFirefox")}
+                          value={deviceTrustMinBrowserVersionFirefox}
+                          onChange={(e) => setDeviceTrustMinBrowserVersionFirefox(e.target.value)}
+                          placeholder={t("deviceTrustMinBrowserFirefoxPlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-browser-firefox" } }}
+                        />
+                        <TextField
+                          label={t("deviceTrustMinBrowserEdge")}
+                          value={deviceTrustMinBrowserVersionEdge}
+                          onChange={(e) => setDeviceTrustMinBrowserVersionEdge(e.target.value)}
+                          placeholder={t("deviceTrustMinBrowserEdgePlaceholder")}
+                          size="small"
+                          slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-browser-edge" } }}
+                        />
+                      </Box>
+                    </Box>
+                  )}
                 </Box>
 
                 {/* Row 5: IP Allowlist */}
