@@ -265,3 +265,153 @@ test.describe("Settings page — admin user", () => {
     await expect(page.getByTestId("tab-system-settings")).toBeVisible({ timeout: 6_000 });
   });
 });
+
+// ─── Settings page — admin System Settings tab content ───────────────────────
+
+const MOCK_ADMIN_SETTINGS = {
+  max_sessions_per_user: "5",
+  password_complexity: "strong",
+  global_mfa_required: "false",
+  require_hardware_attestation: "false",
+  webhook_enabled: "true",
+  webhook_url: "https://hooks.slack.com/services/test",
+  ip_allowlist: "10.0.0.0/8,192.168.1.1",
+  country_allowlist: "TR,US",
+  max_login_attempts: "5",
+  session_idle_timeout_seconds: "300",
+  session_idle_timeout_seconds_admin: "180",
+  session_absolute_timeout_seconds: "28800",
+};
+
+test.describe("Settings page — System Settings tab content", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAuthenticatedUser(page, MOCK_ADMIN);
+    await page.route("**/api/v1/admin/settings", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_ADMIN_SETTINGS) }),
+    );
+    await page.goto("/dashboard/settings");
+    await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
+    await page.getByTestId("tab-system-settings").click();
+  });
+
+  test("shows max sessions field with loaded value", async ({ page }) => {
+    await expect(page.getByTestId("settings-max-sessions")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-max-sessions")).toHaveValue("5");
+  });
+
+  test("shows max login attempts field with loaded value", async ({ page }) => {
+    await expect(page.getByTestId("settings-max-login-attempts")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-max-login-attempts")).toHaveValue("5");
+  });
+
+  test("shows IP allowlist field with loaded value", async ({ page }) => {
+    await expect(page.getByTestId("settings-ip-allowlist")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-ip-allowlist")).toHaveValue("10.0.0.0/8,192.168.1.1");
+  });
+
+  test("shows country allowlist field with loaded value", async ({ page }) => {
+    await expect(page.getByTestId("settings-country-allowlist")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-country-allowlist")).toHaveValue("TR,US");
+  });
+
+  test("shows webhook URL field with loaded value", async ({ page }) => {
+    await expect(page.getByTestId("settings-webhook-url")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-webhook-url")).toHaveValue("https://hooks.slack.com/services/test");
+  });
+
+  test("webhook test button is enabled when URL is set and webhook is enabled", async ({ page }) => {
+    await expect(page.getByTestId("settings-webhook-test")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-webhook-test")).toBeEnabled();
+  });
+
+  test("system save button is visible and enabled", async ({ page }) => {
+    await expect(page.getByTestId("settings-system-save")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("settings-system-save")).toBeEnabled();
+  });
+
+  test("saves system settings and calls API on submit", async ({ page }) => {
+    let patchCalled = false;
+    await page.route("**/api/v1/admin/settings", async (r) => {
+      if (r.request().method() !== "GET") {
+        patchCalled = true;
+        await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_ADMIN_SETTINGS) });
+      } else {
+        await r.continue();
+      }
+    });
+    await expect(page.getByTestId("settings-system-save")).toBeVisible({ timeout: 6_000 });
+    await page.getByTestId("settings-system-save").click();
+    await expect(async () => {
+      expect(patchCalled).toBe(true);
+    }).toPass({ timeout: 4_000 });
+  });
+
+  test("IP allowlist field accepts new input", async ({ page }) => {
+    const field = page.getByTestId("settings-ip-allowlist");
+    await expect(field).toBeVisible({ timeout: 6_000 });
+    await field.fill("172.16.0.0/12");
+    await expect(field).toHaveValue("172.16.0.0/12");
+  });
+
+  test("country allowlist field accepts new input", async ({ page }) => {
+    const field = page.getByTestId("settings-country-allowlist");
+    await expect(field).toBeVisible({ timeout: 6_000 });
+    await field.fill("DE,FR");
+    await expect(field).toHaveValue("DE,FR");
+  });
+});
+
+// ─── Settings page — Login Activity tab ──────────────────────────────────────
+
+test.describe("Settings page — Login Activity tab", () => {
+  test("shows empty state when no activity entries", async ({ page }) => {
+    await mockAuthenticatedUser(page, MOCK_USER);
+    await page.route("**/api/v1/me/audit**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [], total: 0 }) }),
+    );
+    await page.goto("/dashboard/settings");
+    await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
+    await page.getByTestId("tab-login-activity").click();
+    await expect(page.getByTestId("activity-section")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("activity-empty-state")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByText("No recent security events found.")).toBeVisible();
+  });
+
+  test("shows activity entries when audit returns data", async ({ page }) => {
+    const MOCK_AUDIT_ENTRY = {
+      id: "e1",
+      user_id: MOCK_USER.user_id,
+      user_email: MOCK_USER.email,
+      action: "auth.login",
+      resource: "session",
+      ip_address: "1.2.3.4",
+      user_agent: "Chrome/120",
+      metadata: { outcome: "success", location: { city: "Istanbul", country: "TR" }, client_info: { browser: "Chrome", os: "Windows" } },
+      created_at: "2026-06-20T10:00:00Z",
+    };
+    await mockAuthenticatedUser(page, MOCK_USER);
+    await page.route("**/api/v1/me/audit**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [MOCK_AUDIT_ENTRY], total: 1 }) }),
+    );
+    await page.goto("/dashboard/settings");
+    await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
+    await page.getByTestId("tab-login-activity").click();
+    await expect(page.getByTestId("activity-section")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByText("Login")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByText("Istanbul")).toBeVisible();
+  });
+
+  test("admin sees Login Activity at tab index 3", async ({ page }) => {
+    await mockAuthenticatedUser(page, MOCK_ADMIN);
+    await page.route("**/api/v1/admin/settings", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) }),
+    );
+    await page.route("**/api/v1/me/audit**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [], total: 0 }) }),
+    );
+    await page.goto("/dashboard/settings");
+    await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
+    await page.getByTestId("tab-login-activity").click();
+    await expect(page.getByTestId("activity-section")).toBeVisible({ timeout: 6_000 });
+  });
+});

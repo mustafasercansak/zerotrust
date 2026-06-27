@@ -388,7 +388,7 @@ export default function SettingsPage() {
                   <TextField label={tProfile("lastName")} value={lastName} onChange={(e) => setLastName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80, "data-testid": "settings-last-name" } }} />
                 </Box>
                 <Box>
-                  <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }}>
+                  <Button type="submit" variant="contained" disabled={savingProfile} sx={{ minWidth: 120 }} data-testid="settings-profile-save">
                     {savingProfile ? tProfile("saving") : t("save")}
                   </Button>
                 </Box>
@@ -477,7 +477,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === activityTabIndex && (
-          <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+          <Paper variant="outlined" sx={{ overflow: "hidden" }} data-testid="activity-section">
             <Box sx={{ px: 3, pt: 2.5, pb: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <Box>
                 <Typography variant="h6" sx={{ fontWeight: 700 }}>{t("activityTitle")}</Typography>
@@ -494,7 +494,7 @@ export default function SettingsPage() {
                 <CircularProgress size={24} />
               </Box>
             ) : historyEntries.length === 0 ? (
-              <Box sx={{ py: 4, textAlign: "center" }}>
+              <Box sx={{ py: 4, textAlign: "center" }} data-testid="activity-empty-state">
                 <Typography variant="body2" color="text.secondary">{t("activityEmpty")}</Typography>
               </Box>
             ) : (
@@ -574,7 +574,7 @@ export default function SettingsPage() {
                       onChange={(e) => setMaxSessions(e.target.value)}
                       sx={{ width: 140, mt: 0.5 }}
                       size="small"
-                      slotProps={{ htmlInput: numericProps(1, 20) }}
+                      slotProps={{ htmlInput: { ...numericProps(1, 20), "data-testid": "settings-max-sessions" } }}
                     />
                   </Box>
                   <Box sx={{ display: "grid", gap: 0.75 }}>
@@ -587,7 +587,7 @@ export default function SettingsPage() {
                       onChange={(e) => setMaxLoginAttempts(e.target.value)}
                       sx={{ width: 140, mt: 0.5 }}
                       size="small"
-                      slotProps={{ htmlInput: numericProps(1, 20) }}
+                      slotProps={{ htmlInput: { ...numericProps(1, 20), "data-testid": "settings-max-login-attempts" } }}
                     />
                   </Box>
                 </Box>
@@ -697,7 +697,7 @@ export default function SettingsPage() {
                     size="small"
                     fullWidth
                     sx={{ mt: 0.5, fontFamily: "monospace" }}
-                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 } } }}
+                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 }, "data-testid": "settings-ip-allowlist" } }}
                     helperText={t("ipAllowlistHint")}
                   />
                 </Box>
@@ -714,7 +714,7 @@ export default function SettingsPage() {
                     size="small"
                     fullWidth
                     sx={{ mt: 0.5, fontFamily: "monospace" }}
-                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 } } }}
+                    slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 13 }, "data-testid": "settings-country-allowlist" } }}
                     helperText={t("countryAllowlistHint")}
                   />
                 </Box>
@@ -744,6 +744,7 @@ export default function SettingsPage() {
                         placeholder={t("webhookUrlPlaceholder")}
                         size="small"
                         fullWidth
+                        slotProps={{ htmlInput: { "data-testid": "settings-webhook-url" } }}
                       />
                       <Button
                         variant="outlined"
@@ -751,6 +752,7 @@ export default function SettingsPage() {
                         onClick={handleTestWebhook}
                         disabled={testingWebhook || webhookEnabled !== "true" || !webhookUrl}
                         sx={{ whiteSpace: "nowrap", mt: "1px", height: 40 }}
+                        data-testid="settings-webhook-test"
                       >
                         {testingWebhook ? t("webhookTesting") : t("webhookTest")}
                       </Button>
@@ -759,7 +761,7 @@ export default function SettingsPage() {
                 </Box>
 
                 <Box>
-                  <Button type="submit" variant="contained" disabled={savingSystem} sx={{ minWidth: 120 }}>
+                  <Button type="submit" variant="contained" disabled={savingSystem} sx={{ minWidth: 120 }} data-testid="settings-system-save">
                     {savingSystem ? t("saving") : t("save")}
                   </Button>
                 </Box>
