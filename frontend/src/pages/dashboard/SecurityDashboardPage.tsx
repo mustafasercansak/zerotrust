@@ -29,6 +29,7 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   const { t, i18n } = useTranslation("securityDashboard");
   const [showSuccess, setShowSuccess] = useState(true);
   const [showFailure, setShowFailure] = useState(true);
+  const [showRisk, setShowRisk] = useState(true);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   const width = 900;
@@ -51,7 +52,8 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
     const x = padding.left + groupWidth * index + groupWidth / 2;
     const ySuccess = padding.top + chartHeight - (point.success / maxValue) * chartHeight;
     const yFailure = padding.top + chartHeight - (point.failure / maxValue) * chartHeight;
-    return { x, ySuccess, yFailure, bucket: point.bucket };
+    const yRisk = padding.top + chartHeight - ((point.average_risk_score || 0) / 100) * chartHeight;
+    return { x, ySuccess, yFailure, yRisk, bucket: point.bucket };
   });
 
   const successPts = points.map(p => ({ x: p.x, y: p.ySuccess }));
@@ -61,6 +63,10 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   const failurePts = points.map(p => ({ x: p.x, y: p.yFailure }));
   const failureLine = getBezierPath(failurePts);
   const failureFill = getBezierAreaPath(failurePts, padding.top + chartHeight);
+
+  const riskPts = points.map(p => ({ x: p.x, y: p.yRisk }));
+  const riskLine = getBezierPath(riskPts);
+  const riskFill = getBezierAreaPath(riskPts, padding.top + chartHeight);
 
   const activePoint = hoverIdx !== null ? data[hoverIdx] : null;
 
@@ -72,6 +78,7 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
           {[
             { color: "#22c55e", label: t("successful"), visible: showSuccess, set: setShowSuccess },
             { color: "#f43f5e", label: t("failed"), visible: showFailure, set: setShowFailure },
+            { color: "#a855f7", label: t("avgRisk"), visible: showRisk, set: setShowRisk },
           ].map(({ color, label, visible, set }) => (
             <Box
               key={label}
@@ -136,6 +143,13 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
               <Typography variant="caption" sx={{ fontWeight: 700, ml: "auto" }}>{activePoint.failure}</Typography>
             </Box>
           )}
+          {showRisk && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "#a855f7" }} />
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)" }}>{t("avgRisk")}:</Typography>
+              <Typography variant="caption" sx={{ fontWeight: 700, ml: "auto" }}>{activePoint.average_risk_score !== undefined ? activePoint.average_risk_score.toFixed(1) : "0.0"}</Typography>
+            </Box>
+          )}
         </Box>
       )}
 
@@ -149,6 +163,10 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
             <linearGradient id="failureGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
               <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.00" />
+            </linearGradient>
+            <linearGradient id="riskGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#a855f7" stopOpacity="0.00" />
             </linearGradient>
           </defs>
 
@@ -187,9 +205,11 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
 
           {showSuccess && successFill && <path d={successFill} fill="url(#successGradient)" />}
           {showFailure && failureFill && <path d={failureFill} fill="url(#failureGradient)" />}
+          {showRisk && riskFill && <path d={riskFill} fill="url(#riskGradient)" />}
 
           {showSuccess && successLine && <path d={successLine} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
           {showFailure && failureLine && <path d={failureLine} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+          {showRisk && riskLine && <path d={riskLine} fill="none" stroke="#a855f7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
 
           {points.map((p, idx) => {
             const isHovered = hoverIdx === idx;
@@ -212,6 +232,17 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
                     cy={p.yFailure}
                     r={isHovered ? 6 : 3.5}
                     fill="#f43f5e"
+                    stroke="#0b1120"
+                    strokeWidth={isHovered ? 2.5 : 1.5}
+                    style={{ transition: "r 0.15s ease, stroke-width 0.15s ease" }}
+                  />
+                )}
+                {showRisk && (
+                  <circle
+                    cx={p.x}
+                    cy={p.yRisk}
+                    r={isHovered ? 6 : 3.5}
+                    fill="#a855f7"
                     stroke="#0b1120"
                     strokeWidth={isHovered ? 2.5 : 1.5}
                     style={{ transition: "r 0.15s ease, stroke-width 0.15s ease" }}
@@ -321,6 +352,7 @@ export default function SecurityDashboardPage() {
     { label: t("metrics.lockouts"), value: data.metrics.lockouts, accent: "#f59e0b" },
     { label: t("metrics.anomalies"), value: data.metrics.anomalies, accent: "#a855f7" },
     { label: t("metrics.activeSessions"), value: data.metrics.active_sessions, accent: "#3b82f6" },
+    { label: t("metrics.averageRiskScore"), value: Math.round(data.metrics.average_risk_score), accent: "#ff7849" },
   ] : [], [data, t]);
   const anomalyLabel = (name: string) => t(`anomalyTypes.${name}`, {
     defaultValue: humanizeSecurityLabel(name),
@@ -354,7 +386,7 @@ export default function SecurityDashboardPage() {
         <Box sx={{ height: 360, display: "grid", placeItems: "center" }}><CircularProgress size={24} /></Box>
       ) : data && (
         <>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(5, 1fr)" }, gap: 2, mb: 2 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)", lg: "repeat(6, 1fr)" }, gap: 2, mb: 2 }}>
             {metrics.map((metric) => <MetricCard key={metric.label} {...metric} />)}
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
@@ -362,6 +394,7 @@ export default function SecurityDashboardPage() {
             <RankingCard title={t("anomaliesTitle")} items={data.anomaly_breakdown} empty={t("noData")} labelFor={anomalyLabel} />
             <RankingCard title={t("countriesTitle")} items={data.login_countries} empty={t("noData")} labelFor={countryLabel} />
             <RankingCard title={t("failedIPsTitle")} items={data.failed_login_ips} empty={t("noData")} />
+            <RankingCard title={t("blockedCountriesTitle")} items={data.blocked_countries} empty={t("noData")} labelFor={countryLabel} />
           </Box>
         </>
       )}

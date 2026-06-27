@@ -30,7 +30,7 @@ import { useStepUp } from "./useStepUp";
 // State slot indices inside useStepUp:
 //   0 = open, 1 = error, 2 = submitting
 
-const callHook = () => {
+const useTestStepUp = () => {
   callIdx = 0;
   return useStepUp();
 };
@@ -53,28 +53,28 @@ describe("useStepUp", () => {
   // ── runWithStepUp ──────────────────────────────────────────────────────────
 
   it("returns action result directly when action succeeds", async () => {
-    const { runWithStepUp } = callHook();
+    const { runWithStepUp } = useTestStepUp();
     const result = await runWithStepUp(() => Promise.resolve("ok"));
     expect(result).toBe("ok");
     expect(stateStore[0]).toBe(false); // dialog never opened
   });
 
   it("re-throws non-ApiError without opening dialog", async () => {
-    const { runWithStepUp } = callHook();
+    const { runWithStepUp } = useTestStepUp();
     const err = new Error("network");
     await expect(runWithStepUp(() => Promise.reject(err))).rejects.toBe(err);
     expect(stateStore[0]).toBe(false);
   });
 
   it("re-throws ApiError that is not mfa_required without opening dialog", async () => {
-    const { runWithStepUp } = callHook();
+    const { runWithStepUp } = useTestStepUp();
     const err = new ApiError("forbidden", 403);
     await expect(runWithStepUp(() => Promise.reject(err))).rejects.toBe(err);
     expect(stateStore[0]).toBe(false);
   });
 
   it("opens dialog and stores pending action on mfa_required", async () => {
-    const { runWithStepUp } = callHook();
+    const { runWithStepUp } = useTestStepUp();
     const action = vi.fn().mockRejectedValue(new ApiError("mfa_required", 403));
 
     runWithStepUp(action).catch(() => {}); // stays pending until dialog handled
@@ -85,7 +85,7 @@ describe("useStepUp", () => {
   });
 
   it("passes reason to pending action when provided", async () => {
-    const { runWithStepUp } = callHook();
+    const { runWithStepUp } = useTestStepUp();
     const action = vi.fn().mockRejectedValue(new ApiError("mfa_required", 403));
 
     runWithStepUp(action, "delete_account").catch(() => {});
@@ -98,14 +98,14 @@ describe("useStepUp", () => {
 
   it("does nothing when there is no pending action", async () => {
     const spy = vi.spyOn(api, "mfaStepUp").mockResolvedValue(undefined as any);
-    const { handleStepUpSubmit } = callHook();
+    const { handleStepUpSubmit } = useTestStepUp();
     await handleStepUpSubmit("123456");
     expect(spy).not.toHaveBeenCalled();
   });
 
   it("calls mfaStepUp with code+reason, resolves action result, closes dialog", async () => {
     vi.spyOn(api, "mfaStepUp").mockResolvedValue(undefined as any);
-    const { runWithStepUp, handleStepUpSubmit } = callHook();
+    const { runWithStepUp, handleStepUpSubmit } = useTestStepUp();
     const action = vi.fn()
       .mockRejectedValueOnce(new ApiError("mfa_required", 403))
       .mockResolvedValueOnce("final");
@@ -124,7 +124,7 @@ describe("useStepUp", () => {
 
   it("sets error and keeps dialog open on invalid_code", async () => {
     vi.spyOn(api, "mfaStepUp").mockRejectedValue(new ApiError("invalid_code", 400));
-    const { runWithStepUp, handleStepUpSubmit } = callHook();
+    const { runWithStepUp, handleStepUpSubmit } = useTestStepUp();
     const action = vi.fn().mockRejectedValue(new ApiError("mfa_required", 403));
 
     runWithStepUp(action).catch(() => {});
@@ -139,7 +139,7 @@ describe("useStepUp", () => {
 
   it("sets error and keeps dialog open on too_many_attempts", async () => {
     vi.spyOn(api, "mfaStepUp").mockRejectedValue(new ApiError("too_many_attempts", 429));
-    const { runWithStepUp, handleStepUpSubmit } = callHook();
+    const { runWithStepUp, handleStepUpSubmit } = useTestStepUp();
     const action = vi.fn().mockRejectedValue(new ApiError("mfa_required", 403));
 
     runWithStepUp(action).catch(() => {});
@@ -154,7 +154,7 @@ describe("useStepUp", () => {
   it("rejects pending and closes dialog on unexpected error from action", async () => {
     vi.spyOn(api, "mfaStepUp").mockResolvedValue(undefined as any);
     const downstreamErr = new Error("server down");
-    const { runWithStepUp, handleStepUpSubmit } = callHook();
+    const { runWithStepUp, handleStepUpSubmit } = useTestStepUp();
     const action = vi.fn()
       .mockRejectedValueOnce(new ApiError("mfa_required", 403))
       .mockRejectedValueOnce(downstreamErr);
@@ -173,7 +173,7 @@ describe("useStepUp", () => {
   // ── handleStepUpClose ──────────────────────────────────────────────────────
 
   it("rejects pending with mfa_required ApiError and closes dialog", async () => {
-    const { runWithStepUp, handleStepUpClose } = callHook();
+    const { runWithStepUp, handleStepUpClose } = useTestStepUp();
     const action = vi.fn().mockRejectedValue(new ApiError("mfa_required", 403));
 
     const promise = runWithStepUp(action);
@@ -189,7 +189,7 @@ describe("useStepUp", () => {
 
   it("closes dialog without error even when no pending action", () => {
     stateStore[0] = true;
-    const { handleStepUpClose } = callHook();
+    const { handleStepUpClose } = useTestStepUp();
     handleStepUpClose();
     expect(stateStore[0]).toBe(false);
   });

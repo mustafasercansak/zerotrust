@@ -431,6 +431,8 @@
     "anomaliesTitle": "Giriş Anormallikleri",
     "countriesTitle": "Başarılı Giriş Ülkeleri",
     "failedIPsTitle": "En Çok Başarısız Giriş Yapan IP'ler",
+    "blockedCountriesTitle": "Engellenen Giriş Ülkeleri",
+    "avgRisk": "Ort. Risk",
     "noData": "Bu dönemde olay bulunamadı.",
     "anomalyTypes": {
       "new_device": "Yeni cihaz",
@@ -457,7 +459,8 @@
       "failedLogins": "Başarısız girişler",
       "lockouts": "Hesap kilitlemeleri",
       "anomalies": "Giriş anormallikleri",
-      "activeSessions": "Aktif oturumlar"
+      "activeSessions": "Aktif oturumlar",
+      "averageRiskScore": "Ortalama risk skoru"
     },
     "systemSettings": {
       "title": "Sistem Ayarları",

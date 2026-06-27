@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -275,7 +276,7 @@ func TestLogin_RiskBasedAuthBlock(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected login to be blocked, got nil error")
 	}
-	if err != ErrHighRiskBlocked {
+	if !errors.Is(err, ErrHighRiskBlocked) {
 		t.Errorf("expected ErrHighRiskBlocked, got %v", err)
 	}
 }

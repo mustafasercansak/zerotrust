@@ -7,17 +7,19 @@ import (
 )
 
 type SecurityDashboardMetrics struct {
-	SuccessfulLogins int `json:"successful_logins"`
-	FailedLogins     int `json:"failed_logins"`
-	Lockouts         int `json:"lockouts"`
-	Anomalies        int `json:"anomalies"`
-	ActiveSessions   int `json:"active_sessions"`
+	SuccessfulLogins int     `json:"successful_logins"`
+	FailedLogins     int     `json:"failed_logins"`
+	Lockouts         int     `json:"lockouts"`
+	Anomalies        int     `json:"anomalies"`
+	ActiveSessions   int     `json:"active_sessions"`
+	AverageRiskScore float64 `json:"average_risk_score"`
 }
 
 type SecurityActivityPoint struct {
-	Bucket  string `json:"bucket"`
-	Success int    `json:"success"`
-	Failure int    `json:"failure"`
+	Bucket           string  `json:"bucket"`
+	Success          int     `json:"success"`
+	Failure          int     `json:"failure"`
+	AverageRiskScore float64 `json:"average_risk_score"`
 }
 
 type SecurityCount struct {
@@ -34,6 +36,7 @@ type SecurityDashboard struct {
 	AnomalyBreakdown []SecurityCount          `json:"anomaly_breakdown"`
 	LoginCountries   []SecurityCount          `json:"login_countries"`
 	FailedLoginIPs   []SecurityCount          `json:"failed_login_ips"`
+	BlockedCountries []SecurityCount          `json:"blocked_countries"`
 }
 
 type dashboardRange struct {
@@ -92,13 +95,15 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 		AnomalyBreakdown: []SecurityCount{},
 		LoginCountries:   []SecurityCount{},
 		FailedLoginIPs:   []SecurityCount{},
+		BlockedCountries: []SecurityCount{},
 	}
 
 	if err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE action = 'auth.login_success'),
 		       COUNT(*) FILTER (WHERE action = 'auth.login_failed'),
 		       COUNT(*) FILTER (WHERE action = 'auth.login_failed' AND metadata->>'reason' = 'account_locked'),
-		       COUNT(*) FILTER (WHERE action = 'login.anomaly')
+		       COUNT(*) FILTER (WHERE action = 'login.anomaly'),
+		       COALESCE(AVG((metadata->>'risk_score')::numeric) FILTER (WHERE action IN ('auth.login_success', 'auth.login_blocked')), 0)
 		FROM audit_logs
 		WHERE created_at >= $1
 	`, window.since).Scan(
@@ -106,6 +111,7 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 		&result.Metrics.FailedLogins,
 		&result.Metrics.Lockouts,
 		&result.Metrics.Anomalies,
+		&result.Metrics.AverageRiskScore,
 	); err != nil {
 		return SecurityDashboard{}, fmt.Errorf("query security dashboard metrics: %w", err)
 	}
@@ -121,10 +127,11 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT %s AS bucket,
 		       COUNT(*) FILTER (WHERE action = 'auth.login_success'),
-		       COUNT(*) FILTER (WHERE action = 'auth.login_failed')
+		       COUNT(*) FILTER (WHERE action = 'auth.login_failed'),
+		       COALESCE(AVG((metadata->>'risk_score')::numeric) FILTER (WHERE action IN ('auth.login_success', 'auth.login_blocked')), 0)
 		FROM audit_logs
 		WHERE created_at >= $1
-		  AND action IN ('auth.login_success', 'auth.login_failed')
+		  AND action IN ('auth.login_success', 'auth.login_failed', 'auth.login_blocked')
 		GROUP BY bucket
 		ORDER BY bucket
 	`, window.bucketExpr), window.since)
@@ -135,7 +142,7 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 	for rows.Next() {
 		var bucket time.Time
 		var point SecurityActivityPoint
-		if err := rows.Scan(&bucket, &point.Success, &point.Failure); err != nil {
+		if err := rows.Scan(&bucket, &point.Success, &point.Failure, &point.AverageRiskScore); err != nil {
 			rows.Close()
 			return SecurityDashboard{}, fmt.Errorf("scan authentication activity: %w", err)
 		}
@@ -187,6 +194,17 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 		LIMIT 8
 	`, window.since); err != nil {
 		return SecurityDashboard{}, fmt.Errorf("query failed login IPs: %w", err)
+	}
+
+	if result.BlockedCountries, err = r.securityCounts(ctx, `
+		SELECT COALESCE(NULLIF(metadata #>> '{location,country}', ''), 'Unknown'), COUNT(*)
+		FROM audit_logs
+		WHERE created_at >= $1 AND action = 'auth.login_blocked'
+		GROUP BY 1
+		ORDER BY 2 DESC, 1 ASC
+		LIMIT 8
+	`, window.since); err != nil {
+		return SecurityDashboard{}, fmt.Errorf("query blocked countries: %w", err)
 	}
 
 	return result, nil

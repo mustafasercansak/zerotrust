@@ -155,7 +155,7 @@ func TestHandler_CreateUser(t *testing.T) {
 }
 
 func TestHandler_UpdateRoles(t *testing.T) {
-	h, svc, pool, ctx, _ := mockHandlerDeps(t)
+	h, svc, pool, ctx, mockSessions := mockHandlerDeps(t)
 	if h == nil {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
@@ -175,6 +175,10 @@ func TestHandler_UpdateRoles(t *testing.T) {
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("Expected 204 No Content, got %d", rr.Code)
+	}
+
+	if !mockSessions.revokeAllCalled {
+		t.Fatal("Expected revokeAllCalled to be true when updating roles")
 	}
 
 	// Test unknown role

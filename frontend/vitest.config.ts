@@ -8,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    environment: 'jsdom',
     exclude: ['node_modules', 'e2e/**'],
     coverage: {
       include: ['src/**/*.ts', 'src/**/*.tsx']

@@ -431,6 +431,8 @@
     "anomaliesTitle": "Login Anomalies",
     "countriesTitle": "Successful Login Countries",
     "failedIPsTitle": "Top Failed Login IPs",
+    "blockedCountriesTitle": "Blocked Login Countries",
+    "avgRisk": "Avg Risk",
     "noData": "No events in this period.",
     "anomalyTypes": {
       "new_device": "New device",
@@ -457,7 +459,8 @@
       "failedLogins": "Failed logins",
       "lockouts": "Account lockouts",
       "anomalies": "Login anomalies",
-      "activeSessions": "Active sessions"
+      "activeSessions": "Active sessions",
+      "averageRiskScore": "Average risk score"
     },
     "systemSettings": {
       "title": "System Settings",

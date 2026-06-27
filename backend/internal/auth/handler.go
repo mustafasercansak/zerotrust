@@ -199,12 +199,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			}, true)
 			writeError(w, http.StatusForbidden, "device_not_allowed")
 		case errors.Is(err, ErrHighRiskBlocked):
+			var riskBlockErr *RiskBlockedError
+			riskScore := 0
+			if errors.As(err, &riskBlockErr) {
+				riskScore = riskBlockErr.RiskScore
+			}
+			meta := authMetadata(req.Email, "high_risk_blocked", http.StatusForbidden, clientInfo)
+			meta["risk_score"] = riskScore
 			h.logAudit(r.Context(), audit.Entry{
 				Action:    "auth.login_blocked",
 				Resource:  "/api/v1/auth/login",
 				IPAddress: r.RemoteAddr,
 				UserAgent: r.Header.Get("User-Agent"),
-				Metadata:  authMetadata(req.Email, "high_risk_blocked", http.StatusForbidden, clientInfo),
+				Metadata:  meta,
 			}, true)
 			writeError(w, http.StatusForbidden, "high_risk_blocked")
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
@@ -222,12 +229,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	meta := authMetadata(req.Email, "", http.StatusOK, req.ClientInfo)
+	meta["risk_score"] = result.RiskScore
 	h.logAudit(r.Context(), audit.Entry{
 		Action:    "auth.login_success",
 		Resource:  "/api/v1/auth/login",
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.Header.Get("User-Agent"),
-		Metadata:  authMetadata(req.Email, "", http.StatusOK, req.ClientInfo),
+		Metadata:  meta,
 	}, true)
 
 	if result.AnomalyType != "" || result.RiskScore > 0 {

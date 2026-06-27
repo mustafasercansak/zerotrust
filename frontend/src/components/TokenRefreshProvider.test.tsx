@@ -88,6 +88,7 @@ describe("TokenRefreshProvider component", () => {
       },
     });
     capturedCleanup = null;
+    vi.spyOn(api, "logout").mockResolvedValue(new Response());
     vi.clearAllMocks();
     vi.useFakeTimers();
     MockEventSource.lastInstance = null;
@@ -517,6 +518,7 @@ describe("TokenRefreshProvider component", () => {
     vi.spyOn(api, "listSessions").mockRejectedValue(
       new ApiError("invalid_token", undefined, 401)
     );
+    const logoutSpy = vi.spyOn(api, "logout").mockResolvedValue(new Response());
 
     renderToString(
       React.createElement(
@@ -530,6 +532,7 @@ describe("TokenRefreshProvider component", () => {
     MockEventSource.lastInstance?.onmessage?.({ data: "revoked" });
     expect(toast.warning).toHaveBeenCalledWith("currentSessionRevoked", expect.any(Object));
     expect(cancelRefresh).toHaveBeenCalled();
+    expect(logoutSpy).toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith("/auth/login", { replace: true });
   });
 

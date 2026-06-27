@@ -151,6 +151,14 @@ type AccountLockedError struct {
 
 func (e *AccountLockedError) Error() string { return "account_locked" }
 
+type RiskBlockedError struct {
+	RiskScore int
+}
+
+func (e *RiskBlockedError) Error() string { return "high_risk_blocked" }
+
+func (e *RiskBlockedError) Unwrap() error { return ErrHighRiskBlocked }
+
 func progressiveLockout(attempts int64) time.Duration {
 	switch {
 	case attempts < 5:
@@ -287,7 +295,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	// Enforce Block
 	if riskBasedAuthEnabled && riskScore >= riskThresholdBlock {
 		slog.Warn("Login blocked due to high risk score", "user_id", u.ID, "score", riskScore)
-		return nil, ErrHighRiskBlocked
+		return nil, &RiskBlockedError{RiskScore: riskScore}
 	}
 
 	riskMFARequired := riskBasedAuthEnabled && riskScore >= riskThresholdMfa

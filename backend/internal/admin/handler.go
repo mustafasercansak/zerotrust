@@ -248,6 +248,10 @@ func (h *Handler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Deauthorise existing sessions immediately so new roles take effect.
+	if h.sessions != nil {
+		_ = h.sessions.RevokeAllForUser(r.Context(), userID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

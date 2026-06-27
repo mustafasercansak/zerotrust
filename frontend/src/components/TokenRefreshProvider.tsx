@@ -126,6 +126,7 @@ export default function TokenRefreshProvider({ children }: { children: React.Rea
           if (event.data === "revoked") {
             toast.warning(t("currentSessionRevoked"), { duration: 5000 });
             cancelRefresh();
+            void api.logout();
             navigate("/auth/login", { replace: true });
             return;
           }

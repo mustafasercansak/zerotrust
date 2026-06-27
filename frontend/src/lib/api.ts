@@ -161,15 +161,18 @@ export interface SecurityDashboardData {
     lockouts: number;
     anomalies: number;
     active_sessions: number;
+    average_risk_score: number;
   };
   auth_activity: Array<{
     bucket: string;
     success: number;
     failure: number;
+    average_risk_score: number;
   }>;
   anomaly_breakdown: SecurityDashboardCount[];
   login_countries: SecurityDashboardCount[];
   failed_login_ips: SecurityDashboardCount[];
+  blocked_countries: SecurityDashboardCount[];
 }
 
 // Shared pagination / sort / filter params used by resource table fetchers.
