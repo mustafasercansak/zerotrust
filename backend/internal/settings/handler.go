@@ -123,6 +123,17 @@ var allowedKeys = map[string]func(string) bool{
 	"device_trust_block_mobile": func(v string) bool {
 		return v == "true" || v == "false"
 	},
+	"risk_based_auth_enabled": func(v string) bool {
+		return v == "true" || v == "false"
+	},
+	"risk_threshold_mfa": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1 && n <= 100
+	},
+	"risk_threshold_block": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1 && n <= 100
+	},
 }
 
 type Handler struct {

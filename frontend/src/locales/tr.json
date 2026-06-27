@@ -89,7 +89,8 @@
       "passkey_unavailable": "Bu cihazda geçiş anahtarı bulunamadı veya istek iptal edildi.",
       "ip_not_allowed": "Mevcut IP adresinizden oturum açmaya izin verilmiyor.",
       "country_not_allowed": "Bulunduğunuz ülke veya bölgeden oturum açmaya izin verilmiyor.",
-      "device_not_allowed": "Mevcut cihazınızın güvenlik profilinden ötürü oturum açmaya izin verilmiyor."
+      "device_not_allowed": "Mevcut cihazınızın güvenlik profilinden ötürü oturum açmaya izin verilmiyor.",
+      "high_risk_blocked": "Oturum açma isteğiniz yüksek güvenlik riski nedeniyle engellendi."
     },
     "usePasskey": "Geçiş anahtarı kullan",
     "signInWithPasskey": "Geçiş anahtarıyla giriş yap",
@@ -563,6 +564,13 @@
     "deviceTrustMinBrowserEdgePlaceholder": "120.0",
     "deviceTrustBlockMobile": "Mobil Cihazları Engelle",
     "deviceTrustBlockMobileDesc": "iOS, Android ve diğer mobil platformlardan gelen oturum açma isteklerini reddet.",
+    "riskBasedAuth": "Risk Tabanlı Uyumlu Kimlik Doğrulama",
+    "riskBasedAuthDesc": "İmkansız seyahat, yeni cihazlar, şüpheli saatler ve başarısız denemelere dayalı dinamik güvenlik politikalarını (uyumlu MFA veya erişim engelleme) uygulayın.",
+    "riskBasedAuthEnabled": "Risk Tabanlı Kimlik Doğrulamayı Etkinleştir",
+    "riskThresholdMfa": "MFA Zorunluluk Eşiği",
+    "riskThresholdMfaDesc": "Hesaplanan risk skoru bu değere ulaştığında veya aştığında ek MFA doğrulaması iste.",
+    "riskThresholdBlock": "Erişim Engelleme Eşiği",
+    "riskThresholdBlockDesc": "Hesaplanan risk skoru bu değere ulaştığında veya aştığında erişimi tamamen engelle.",
     "ipAllowlist": "IP İzin Listesi",
     "ipAllowlistDesc": "Oturum açmayı yalnızca bu IP adresleri veya CIDR aralıklarıyla sınırlandırın. Tüm IP'lere izin vermek için boş bırakın. Satır başına bir giriş veya virgülle ayrılmış.",
     "ipAllowlistInput": "İzin Verilen IP'ler / CIDR'ler",

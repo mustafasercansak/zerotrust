@@ -222,3 +222,110 @@ func TestLogin_NoNewLoginAlert_WhenAnomalyDetected(t *testing.T) {
 		t.Errorf("unexpected alert: %s", m.sentAlerts[0])
 	}
 }
+
+type testAnomalySettings struct {
+	enabled string
+	mfa     int
+	block   int
+}
+
+func (s *testAnomalySettings) GetInt(_ context.Context, key string, defaultVal int) int {
+	if key == "risk_threshold_mfa" {
+		return s.mfa
+	}
+	if key == "risk_threshold_block" {
+		return s.block
+	}
+	return defaultVal
+}
+func (s *testAnomalySettings) GetString(_ context.Context, _ string, defaultVal string) string {
+	return defaultVal
+}
+func (s *testAnomalySettings) GetBool(_ context.Context, key string, defaultVal bool) bool {
+	if key == "risk_based_auth_enabled" {
+		return s.enabled == "true"
+	}
+	return defaultVal
+}
+
+func TestLogin_RiskBasedAuthBlock(t *testing.T) {
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true}
+	reader := &dummyUserReader{u: u}
+
+	// Active session in London
+	sessions := []map[string]any{
+		{
+			"ip_address":   "100.0.0.2", // United Kingdom, London
+			"user_agent":   "Chrome",
+			"created_at":   time.Now().Add(-30 * time.Minute),
+			"last_used_at": time.Now().Add(-30 * time.Minute),
+		},
+	}
+
+	store := &testAnomalySessionStore{sessions: sessions}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	setts := &testAnomalySettings{enabled: "true", mfa: 40, block: 80}
+	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, setts)
+	
+	g := geoip.NewService("")
+	svc.ConfigureSecurityAnomalies(g, nil)
+
+	// Logging in from Tokyo (100.0.0.1) in 30 minutes triggers impossible travel (+80 risk score)
+	_, err := svc.Login(context.Background(), "user1@example.com", "pass", "100.0.0.1", "Chrome", nil)
+	if err == nil {
+		t.Fatalf("expected login to be blocked, got nil error")
+	}
+	if err != ErrHighRiskBlocked {
+		t.Errorf("expected ErrHighRiskBlocked, got %v", err)
+	}
+}
+
+type testAnomalyMFAChecker struct {
+	enabled bool
+}
+
+func (c *testAnomalyMFAChecker) IsEnabled(_ context.Context, _ string) bool { return c.enabled }
+func (c *testAnomalyMFAChecker) Validate(_ context.Context, _, _ string) bool { return true }
+func (c *testAnomalyMFAChecker) Setup(_ context.Context, _, _, _ string) (string, string, []string, error) {
+	return "url", "secret", []string{"code1"}, nil
+}
+func (c *testAnomalyMFAChecker) VerifyAndEnable(_ context.Context, _, _ string) error { return nil }
+
+func TestLogin_RiskBasedAuthAdaptiveMFA(t *testing.T) {
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true}
+	reader := &dummyUserReader{u: u}
+
+	// Active session in New York on Firefox
+	sessions := []map[string]any{
+		{
+			"ip_address":   "100.0.0.3", // United States, New York
+			"user_agent":   "Firefox",
+			"created_at":   time.Now().Add(-5 * time.Hour),
+			"last_used_at": time.Now().Add(-5 * time.Hour),
+		},
+	}
+
+	store := &testAnomalySessionStore{sessions: sessions}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	setts := &testAnomalySettings{enabled: "true", mfa: 20, block: 90}
+	mfaChecker := &testAnomalyMFAChecker{enabled: false} // User does not have MFA enabled
+	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, mfaChecker, setts)
+	
+	g := geoip.NewService("")
+	svc.ConfigureSecurityAnomalies(g, nil)
+
+	// Login from New York (100.0.0.3) but with Chrome triggers new device anomaly (+30 risk score)
+	res, err := svc.Login(context.Background(), "user1@example.com", "pass", "100.0.0.3", "Chrome", nil)
+	if err != nil {
+		t.Fatalf("unexpected login error: %v", err)
+	}
+
+	// Risk score is 30, which is >= mfa threshold (20) and < block threshold (90).
+	// Since user doesn't have MFA setup, they should be forced to set up TOTP.
+	if !res.MFARequired {
+		t.Errorf("expected MFA to be required due to risk score")
+	}
+	if res.MFASetupSecret != "secret" {
+		t.Errorf("expected MFA setup force-trigger secret, got %q", res.MFASetupSecret)
+	}
+}

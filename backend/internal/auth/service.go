@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -141,6 +142,7 @@ var (
 	// ErrDPoPReplay is returned when a DPoP proof's jti has already been used
 	// within the replay window. (ISSUE_LIST #35)
 	ErrDPoPReplay = errors.New("dpop_proof_replay")
+	ErrHighRiskBlocked = errors.New("high_risk_blocked")
 )
 
 type AccountLockedError struct {
@@ -176,6 +178,7 @@ type LoginResult struct {
 	WebAuthnEnabled  bool // user can satisfy MFA with a passkey
 	AnomalyType      string
 	AnomalyDetails   string
+	RiskScore        int
 }
 
 type Service struct {
@@ -249,13 +252,22 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 	// Password correct — clear lockout counters regardless of MFA outcome.
 	s.clearFailedAttempts(ctx, email)
 
-	// Anomaly checking
-	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, u.ID, u.Email, ip, ua, deviceInfo)
-	if hasAnomaly {
-		slog.Warn("Login anomaly detected", "user_id", u.ID, "type", anomalyType, "details", anomalyDetails)
+	// Risk score calculation
+	riskScore, anomalyType, anomalyDetails := s.calculateRiskScore(ctx, u.ID, u.Email, ip, ua, deviceInfo)
+	riskBasedAuthEnabled := false
+	riskThresholdMfa := 40
+	riskThresholdBlock := 80
+	if s.settings != nil {
+		riskBasedAuthEnabled = s.settings.GetBool(ctx, "risk_based_auth_enabled", false)
+		riskThresholdMfa = s.settings.GetInt(ctx, "risk_threshold_mfa", 40)
+		riskThresholdBlock = s.settings.GetInt(ctx, "risk_threshold_block", 80)
+	}
 
-		// Send security alert email (only if user has not opted out).
-		if s.mailer != nil && u.NotifySecurityEmails {
+	if riskScore > 0 {
+		slog.Warn("Login risk assessment", "user_id", u.ID, "score", riskScore, "type", anomalyType, "details", anomalyDetails)
+
+		// Send security alert email if user has not opted out and risk is medium or high
+		if s.mailer != nil && u.NotifySecurityEmails && riskScore >= 30 {
 			var locStr string
 			if s.geoip != nil {
 				if loc, err := s.geoip.Lookup(ip); err == nil {
@@ -272,6 +284,13 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		}
 	}
 
+	// Enforce Block
+	if riskBasedAuthEnabled && riskScore >= riskThresholdBlock {
+		slog.Warn("Login blocked due to high risk score", "user_id", u.ID, "score", riskScore)
+		return nil, ErrHighRiskBlocked
+	}
+
+	riskMFARequired := riskBasedAuthEnabled && riskScore >= riskThresholdMfa
 	globalMFARequired := false
 	if s.settings != nil {
 		globalMFARequired = s.settings.GetBool(ctx, "global_mfa_required", false)
@@ -279,9 +298,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 
 	totpEnabled := s.mfa != nil && s.mfa.IsEnabled(ctx, u.ID)
 	webauthnEnabled := s.webauthn != nil && s.webauthn.HasCredentials(ctx, u.ID)
-	// Global MFA enforcement only bootstraps TOTP when the user has no second
-	// factor at all (a registered passkey already satisfies the requirement).
-	forceTOTPSetup := s.mfa != nil && globalMFARequired && !totpEnabled && !webauthnEnabled
+	// Force TOTP setup if global MFA is required OR if adaptive MFA is triggered due to risk, and user has no MFA options configured yet
+	forceTOTPSetup := s.mfa != nil && (globalMFARequired || riskMFARequired) && !totpEnabled && !webauthnEnabled
 
 	if totpEnabled || webauthnEnabled || forceTOTPSetup {
 		token, err := generateOpaqueToken()
@@ -311,8 +329,10 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			"setup_url":      setupURL,
 			"recovery_codes": recoveryCodes,
 		})
-		if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
-			return nil, err
+		if s.rdb != nil {
+			if err := s.rdb.Set(ctx, mfaPendingKey(hashToken(token)), string(data), mfaPendingTTL).Err(); err != nil {
+				return nil, err
+			}
 		}
 		return &LoginResult{
 			MFARequired:      true,
@@ -324,10 +344,11 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 			WebAuthnEnabled:  webauthnEnabled,
 			AnomalyType:      anomalyType,
 			AnomalyDetails:   anomalyDetails,
+			RiskScore:        riskScore,
 		}, nil
 	}
 
-	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo, hasAnomaly)
+	pair, err := s.completeLogin(ctx, u, ip, ua, deviceInfo, riskScore > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +356,65 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 		Pair:           pair,
 		AnomalyType:    anomalyType,
 		AnomalyDetails: anomalyDetails,
+		RiskScore:      riskScore,
 	}, nil
+}
+
+func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua string, deviceInfo map[string]string) (int, string, string) {
+	score := 0
+	var reasons []string
+	var details []string
+
+	// 1. Check Anomalies (Impossible Travel, New Device)
+	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, userID, email, ip, ua, deviceInfo)
+	if hasAnomaly {
+		if anomalyType == "impossible_travel" {
+			score += 80
+			reasons = append(reasons, "impossible_travel")
+			details = append(details, anomalyDetails)
+		} else if anomalyType == "new_device" {
+			score += 30
+			reasons = append(reasons, "new_device")
+			details = append(details, anomalyDetails)
+		}
+	}
+
+	// 2. Suspicious Hours Check (11 PM - 5 AM)
+	hour := time.Now().Hour()
+	if hour >= 23 || hour < 5 {
+		score += 20
+		reasons = append(reasons, "suspicious_hours")
+		details = append(details, fmt.Sprintf("Login attempt at suspicious hour: %d:00", hour))
+	}
+
+	// 3. Failed Login Attempts Check
+	if s.rdb != nil {
+		fkey := failKey(email)
+		val, err := s.rdb.Get(ctx, fkey).Int64()
+		if err == nil && val > 0 {
+			// Add 15 per failed attempt, max 45
+			failedScore := int(val) * 15
+			if failedScore > 45 {
+				failedScore = 45
+			}
+			score += failedScore
+			reasons = append(reasons, "multiple_failed_attempts")
+			details = append(details, fmt.Sprintf("Recent failed login attempts: %d", val))
+		}
+	}
+
+	// Clamp score between 0 and 100
+	if score > 100 {
+		score = 100
+	}
+
+	var reasonStr, detailStr string
+	if len(reasons) > 0 {
+		reasonStr = strings.Join(reasons, ",")
+		detailStr = strings.Join(details, "; ")
+	}
+
+	return score, reasonStr, detailStr
 }
 
 func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ string, currentIP, currentUA string, _ map[string]string) (bool, string, string) {

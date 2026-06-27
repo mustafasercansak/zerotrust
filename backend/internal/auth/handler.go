@@ -198,6 +198,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				Metadata:  authMetadata(req.Email, "device_not_allowed", http.StatusForbidden, clientInfo),
 			}, true)
 			writeError(w, http.StatusForbidden, "device_not_allowed")
+		case errors.Is(err, ErrHighRiskBlocked):
+			h.logAudit(r.Context(), audit.Entry{
+				Action:    "auth.login_blocked",
+				Resource:  "/api/v1/auth/login",
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
+				Metadata:  authMetadata(req.Email, "high_risk_blocked", http.StatusForbidden, clientInfo),
+			}, true)
+			writeError(w, http.StatusForbidden, "high_risk_blocked")
 		case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrInactiveUser):
 			h.logAudit(r.Context(), audit.Entry{
 				Action:    "auth.login_failed",
@@ -221,7 +230,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Metadata:  authMetadata(req.Email, "", http.StatusOK, req.ClientInfo),
 	}, true)
 
-	if result.AnomalyType != "" {
+	if result.AnomalyType != "" || result.RiskScore > 0 {
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "login.anomaly",
 			Resource:  "/api/v1/auth/login",
@@ -231,6 +240,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				"email":        req.Email,
 				"anomaly_type": result.AnomalyType,
 				"details":      result.AnomalyDetails,
+				"risk_score":   result.RiskScore,
 				"outcome":      "success",
 			},
 		}, true)
@@ -598,6 +608,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrDeviceNotAllowed) {
 			writeError(w, http.StatusForbidden, "device_not_allowed")
+			return
+		}
+		if errors.Is(err, ErrHighRiskBlocked) {
+			writeError(w, http.StatusForbidden, "high_risk_blocked")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error")

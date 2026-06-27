@@ -89,7 +89,8 @@
       "passkey_unavailable": "No passkey was found on this device, or the request was cancelled.",
       "ip_not_allowed": "Sign-in is not allowed from your current IP address.",
       "country_not_allowed": "Sign-in is not allowed from your current country or region.",
-      "device_not_allowed": "Sign-in is not allowed from your current device posture."
+      "device_not_allowed": "Sign-in is not allowed from your current device posture.",
+      "high_risk_blocked": "Your sign-in request was blocked due to a high security risk."
     },
     "usePasskey": "Use a passkey",
     "signInWithPasskey": "Sign in with a passkey",
@@ -563,6 +564,13 @@
     "deviceTrustMinBrowserEdgePlaceholder": "120.0",
     "deviceTrustBlockMobile": "Block Mobile Devices",
     "deviceTrustBlockMobileDesc": "Reject sign-ins from iOS, Android, or other mobile platforms.",
+    "riskBasedAuth": "Risk-Based Adaptive Authentication",
+    "riskBasedAuthDesc": "Enforce dynamic security policies (adaptive MFA or complete blocks) based on impossible travel, new devices, suspicious hours, and failed attempts.",
+    "riskBasedAuthEnabled": "Enable Risk-Based Authentication",
+    "riskThresholdMfa": "MFA Challenge Threshold",
+    "riskThresholdMfaDesc": "Force Step-up MFA verification if the computed risk score meets or exceeds this value.",
+    "riskThresholdBlock": "Access Block Threshold",
+    "riskThresholdBlockDesc": "Block access entirely if the computed risk score meets or exceeds this value.",
     "ipAllowlist": "IP Allowlist",
     "ipAllowlistDesc": "Restrict logins to these IP addresses or CIDR ranges. Leave empty to allow all IPs. One entry per line or comma-separated.",
     "ipAllowlistInput": "Allowed IPs / CIDRs",

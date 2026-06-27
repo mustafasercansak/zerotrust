@@ -139,6 +139,11 @@ export default function SettingsPage() {
   const [deviceTrustMinBrowserVersionEdge, setDeviceTrustMinBrowserVersionEdge] = useState("");
   const [deviceTrustBlockMobile, setDeviceTrustBlockMobile] = useState("false");
 
+  // Risk-Based Authentication Settings (appended last to preserve test state indices)
+  const [riskBasedAuthEnabled, setRiskBasedAuthEnabled] = useState("false");
+  const [riskThresholdMfa, setRiskThresholdMfa] = useState("40");
+  const [riskThresholdBlock, setRiskThresholdBlock] = useState("80");
+
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
   }, [me]);
@@ -195,6 +200,9 @@ export default function SettingsPage() {
         setDeviceTrustMinBrowserVersionFirefox(s["device_trust_min_browser_version_firefox"] ?? "");
         setDeviceTrustMinBrowserVersionEdge(s["device_trust_min_browser_version_edge"] ?? "");
         setDeviceTrustBlockMobile(s["device_trust_block_mobile"] ?? "false");
+        setRiskBasedAuthEnabled(s["risk_based_auth_enabled"] ?? "false");
+        setRiskThresholdMfa(s["risk_threshold_mfa"] ?? "40");
+        setRiskThresholdBlock(s["risk_threshold_block"] ?? "80");
       })
       .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
@@ -333,6 +341,11 @@ export default function SettingsPage() {
     if (isNaN(adminIdle) || adminIdle < 60 || adminIdle > 1800) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     const absolute = parseInt(absoluteTimeout, 10);
     if (isNaN(absolute) || absolute < 1800 || absolute > 172800) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const rMfa = parseInt(riskThresholdMfa, 10);
+    if (isNaN(rMfa) || rMfa < 1 || rMfa > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const rBlock = parseInt(riskThresholdBlock, 10);
+    if (isNaN(rBlock) || rBlock < 1 || rBlock > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    if (rMfa > rBlock) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     setSavingSystem(true);
     try {
       await runWithStepUp(() => api.admin.updateSettings({
@@ -358,6 +371,9 @@ export default function SettingsPage() {
         device_trust_min_browser_version_firefox: deviceTrustMinBrowserVersionFirefox,
         device_trust_min_browser_version_edge: deviceTrustMinBrowserVersionEdge,
         device_trust_block_mobile: deviceTrustBlockMobile,
+        risk_based_auth_enabled: riskBasedAuthEnabled,
+        risk_threshold_mfa: String(rMfa),
+        risk_threshold_block: String(rBlock),
       }), "settings_update");
       toast.success(t("saved"));
     } catch (err) {
@@ -825,6 +841,48 @@ export default function SettingsPage() {
                           slotProps={{ htmlInput: { "data-testid": "settings-device-trust-min-browser-edge" } }}
                         />
                       </Box>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Risk-Based Adaptive Authentication Section */}
+                <Box sx={{ display: "grid", gap: 2, p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: 2, bgcolor: "action.hover" }}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.95rem" }}>{t("riskBasedAuth")}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{t("riskBasedAuthDesc")}</Typography>
+                  </Box>
+
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={riskBasedAuthEnabled === "true"}
+                        onChange={(e) => setRiskBasedAuthEnabled(e.target.checked ? "true" : "false")}
+                        color="primary"
+                      />
+                    }
+                    label={t("riskBasedAuthEnabled")}
+                  />
+
+                  {riskBasedAuthEnabled === "true" && (
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mt: 1 }}>
+                      <TextField
+                        label={t("riskThresholdMfa")}
+                        type="number"
+                        value={riskThresholdMfa}
+                        onChange={(e) => setRiskThresholdMfa(e.target.value)}
+                        helperText={t("riskThresholdMfaDesc")}
+                        size="small"
+                        slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-mfa" } }}
+                      />
+                      <TextField
+                        label={t("riskThresholdBlock")}
+                        type="number"
+                        value={riskThresholdBlock}
+                        onChange={(e) => setRiskThresholdBlock(e.target.value)}
+                        helperText={t("riskThresholdBlockDesc")}
+                        size="small"
+                        slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-block" } }}
+                      />
                     </Box>
                   )}
                 </Box>

@@ -61,7 +61,7 @@ vi.mock("react", async (importOriginal) => {
           stateStore[idx] = newVal;
         }
       };
-      if (callIdx >= 55) {
+      if (callIdx >= 65) {
         callIdx = 0;
       }
       return [stateStore[idx], stateSetters[idx]];
@@ -970,6 +970,47 @@ describe("SettingsPage page component", () => {
     expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
       ip_allowlist: "10.0.0.1,172.16.0.0/12",
       country_allowlist: "TR,DE",
+    }));
+  });
+
+  it("initializes risk-based auth settings and includes them in the save payload", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      risk_based_auth_enabled: "true",
+      risk_threshold_mfa: "45",
+      risk_threshold_block: "85",
+    });
+    const updateSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
+
+    runRender();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stateStore[41]).toBe("true"); // riskBasedAuthEnabled
+    expect(stateStore[42]).toBe("45");   // riskThresholdMfa
+    expect(stateStore[43]).toBe("85");   // riskThresholdBlock
+
+    stateStore[0] = 2;        // System tab
+    stateStore[6] = "5";      // maxSessions (valid: 1-20)
+    stateStore[9] = "5";      // maxLoginAttempts (valid: 1-20)
+    stateStore[10] = false;   // systemLoading = false → content renders
+    stateStore[16] = "300";   // idleTimeout (valid: 60-3600)
+    stateStore[17] = "180";   // adminIdleTimeout (valid: 60-1800)
+    stateStore[18] = "28800"; // absoluteTimeout (valid: 1800-172800)
+
+    runRender();
+    expect(capturedSubmits[capturedSubmits.length - 1]).toBeDefined();
+    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+
+    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      risk_based_auth_enabled: "true",
+      risk_threshold_mfa: "45",
+      risk_threshold_block: "85",
     }));
   });
 });
