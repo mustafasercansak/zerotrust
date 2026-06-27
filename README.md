@@ -118,6 +118,17 @@ Planned/ongoing hardening:
 
 - Operational security review before any real production deployment
 
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Architecture](docs/architecture.md) | System components, request lifecycle, token design, session model, OIDC flow |
+| [API Reference](docs/api.md) | All endpoints — auth, OIDC, user profile, sessions, MFA, passkeys, admin |
+| [Configuration](docs/configuration.md) | All environment variables with defaults, types, and a production checklist |
+| [Security Model](docs/security-model.md) | Threat model, defense layers, risk scoring algorithm, crypto primitives |
+| [System Settings](docs/settings.md) | Runtime-configurable settings (session policy, lockout, device trust, allowlists) |
+| [Development Guide](docs/development.md) | Dev setup, test harness, conventions, production deployment |
+
 ## Quick Start
 
 ### Requirements
