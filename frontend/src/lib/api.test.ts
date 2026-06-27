@@ -410,4 +410,305 @@ describe("api helper library", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers["X-CSRF-Token"]).toBeUndefined();
   });
+
+  it("handles updateNotifications successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.updateNotifications(false);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/me/notifications");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({ notify_security_emails: false });
+  });
+
+  it("handles changePassword successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.changePassword("old", "new");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/me/password");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({ current_password: "old", new_password: "new" });
+  });
+
+  it("handles getSessionPolicy successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { idle_timeout_seconds: 300 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.getSessionPolicy();
+    expect(res).toEqual({ idle_timeout_seconds: 300 });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/session/policy");
+  });
+
+  it("handles listMyAudit with default pagination", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { data: [], total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listMyAudit();
+    const [path] = fetchMock.mock.calls[0];
+    expect(path).toContain("/api/v1/me/audit");
+    expect(path).toContain("limit=50");
+    expect(path).toContain("offset=0");
+  });
+
+  it("handles listMyAudit with custom pagination", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { data: [], total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listMyAudit(25, 50);
+    const [path] = fetchMock.mock.calls[0];
+    expect(path).toContain("limit=25");
+    expect(path).toContain("offset=50");
+  });
+
+  it("handles getOidcClientInfo successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { name: "My App", allowed_scopes: ["openid"] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.getOidcClientInfo("client-abc");
+    expect(res).toEqual({ name: "My App", allowed_scopes: ["openid"] });
+    expect(fetchMock.mock.calls[0][0]).toBe("/oauth2/clients/client-abc");
+  });
+
+  it("handles submitConsent with approved=true", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { redirect_url: "https://app.example.com/cb?code=x" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.submitConsent({
+      client_id: "cid",
+      redirect_uri: "https://app.example.com/cb",
+      scopes: ["openid", "profile"],
+      state: "abc",
+      approved: true,
+    });
+    expect(res.redirect_url).toContain("code=x");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/oauth2/consent");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body).approved).toBe(true);
+  });
+
+  it("handles submitConsent with approved=false", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { redirect_url: "https://app.example.com/cb?error=access_denied" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.submitConsent({
+      client_id: "cid",
+      redirect_uri: "https://app.example.com/cb",
+      scopes: [],
+      approved: false,
+    });
+    expect(res.redirect_url).toContain("error=access_denied");
+  });
+
+  it("includes the reason field when mfaStepUp is called with a reason", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.mfaStepUp("123456", "delete_oidc_client");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ code: "123456", reason: "delete_oidc_client" });
+  });
+
+  it("omits the reason field when mfaStepUp is called without a reason", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.mfaStepUp("123456");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ code: "123456" });
+    expect("reason" in body).toBe(false);
+  });
+
+  it("does not set Content-Type for FormData uploads", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { user_id: "1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["img"], "a.png", { type: "image/png" });
+    await api.uploadAvatar(file);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("sets Content-Type application/json for JSON requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.mfaVerify("000000");
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("includes X-CSRF-Token on POST/PATCH/DELETE requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.mfaVerify("000000");
+    expect(fetchMock.mock.calls[0][1].headers["X-CSRF-Token"]).toBe("csrf123");
+
+    await api.updateLocale("en");
+    expect(fetchMock.mock.calls[1][1].headers["X-CSRF-Token"]).toBe("csrf123");
+
+    await api.revokeSession("id");
+    expect(fetchMock.mock.calls[2][1].headers["X-CSRF-Token"]).toBe("csrf123");
+  });
+
+  it("handles admin.bulkSetUserStatus successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.bulkSetUserStatus(["uid1", "uid2"], false);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/users/bulk-status");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ user_ids: ["uid1", "uid2"], is_active: false });
+  });
+
+  it("handles admin.listUserMfa successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { totp_enabled: true, webauthn_credentials: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.listUserMfa("uid1");
+    expect(res.totp_enabled).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/admin/users/uid1/mfa");
+  });
+
+  it("handles admin.testWebhook with an explicit url", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.testWebhook("https://hooks.example.com/recv");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/settings/webhook/test");
+    expect(JSON.parse(init.body)).toEqual({ url: "https://hooks.example.com/recv" });
+  });
+
+  it("handles admin.testWebhook with no url (uses stored setting)", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.testWebhook();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ url: "" });
+  });
+
+  it("handles admin.listOidcClients successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, []));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.listOidcClients();
+    expect(Array.isArray(res)).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/admin/oidc/clients");
+  });
+
+  it("handles admin.createOidcClient successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, { id: "oid", client_id: "my-app", name: "My App", redirect_uris: [], allowed_scopes: [], created_at: "" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = { client_id: "my-app", name: "My App", redirect_uris: ["https://app.com/cb"], allowed_scopes: ["openid"] };
+    const res = await api.admin.createOidcClient(payload);
+    expect(res.client_id).toBe("my-app");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/oidc/clients");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual(payload);
+  });
+
+  it("handles admin.updateOidcClient successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { id: "oid", client_id: "x", name: "Updated", redirect_uris: [], allowed_scopes: [], created_at: "" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.updateOidcClient("oid", { name: "Updated", redirect_uris: [], allowed_scopes: [] });
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/oidc/clients/oid");
+    expect(init.method).toBe("PUT");
+  });
+
+  it("handles admin.deleteOidcClient successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.deleteOidcClient("oid");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/oidc/clients/oid");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("handles admin.rotateOidcClientSecret and returns the new secret", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { client_secret: "new-secret-abc" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.rotateOidcClientSecret("oid");
+    expect(res.client_secret).toBe("new-secret-abc");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/admin/oidc/clients/oid/rotate");
+    expect(init.method).toBe("POST");
+  });
+
+  it("handles admin.securityPosture successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, { total_users: 10, users_without_mfa: 3, users_inactive_30d: 1 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.securityPosture();
+    expect(res.total_users).toBe(10);
+    expect(res.users_without_mfa).toBe(3);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/admin/security-posture");
+  });
+
+  it("handles admin.health successfully", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        status: "ok",
+        database: { status: "ok", pool: { total: 5, idle: 3, max: 20 } },
+        redis: { status: "ok", pool: { total: 2, idle: 1, max: 10 } },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.health();
+    expect(res.status).toBe("ok");
+    expect(res.database.pool.max).toBe(20);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/admin/health");
+  });
+
+  it("handles admin.auditExport with csv format and filters", async () => {
+    const mockResponse = new Response("col1,col2\n", { status: 200 });
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.auditExport({ format: "csv", action: "auth.login", user_id: "uid1" });
+    expect(res).toBe(mockResponse);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toContain("/api/v1/admin/audit/export");
+    expect(path).toContain("format=csv");
+    expect(path).toContain("action=auth.login");
+    expect(path).toContain("user_id=uid1");
+    expect(init.headers.Accept).toBe("text/csv");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("handles admin.auditExport with json format", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.auditExport({ format: "json" });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Accept).toBe("application/json");
+  });
+
+  it("omits undefined audit export filters from the query string", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.admin.auditExport({ format: "csv" });
+    const [path] = fetchMock.mock.calls[0];
+    expect(path).not.toContain("action=");
+    expect(path).not.toContain("user_id=");
+    expect(path).not.toContain("outcome=");
+  });
 });

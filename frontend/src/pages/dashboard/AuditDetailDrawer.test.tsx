@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { AuditDetailDrawer } from "./AuditPage";
-import { renderToString } from "react-dom/server";
+import type { AuditEntry } from "@/lib/api";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -12,48 +13,13 @@ vi.mock("react-i18next", () => ({
 
 // Drawer renders its children unconditionally (always open)
 vi.mock("@mui/material/Drawer", () => ({
-  default: (props: any) => React.createElement("div", null, props.children),
-}));
-
-// State mocking
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      return [stateStore[idx], stateSetters[idx]];
-    },
-  };
-});
-
-const capturedIconButtonClicks: any[] = [];
-vi.mock("@mui/material/IconButton", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedIconButtonClicks.push(props.onClick);
-    return React.createElement("button", { onClick: props.onClick }, props.children);
-  },
+  default: (props: any) => React.createElement("div", { "data-testid": "drawer" }, props.children),
 }));
 
 describe("AuditDetailDrawer component", () => {
   const onClose = vi.fn();
 
-  const getMockEntry = (overrides: any = {}): any => ({
+  const getMockEntry = (overrides: any = {}): AuditEntry => ({
     id: "a1",
     action: "auth.login",
     resource: "users",
@@ -73,10 +39,6 @@ describe("AuditDetailDrawer component", () => {
   });
 
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    capturedIconButtonClicks.length = 0;
     onClose.mockClear();
   });
 
@@ -84,170 +46,151 @@ describe("AuditDetailDrawer component", () => {
     vi.restoreAllMocks();
   });
 
-  const runRender = (entry?: any) => {
-    callIdx = 0;
-    capturedIconButtonClicks.length = 0;
-    return renderToString(
-      React.createElement(AuditDetailDrawer, { entry: entry ?? getMockEntry(), onClose }),
-    );
-  };
-
   // ── Info section (default activeSection = "info") ─────────────────────────
 
   it("renders info section by default with action, ip, location, status and reason", () => {
-    const html = runRender();
-    expect(html).toContain("auth.login");
-    expect(html).toContain("1.1.1.1");
-    expect(html).toContain("New York");
-    expect(html).toContain("US");
-    expect(html).toContain("200");
-    expect(html).toContain("OK");
-    expect(html).toContain("eventDetails");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+
+    expect(screen.getAllByText("auth.login").length).toBeGreaterThan(0);
+    expect(screen.getByText("1.1.1.1")).toBeDefined();
+    expect(screen.getByText("New York, US")).toBeDefined();
+    expect(screen.getByText("200")).toBeDefined();
+    expect(screen.getByText("OK")).toBeDefined();
+    expect(screen.getByText("eventDetails")).toBeDefined();
   });
 
   it("renders success outcome chip in header", () => {
-    const html = runRender();
-    expect(html).toContain("success");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    expect(screen.getByText("success")).toBeDefined();
   });
 
   it("renders failure outcome chip in header", () => {
-    const html = runRender(getMockEntry({ metadata: { outcome: "failure", status: 401 } }));
-    expect(html).toContain("failure");
-    expect(html).toContain("401");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { outcome: "failure", status: 401 } }), onClose }));
+    expect(screen.getByText("failure")).toBeDefined();
+    expect(screen.getByText("401")).toBeDefined();
   });
 
   it("renders unknown outcome chip with default color", () => {
-    const html = runRender(getMockEntry({ metadata: { outcome: "partial" } }));
-    expect(html).toContain("partial");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { outcome: "partial" } }), onClose }));
+    expect(screen.getByText("partial")).toBeDefined();
   });
 
   it("omits outcome chip when metadata has no outcome", () => {
-    const html = runRender(getMockEntry({ metadata: { status: 200 } }));
-    expect(html).toContain("200");
-    expect(html).not.toContain("success");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { status: 200 } }), onClose }));
+    expect(screen.queryByText("success")).toBeNull();
+    expect(screen.getByText("200")).toBeDefined();
   });
 
   it("renders location with country only when city is absent", () => {
-    const html = runRender(getMockEntry({ metadata: { location: { country: "TR" } } }));
-    expect(html).toContain("TR");
-    expect(html).not.toContain("New York");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { location: { country: "TR" } } }), onClose }));
+    expect(screen.getByText("TR")).toBeDefined();
+    expect(screen.queryByText("New York")).toBeNull();
   });
 
   it("omits location row when metadata has no location", () => {
-    const html = runRender(getMockEntry({ metadata: { status: 200, reason: "OK" } }));
-    expect(html).not.toContain("location");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { status: 200, reason: "OK" } }), onClose }));
+    expect(screen.queryByText("location")).toBeNull();
   });
 
   it("omits status and reason rows when absent from metadata", () => {
-    const html = runRender(getMockEntry({ metadata: { outcome: "success" } }));
-    // Check the translation-key labels are not rendered (safe: these won't appear in CSS)
-    expect(html).not.toContain("reason");
-    expect(html).toContain("eventDetails");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: { outcome: "success" } }), onClose }));
+    expect(screen.queryByText("reason")).toBeNull();
+    expect(screen.getByText("eventDetails")).toBeDefined();
   });
 
   it("renders raw metadata toggle in collapsed state by default", () => {
-    const html = runRender();
-    expect(html).toContain("rawMetadata");
-    expect(html).toContain("▼");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    expect(screen.getByText("rawMetadata")).toBeDefined();
+    expect(screen.getByText("▼")).toBeDefined();
   });
 
-  it("renders expanded raw metadata when showRaw is true", () => {
-    stateStore[1] = true;
-    const html = runRender();
-    expect(html).toContain("▲");
-    // JSON strings are HTML-encoded in SSR output
-    expect(html).toContain("&quot;outcome&quot;");
+  it("renders expanded raw metadata when clicked", () => {
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    fireEvent.click(screen.getByText("rawMetadata"));
+    expect(screen.getByText("▲")).toBeDefined();
+    expect(screen.getByText(/"outcome": "success"/)).toBeDefined();
   });
 
   it("omits raw metadata section when entry has no metadata", () => {
-    const html = runRender(getMockEntry({ metadata: undefined }));
-    expect(html).toContain("auth.login");
-    expect(html).not.toContain("rawMetadata");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ metadata: undefined }), onClose }));
+    expect(screen.getAllByText("auth.login").length).toBeGreaterThan(0);
+    expect(screen.queryByText("rawMetadata")).toBeNull();
   });
 
   // ── Client section ────────────────────────────────────────────────────────
 
   it("renders client section with browser, OS, and user-agent string", () => {
-    stateStore[0] = "client";
-    const html = runRender();
-    expect(html).toContain("clientDetails");
-    expect(html).toContain("Chrome");
-    expect(html).toContain("Windows");
-    expect(html).toContain("Mozilla/5.0");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    fireEvent.click(screen.getByText("drawerClient"));
+
+    expect(screen.getByText("clientDetails")).toBeDefined();
+    expect(screen.getByText("Chrome")).toBeDefined();
+    expect(screen.getByText("Windows 10")).toBeDefined();
+    expect(screen.getByText("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")).toBeDefined();
   });
 
   it("renders client section without user-agent block when user_agent is null", () => {
-    stateStore[0] = "client";
-    const html = runRender(getMockEntry({ user_agent: null }));
-    expect(html).toContain("clientDetails");
-    expect(html).not.toContain("userAgent");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ user_agent: null }), onClose }));
+    fireEvent.click(screen.getByText("drawerClient"));
+
+    expect(screen.getByText("clientDetails")).toBeDefined();
+    expect(screen.queryByText("userAgent")).toBeNull();
   });
 
   it("renders client section with OS dash fallback when osLabel returns empty string", () => {
-    stateStore[0] = "client";
-    const html = runRender(getMockEntry({ user_agent: "", metadata: {} }));
-    expect(html).toContain("—");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ user_agent: "", metadata: {} }), onClose }));
+    fireEvent.click(screen.getByText("drawerClient"));
+    expect(screen.getByText("—")).toBeDefined();
   });
 
   // ── User section ──────────────────────────────────────────────────────────
 
   it("renders user section with actor email and user_id", () => {
-    stateStore[0] = "user";
-    const html = runRender();
-    expect(html).toContain("actorDetails");
-    expect(html).toContain("alice@example.com");
-    expect(html).toContain("u1");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    fireEvent.click(screen.getByText("drawerUser"));
+
+    expect(screen.getByText("actorDetails")).toBeDefined();
+    expect(screen.getByText("alice@example.com")).toBeDefined();
+    expect(screen.getByText("u1")).toBeDefined();
   });
 
   it("renders only email in user section when user_id is absent", () => {
-    stateStore[0] = "user";
-    const html = runRender(getMockEntry({ user_id: undefined }));
-    expect(html).toContain("alice@example.com");
-    expect(html).not.toContain("userId");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ user_id: undefined }), onClose }));
+    fireEvent.click(screen.getByText("drawerUser"));
+
+    expect(screen.getByText("alice@example.com")).toBeDefined();
+    expect(screen.queryByText("userId")).toBeNull();
   });
 
   it("renders only user_id in user section when email is absent", () => {
-    stateStore[0] = "user";
-    const html = runRender(getMockEntry({ user_email: "" }));
-    expect(html).toContain("u1");
-    expect(html).not.toContain("email");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ user_email: "" }), onClose }));
+    fireEvent.click(screen.getByText("drawerUser"));
+
+    expect(screen.getByText("u1")).toBeDefined();
+    expect(screen.queryByText("email")).toBeNull();
   });
 
   it("renders anonymousActor when neither email nor user_id are present", () => {
-    stateStore[0] = "user";
-    const html = runRender(getMockEntry({ user_email: "", user_id: "" }));
-    expect(html).toContain("anonymousActor");
-    expect(html).not.toContain("actorDetails");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry({ user_email: "", user_id: "" }), onClose }));
+    fireEvent.click(screen.getByText("drawerUser"));
+
+    expect(screen.getByText("anonymousActor")).toBeDefined();
+    expect(screen.queryByText("actorDetails")).toBeNull();
   });
 
   // ── Section nav and close ────────────────────────────────────────────────
 
   it("renders all three section nav tabs", () => {
-    const html = runRender();
-    expect(html).toContain("drawerInfo");
-    expect(html).toContain("drawerClient");
-    expect(html).toContain("drawerUser");
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    expect(screen.getByText("drawerInfo")).toBeDefined();
+    expect(screen.getByText("drawerClient")).toBeDefined();
+    expect(screen.getByText("drawerUser")).toBeDefined();
   });
 
-  it("calls onClose when the close IconButton is clicked", () => {
-    runRender();
-    expect(capturedIconButtonClicks.length).toBeGreaterThan(0);
-    capturedIconButtonClicks[0]();
+  it("calls onClose when the close button is clicked", () => {
+    render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
+    const closeBtn = screen.getByTestId("CloseIcon");
+    fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("setActiveSection setter changes rendered section on next render", () => {
-    runRender();
-    stateSetters[0]("client");
-    const html = runRender();
-    expect(html).toContain("clientDetails");
-  });
-
-  it("setShowRaw setter toggles raw metadata display on next render", () => {
-    runRender();
-    stateSetters[1]((v: boolean) => !v);
-    expect(stateStore[1]).toBe(true);
-    const html = runRender();
-    expect(html).toContain("▲");
   });
 });

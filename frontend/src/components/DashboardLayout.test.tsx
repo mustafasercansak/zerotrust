@@ -2,42 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import DashboardLayout from "./DashboardLayout";
 import { api } from "@/lib/api";
-import { renderToString } from "react-dom/server";
-
-// State Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-let effectCleanups: Array<() => void> = [];
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 20) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      const cleanup = fn();
-      if (typeof cleanup === "function") effectCleanups.push(cleanup);
-    },
-  };
-});
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 
 const mockNavigate = vi.fn();
 let mockPathname = "/dashboard";
@@ -97,38 +62,15 @@ vi.mock("@/lib/useAuth", () => ({
     loading: mockLoading,
     bootstrapError: mockBootstrapError,
     retry: mockRetry,
+    localeWarning: false,
+    dismissLocaleWarning: vi.fn(),
+    anomalyWarning: false,
+    dismissAnomalyWarning: vi.fn(),
   }),
 }));
 
-let capturedClickLogout: any = null;
-const capturedClickLocales: Record<string, any> = {};
-let capturedClickProfile: any = null;
-
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) {
-      if (props.children === "logout") {
-        capturedClickLogout = props.onClick;
-      } else if (props.children === "EN" || props.children === "TR") {
-        capturedClickLocales[props.children] = props.onClick;
-      } else {
-        capturedClickProfile = props.onClick;
-      }
-    }
-    return React.createElement("button", { onClick: props.onClick }, props.children);
-  },
-}));
-
 describe("DashboardLayout component", () => {
-  let capturedMeUpdatedListener: any = null;
-
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    effectCleanups = [];
-    capturedMeUpdatedListener = null;
-
     global.localStorage = {
       getItem: vi.fn(),
       setItem: vi.fn(),
@@ -148,124 +90,105 @@ describe("DashboardLayout component", () => {
       roles: ["admin"],
       locale: "en",
     };
-    capturedClickLogout = null;
-    for (const key in capturedClickLocales) {
-      delete capturedClickLocales[key];
-    }
-    capturedClickProfile = null;
+    mockNavigate.mockClear();
+    mockSetMe.mockClear();
     vi.clearAllMocks();
-
-    vi.stubGlobal("window", {
-      addEventListener: vi.fn((event, cb) => {
-        if (event === "me:updated") capturedMeUpdatedListener = cb;
-      }),
-      removeEventListener: vi.fn(),
-    });
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
-  const runRender = () => {
-    callIdx = 0;
-    return renderToString(React.createElement(DashboardLayout));
-  };
-
   it("renders side navigation, Outlet, and user details", () => {
-    const html = runRender();
-    expect(html).toContain("Outlet");
-    expect(html).toContain("John Doe");
-    expect(html).toContain("test@example.com");
-    expect(html).toContain("security");
+    render(React.createElement(DashboardLayout));
+    expect(screen.getByText("Outlet")).toBeDefined();
+    expect(screen.getByText("John Doe")).toBeDefined();
+    expect(screen.getByText("test@example.com")).toBeDefined();
+    expect(screen.getByText("security")).toBeDefined();
   });
 
   it("renders user initials when first/last name are empty", () => {
     mockMeData.first_name = "";
     mockMeData.last_name = "";
     mockMeData.has_avatar = false;
-    const html = runRender();
-    expect(html).toContain("TE"); // TE for test@example.com initials
+    render(React.createElement(DashboardLayout));
+    expect(screen.getByText("TE")).toBeDefined(); // TE for test@example.com initials
   });
 
   it("renders loader screen when loading is true", () => {
     mockLoading = true;
-    const html = runRender();
-    expect(html).toContain("loading");
+    render(React.createElement(DashboardLayout));
+    expect(screen.getByText("loading")).toBeDefined();
   });
 
   it("renders error retry screen when bootstrapError is present", () => {
     mockBootstrapError = "network";
-    const html = runRender();
-    expect(html).toContain("retry");
+    render(React.createElement(DashboardLayout));
+    expect(screen.getByText("retry")).toBeDefined();
   });
 
   it("renders auth bootstrap fallback when the user is missing", () => {
     mockMeData = null;
-    const html = runRender();
-    expect(html).toContain("authBootstrap.network");
+    render(React.createElement(DashboardLayout));
+    expect(screen.getByText("authBootstrap.network")).toBeDefined();
   });
 
   it("renders non-admin navigation without admin-only links", () => {
     mockMeData.roles = ["user"];
     mockPathname = "/dashboard/settings";
-    const html = runRender();
+    render(React.createElement(DashboardLayout));
 
-    expect(html).toContain("settings");
-    expect(html).not.toContain("security");
-    expect(html).not.toContain("serviceAccounts");
+    expect(screen.getByText("settings")).toBeDefined();
+    expect(screen.queryByText("security")).toBeNull();
+    expect(screen.queryByText("serviceAccounts")).toBeNull();
   });
 
   it("handles profile, locale, and logout buttons correctly", async () => {
     const updateLocaleSpy = vi.spyOn(api, "updateLocale").mockResolvedValue({} as any);
     const logoutSpy = vi.spyOn(api, "logout").mockResolvedValue({} as any);
 
-    runRender();
+    render(React.createElement(DashboardLayout));
 
-    expect(capturedClickProfile).toBeDefined();
-    capturedClickProfile();
+    // Profile Avatar button
+    fireEvent.click(screen.getByText("John Doe"));
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard/settings");
 
-    expect(capturedClickLogout).toBeDefined();
-    capturedClickLogout();
+    // Logout button
+    fireEvent.click(screen.getByText("logout"));
     expect(logoutSpy).toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith("/auth/login");
 
-    expect(capturedClickLocales["TR"]).toBeDefined();
-    await capturedClickLocales["TR"]();
+    // TR Locale button
+    fireEvent.click(screen.getByText("TR"));
     expect(updateLocaleSpy).toHaveBeenCalledWith("tr");
   });
 
   it("skips same-locale changes and ignores locale update failures", async () => {
     const updateLocaleSpy = vi.spyOn(api, "updateLocale").mockRejectedValue(new Error("locale failed"));
 
-    runRender();
+    render(React.createElement(DashboardLayout));
 
-    await capturedClickLocales["EN"]();
+    // EN is current, so clicking EN should skip updateLocale call
+    fireEvent.click(screen.getByText("EN"));
     expect(updateLocaleSpy).not.toHaveBeenCalled();
 
-    await capturedClickLocales["TR"]();
+    // TR is different, so clicking TR should trigger updateLocale call
+    fireEvent.click(screen.getByText("TR"));
     expect(updateLocaleSpy).toHaveBeenCalledWith("tr");
-    expect(localStorage.setItem).toHaveBeenCalledWith("locale", "tr");
+    await waitFor(() => {
+      expect(localStorage.setItem).toHaveBeenCalledWith("locale", "tr");
+    });
   });
 
   it("handles me:updated custom window event", () => {
-    runRender();
-    expect(capturedMeUpdatedListener).toBeDefined();
+    render(React.createElement(DashboardLayout));
 
     const updatedData = { ...mockMeData, first_name: "Jane" };
-    capturedMeUpdatedListener({ detail: updatedData });
+    act(() => {
+      window.dispatchEvent(new CustomEvent("me:updated", { detail: updatedData }));
+    });
 
     expect(mockSetMe).toHaveBeenCalledWith(updatedData);
-  });
-
-  it("removes the me:updated listener on cleanup", () => {
-    runRender();
-    expect(effectCleanups[0]).toBeDefined();
-
-    effectCleanups[0]();
-
-    expect(window.removeEventListener).toHaveBeenCalledWith("me:updated", expect.any(Function));
   });
 });

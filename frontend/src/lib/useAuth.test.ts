@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth, authBootstrapFailureAction, classifyAuthBootstrapError, isAuthRedirectError } from "./useAuth";
 import { ApiError, api } from "./api";
-
-// Stub variables for mock React state
-let stateCalls: any[] = [];
-let callIdx = 0;
+import { renderHook, waitFor, act } from "@testing-library/react";
 
 // Mock router navigation
 const mockNavigate = vi.fn();
@@ -24,32 +21,6 @@ vi.mock("react-i18next", () => ({
     t: (key: string) => key,
   }),
 }));
-
-beforeEach(() => {
-  vi.stubGlobal("localStorage", {
-    setItem: vi.fn(),
-    getItem: vi.fn(),
-  });
-});
-
-// Mock React
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!stateCalls[idx]) {
-        stateCalls[idx] = [init, vi.fn()];
-      }
-      return stateCalls[idx];
-    },
-    useEffect: (fn: any) => {
-      fn();
-    },
-  };
-});
 
 describe("auth bootstrap helper error handling", () => {
   it.each([401, 403])("redirects HTTP %s auth failures to login", (status) => {
@@ -86,18 +57,18 @@ describe("auth bootstrap helper error handling", () => {
 
 describe("useAuth React hook", () => {
   beforeEach(() => {
-    callIdx = 0;
+    vi.stubGlobal("localStorage", {
+      setItem: vi.fn(),
+      getItem: vi.fn(),
+    });
     mockNavigate.mockClear();
     mockChangeLanguage.mockClear();
-    stateCalls = [
-      [null, vi.fn()], // me
-      [true, vi.fn()], // loading
-      [null, vi.fn()], // bootstrapError
-    ];
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [] } as any);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("loads profile on mount, syncs mismatching locale, and sets state", async () => {
@@ -113,13 +84,13 @@ describe("useAuth React hook", () => {
       roles: ["admin"],
     });
 
-    useAuth();
+    const { result } = renderHook(() => useAuth());
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockMe).toHaveBeenCalled();
       expect(mockChangeLanguage).toHaveBeenCalledWith("tr");
-      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.any(Object)); // setMe
-      expect(stateCalls[1][1]).toHaveBeenCalledWith(false); // setLoading
+      expect(result.current.me).toEqual(expect.objectContaining({ user_id: "u1", locale: "tr" }));
+      expect(result.current.loading).toBe(false);
     });
   });
 
@@ -136,12 +107,12 @@ describe("useAuth React hook", () => {
       roles: ["admin"],
     });
 
-    useAuth();
+    const { result } = renderHook(() => useAuth());
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockMe).toHaveBeenCalled();
-      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
-      expect(stateCalls[1][1]).toHaveBeenCalledWith(false);
+      expect(result.current.me).toEqual(expect.objectContaining({ locale: "en" }));
+      expect(result.current.loading).toBe(false);
     });
     expect(mockChangeLanguage).not.toHaveBeenCalled();
     expect(localStorage.setItem).not.toHaveBeenCalled();
@@ -160,12 +131,12 @@ describe("useAuth React hook", () => {
       roles: ["admin"],
     });
 
-    useAuth();
+    const { result } = renderHook(() => useAuth());
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockMe).toHaveBeenCalled();
-      expect(stateCalls[0][1]).toHaveBeenCalledWith(expect.objectContaining({ locale: "" }));
-      expect(stateCalls[1][1]).toHaveBeenCalledWith(false);
+      expect(result.current.me).toEqual(expect.objectContaining({ locale: "" }));
+      expect(result.current.loading).toBe(false);
     });
     expect(mockChangeLanguage).not.toHaveBeenCalled();
     expect(localStorage.setItem).not.toHaveBeenCalled();
@@ -174,9 +145,9 @@ describe("useAuth React hook", () => {
   it("redirects to login on auth failure (401/403)", async () => {
     const mockMe = vi.spyOn(api, "me").mockRejectedValue(new ApiError("unauthorized", undefined, 401));
 
-    useAuth();
+    renderHook(() => useAuth());
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockMe).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith("/auth/login", { replace: true });
     });
@@ -185,12 +156,12 @@ describe("useAuth React hook", () => {
   it("sets bootstrap error on network/infrastructure failure", async () => {
     const mockMe = vi.spyOn(api, "me").mockRejectedValue(new ApiError("server_error", undefined, 500));
 
-    useAuth();
+    const { result } = renderHook(() => useAuth());
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockMe).toHaveBeenCalled();
-      expect(stateCalls[2][1]).toHaveBeenCalledWith("server"); // setBootstrapError
-      expect(stateCalls[1][1]).toHaveBeenCalledWith(false); // setLoading
+      expect(result.current.bootstrapError).toBe("server");
+      expect(result.current.loading).toBe(false);
     });
   });
 });

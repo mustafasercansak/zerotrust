@@ -1,75 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 import { api } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   api: { getSessionPolicy: vi.fn() },
 }));
 
-// State and effect store — same pattern as SettingsPage.test.tsx.
-let stateStore: Record<number, unknown> = {};
-let effectFns: Array<() => void | (() => void)> = [];
-let callIdx = 0;
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: unknown) => {
-      const idx = callIdx++;
-      if (!(idx in stateStore)) stateStore[idx] = init;
-      const setter = (v: unknown) => {
-        stateStore[idx] = typeof v === "function" ? (v as (p: unknown) => unknown)(stateStore[idx]) : v;
-      };
-      return [stateStore[idx], setter];
-    },
-    useEffect: (fn: () => void | (() => void)) => { effectFns.push(fn); },
-    useCallback: (fn: unknown) => fn,
-    useRef: (init: unknown) => ({ current: init }),
-  };
-});
-
-const mockAddEventListener = vi.fn();
-const mockRemoveEventListener = vi.fn();
-
 beforeEach(() => {
   vi.useFakeTimers();
-  stateStore = {};
-  effectFns = [];
-  callIdx = 0;
   vi.mocked(api.getSessionPolicy).mockResolvedValue({ idle_timeout_seconds: 120 });
-  vi.stubGlobal("window", {
-    addEventListener: mockAddEventListener,
-    removeEventListener: mockRemoveEventListener,
-  });
-  mockAddEventListener.mockClear();
-  mockRemoveEventListener.mockClear();
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("useIdleTimeout hook", () => {
   it("returns correct initial shape", async () => {
     const { useIdleTimeout } = await import("./useIdleTimeout");
-    callIdx = 0;
-    const result = useIdleTimeout(vi.fn());
+    const onExpire = vi.fn();
+    const { result } = renderHook(() => useIdleTimeout(onExpire));
 
-    expect(result.warningVisible).toBe(false);
-    expect(result.secondsRemaining).toBe(60);
-    expect(typeof result.extendSession).toBe("function");
-    expect(typeof result.dismissWarning).toBe("function");
+    expect(result.current.warningVisible).toBe(false);
+    expect(result.current.secondsRemaining).toBe(60);
+    expect(typeof result.current.extendSession).toBe("function");
+    expect(typeof result.current.dismissWarning).toBe("function");
   });
 
   it("calls getSessionPolicy on mount", async () => {
     const { useIdleTimeout } = await import("./useIdleTimeout");
-    callIdx = 0;
-    useIdleTimeout(vi.fn());
+    const onExpire = vi.fn();
+    renderHook(() => useIdleTimeout(onExpire));
 
-    // Run all collected effects.
-    for (const fn of effectFns) fn();
-    await vi.runAllTimersAsync();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(api.getSessionPolicy).toHaveBeenCalled();
   });
@@ -77,36 +43,34 @@ describe("useIdleTimeout hook", () => {
   it("swallows getSessionPolicy errors silently", async () => {
     vi.mocked(api.getSessionPolicy).mockRejectedValueOnce(new Error("network"));
     const { useIdleTimeout } = await import("./useIdleTimeout");
-    callIdx = 0;
-    useIdleTimeout(vi.fn());
+    const onExpire = vi.fn();
+    renderHook(() => useIdleTimeout(onExpire));
 
-    for (const fn of effectFns) fn();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
     // Expect no unhandled rejection — swallowed silently.
-    await vi.runAllTimersAsync();
   });
 
   it("registers activity event listeners", async () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
     const { useIdleTimeout } = await import("./useIdleTimeout");
-    callIdx = 0;
-    useIdleTimeout(vi.fn());
+    const onExpire = vi.fn();
+    renderHook(() => useIdleTimeout(onExpire));
 
-    for (const fn of effectFns) fn();
-
-    expect(mockAddEventListener).toHaveBeenCalledWith("mousemove", expect.any(Function), { passive: true });
-    expect(mockAddEventListener).toHaveBeenCalledWith("keydown", expect.any(Function), { passive: true });
-    expect(mockAddEventListener).toHaveBeenCalledWith("click", expect.any(Function), { passive: true });
+    expect(addSpy).toHaveBeenCalledWith("mousemove", expect.any(Function), { passive: true });
+    expect(addSpy).toHaveBeenCalledWith("keydown", expect.any(Function), { passive: true });
+    expect(addSpy).toHaveBeenCalledWith("click", expect.any(Function), { passive: true });
   });
 
-  it("removes activity event listeners on cleanup", async () => {
+  it("removes activity event listeners on unmount", async () => {
+    const removeSpy = vi.spyOn(window, "removeEventListener");
     const { useIdleTimeout } = await import("./useIdleTimeout");
-    callIdx = 0;
-    useIdleTimeout(vi.fn());
+    const onExpire = vi.fn();
+    const { unmount } = renderHook(() => useIdleTimeout(onExpire));
 
-    // Run the listeners effect and capture its cleanup.
-    const listenerEffect = effectFns.find((_, i) => i === 1);
-    const cleanup = listenerEffect?.() as (() => void) | undefined;
-    cleanup?.();
+    unmount();
 
-    expect(mockRemoveEventListener).toHaveBeenCalledWith("mousemove", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("mousemove", expect.any(Function));
   });
 });

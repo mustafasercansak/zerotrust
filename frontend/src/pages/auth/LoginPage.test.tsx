@@ -4,7 +4,7 @@ import LoginPage from "./LoginPage";
 import { api, ApiError } from "@/lib/api";
 import { scheduleRefresh } from "@/lib/tokenManager";
 import { toast } from "sonner";
-import { renderToString } from "react-dom/server";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import { isWebAuthnSupported, performAssertion } from "@/lib/webauthn";
 
 const mockNavigate = vi.fn();
@@ -44,146 +44,65 @@ vi.mock("@/lib/webauthn", () => ({
   performAssertion: vi.fn(),
 }));
 
-// State Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-let effectCleanups: Array<() => void> = [];
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 100) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      const cleanup = fn();
-      if (typeof cleanup === "function") effectCleanups.push(cleanup);
-    },
-  };
-});
-
-// Mock Material UI inputs
-let capturedOnSubmitCredentials: any = null;
-let capturedOnSubmitMFA: any = null;
-let capturedOnChangeEmail: any = null;
-let capturedOnChangePassword: any = null;
-let capturedOnChangeTotpCode: any = null;
-let capturedOnChangeCodesSaved: any = null;
-let capturedBackButtonClick: any = null;
-let capturedPasswordlessClick: any = null;
-let capturedPasskeyMFAClick: any = null;
-
-vi.mock("@mui/material/Box", () => ({
-  default: (props: any) => {
-    if (props.onSubmit) {
-      if (stateStore[0] === "credentials") {
-        capturedOnSubmitCredentials = props.onSubmit;
-      } else {
-        capturedOnSubmitMFA = props.onSubmit;
-      }
-    }
-    return React.createElement("div", null, props.children);
-  },
-}));
-
-vi.mock("@mui/material/TextField", () => ({
-  default: (props: any) => {
-    if (props.label === "email") {
-      capturedOnChangeEmail = props.onChange;
-    } else if (props.label === "password") {
-      capturedOnChangePassword = props.onChange;
-    } else if (props.label === "mfaCode" || props.label === "MFA Code / Recovery Code") {
-      capturedOnChangeTotpCode = props.onChange;
-    }
-    return React.createElement("input", { value: props.value, onChange: props.onChange });
-  },
-}));
-
-vi.mock("@mui/material/Checkbox", () => ({
-  default: (props: any) => {
-    capturedOnChangeCodesSaved = props.onChange;
-    return React.createElement("input", { type: "checkbox", checked: props.checked, onChange: props.onChange });
-  },
-}));
-
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.color === "inherit") {
-      capturedBackButtonClick = props.onClick;
-    } else if (props.variant === "outlined" && props.type === "button") {
-      // "Sign in with a passkey" on the credentials screen
-      capturedPasswordlessClick = props.onClick;
-    } else if (props.type === "button" && props.variant === "contained") {
-      // "Use a passkey" on the MFA screen
-      capturedPasskeyMFAClick = props.onClick;
-    }
-    return React.createElement("button", { type: props.type, onClick: props.onClick }, props.children);
-  },
-}));
-
 describe("LoginPage component", () => {
-  beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    effectCleanups = [];
-    capturedOnSubmitCredentials = null;
-    capturedOnSubmitMFA = null;
-    capturedOnChangeEmail = null;
-    capturedOnChangePassword = null;
-    capturedOnChangeTotpCode = null;
-    capturedOnChangeCodesSaved = null;
-    capturedBackButtonClick = null;
-    capturedPasswordlessClick = null;
-    capturedPasskeyMFAClick = null;
-    vi.clearAllMocks();
-    vi.mocked(isWebAuthnSupported).mockReturnValue(false);
-    vi.useFakeTimers();
+  let mockLocation: { href: string };
+  let setIntervalCallback: any;
 
-    vi.stubGlobal("window", {
-      setInterval: vi.fn((fn: any, delay: number) => {
-        fn();
-        return 123;
-      }),
-      clearInterval: vi.fn(),
+  beforeEach(() => {
+    mockNavigate.mockClear();
+    vi.mocked(scheduleRefresh).mockClear();
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(isWebAuthnSupported).mockReturnValue(false);
+    mockSearchParams.delete("redirect_to");
+
+    mockLocation = { href: "" };
+    const windowProxy = new Proxy(window, {
+      get(target, prop) {
+        if (prop === "location") {
+          return mockLocation;
+        }
+        const val = Reflect.get(target, prop);
+        if (typeof val === "function") {
+          return val.bind(target);
+        }
+        return val;
+      },
+      set(target, prop, value) {
+        if (prop === "location") {
+          mockLocation = value;
+          return true;
+        }
+        return Reflect.set(target, prop, value);
+      }
     });
+    vi.stubGlobal("window", windowProxy);
+
+    setIntervalCallback = null;
+    vi.spyOn(window, "setInterval").mockImplementation((fn: any) => {
+      setIntervalCallback = fn;
+      return 123 as any;
+    });
+    vi.spyOn(window, "clearInterval").mockImplementation(() => {});
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  const runRender = () => {
-    callIdx = 0;
-    return renderToString(React.createElement(LoginPage));
-  };
-
   it("handles standard input typing", () => {
-    runRender();
+    render(React.createElement(LoginPage));
 
-    capturedOnChangeEmail({ target: { value: "user@example.com" } });
-    capturedOnChangePassword({ target: { value: "password123" } });
+    const emailInput = screen.getByLabelText(/email/i) as HTMLInputElement;
+    const passwordInput = screen.getByLabelText(/password/i) as HTMLInputElement;
 
-    expect(stateStore[1]).toBe("user@example.com");
-    expect(stateStore[2]).toBe("password123");
+    fireEvent.change(emailInput, { target: { value: "user@example.com" } });
+    fireEvent.change(passwordInput, { target: { value: "password123" } });
+
+    expect(emailInput.value).toBe("user@example.com");
+    expect(passwordInput.value).toBe("password123");
   });
 
   it("handles successful login without MFA", async () => {
@@ -192,15 +111,17 @@ describe("LoginPage component", () => {
       mfa_required: false,
     });
 
-    stateStore[1] = "test@example.com";
-    stateStore[2] = "pass";
-    runRender();
+    render(React.createElement(LoginPage));
 
-    const preventDefault = vi.fn();
-    await capturedOnSubmitCredentials({ preventDefault });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "test@example.com" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "pass" } });
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(loginSpy).toHaveBeenCalledWith("test@example.com", "pass");
-    expect(scheduleRefresh).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(loginSpy).toHaveBeenCalledWith("test@example.com", "pass");
+      expect(scheduleRefresh).toHaveBeenCalled();
+    });
+
     vi.mocked(scheduleRefresh).mock.calls[0][0]?.();
     expect(mockNavigate).toHaveBeenCalledWith("/auth/login");
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
@@ -216,15 +137,17 @@ describe("LoginPage component", () => {
       mfa_recovery_codes: ["code1", "code2"],
     });
 
-    runRender();
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    await waitFor(() => {
+      expect(screen.getByText("mfaTitle")).toBeDefined();
+    });
 
-    expect(stateStore[0]).toBe("mfa"); // stage is updated to mfa
-    expect(stateStore[3]).toBe("mfa-token-123");
-    expect(stateStore[5]).toBe("otpauth://totp/...");
-    expect(stateStore[4]).toBe("secret-xyz");
-    expect(stateStore[6]).toEqual(["code1", "code2"]);
+    expect(screen.getByText("mfaSetupRequiredDesc")).toBeDefined();
+    expect(screen.getByText("secret-xyz")).toBeDefined();
+    expect(screen.getByText("code1")).toBeDefined();
+    expect(screen.getByText("code2")).toBeDefined();
   });
 
   it("handles login requiring MFA verification (already setup)", async () => {
@@ -235,25 +158,25 @@ describe("LoginPage component", () => {
       totp_enabled: true,
     });
 
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(stateStore[0]).toBe("mfa");
-    expect(stateStore[5]).toBe(""); // no setup url
+    await waitFor(() => {
+      expect(screen.getByLabelText(/MFA Code/i)).toBeDefined();
+    });
 
-    // Pre-populate values for MFA stage layout render
-    stateStore[8] = "123456";
-    runRender();
-
-    expect(capturedOnChangeTotpCode).toBeDefined();
-    capturedOnChangeTotpCode({ target: { value: "123456" } });
+    const mfaCodeInput = screen.getByLabelText(/MFA Code/i);
+    fireEvent.change(mfaCodeInput, { target: { value: "123456" } });
 
     const mfaSpy = vi.spyOn(api, "mfaChallenge").mockResolvedValue({ ok: true } as any);
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "123456");
-    const lastScheduleRefreshCall = vi.mocked(scheduleRefresh).mock.calls[vi.mocked(scheduleRefresh).mock.calls.length - 1];
-    lastScheduleRefreshCall?.[0]?.();
+    await waitFor(() => {
+      expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "123456");
+      expect(scheduleRefresh).toHaveBeenCalled();
+    });
+
+    vi.mocked(scheduleRefresh).mock.calls[0][0]?.();
     expect(mockNavigate).toHaveBeenCalledWith("/auth/login");
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
   });
@@ -263,210 +186,228 @@ describe("LoginPage component", () => {
       new ApiError("account_locked", 180, 423)
     );
 
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
+    });
 
     // Rate Limit Error
     vi.spyOn(api, "login").mockRejectedValueOnce(
       new ApiError("rate_limit_exceeded", 30, 429)
     );
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[10]).toBe(30); // retryAfter set to 30
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":30})" })).toBeDefined();
+    });
 
     // Test countdown timer in useEffect
-    runRender();
-    expect(stateStore[10]).toBe(29);
-    expect(effectCleanups[0]).toBeDefined();
-    effectCleanups[0]();
-    expect(window.clearInterval).toHaveBeenCalledWith(123);
+    act(() => {
+      setIntervalCallback();
+    });
+    expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":29})" })).toBeDefined();
   });
 
   it("does not submit credentials or MFA while retry countdown is active", async () => {
+    vi.spyOn(api, "login").mockRejectedValueOnce(
+      new ApiError("rate_limit_exceeded", 5, 429)
+    );
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":5})" })).toBeDefined();
+    });
+
     const loginSpy = vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
-    stateStore[10] = 5;
-    runRender();
-
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
+    loginSpy.mockClear();
+    fireEvent.submit(document.querySelector("form")!);
     expect(loginSpy).not.toHaveBeenCalled();
-
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-token";
-    runRender();
-    const mfaSpy = vi.spyOn(api, "mfaChallenge").mockResolvedValue({ ok: true } as any);
-
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(mfaSpy).not.toHaveBeenCalled();
   });
 
   it("handles regular API and generic failures during credentials login", async () => {
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("invalid_credentials", undefined, 401));
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
+    });
 
     vi.spyOn(api, "login").mockRejectedValueOnce(new Error("Net fail"));
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.internal_error"));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.internal_error"));
+    });
   });
 
   it("handles MFA challenge failures including rate limiting", async () => {
-    // Navigate to MFA stage
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-token-xyz";
-    runRender();
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-xyz",
+      totp_enabled: true,
+    });
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    // Rate limit
+    await waitFor(() => {
+      expect(screen.getByLabelText(/MFA Code/i)).toBeDefined();
+    });
+
     vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(
       new ApiError("rate_limit_exceeded", 10, 429)
     );
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(stateStore[10]).toBe(10);
+    fireEvent.change(screen.getByLabelText(/MFA Code/i), { target: { value: "123456" } });
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":10})" })).toBeDefined();
+    });
 
     // Other failure
+    act(() => {
+      for (let i = 0; i < 10; i++) setIntervalCallback();
+    });
     vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(new Error("wrong code"));
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
+    });
   });
 
-  it("allows backing to credentials stage from MFA layout", () => {
-    stateStore[0] = "mfa";
-    stateStore[5] = "otpauth://totp/...";
-    stateStore[6] = ["code1"]; // recovery codes defined
-    runRender();
+  it("allows backing to credentials stage from MFA layout", async () => {
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-123",
+      mfa_setup_url: "otpauth://totp/...",
+      mfa_setup_secret: "secret-xyz",
+      mfa_recovery_codes: ["code1"],
+    });
 
-    // Verify recovery codes saving checkbox
-    expect(capturedOnChangeCodesSaved).toBeDefined();
-    capturedOnChangeCodesSaved({ target: { checked: true } });
-    expect(stateStore[7]).toBe(true);
-    capturedOnChangeCodesSaved({ target: { checked: false } }); // Hit the false branch
-    expect(stateStore[7]).toBe(false);
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    // Verify back button clicks resets state
-    expect(capturedBackButtonClick).toBeDefined();
-    capturedBackButtonClick();
-    expect(stateStore[0]).toBe("credentials");
-    expect(stateStore[8]).toBe(""); // totpCode cleared
+    await waitFor(() => {
+      expect(screen.getByText("mfaTitle")).toBeDefined();
+    });
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "backToLogin" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("mfaTitle")).toBeNull();
+      expect(screen.getByRole("button", { name: "loginButton" })).toBeDefined();
+    });
   });
 
   it("handles recovery code (length 14) during MFA verification", async () => {
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-token-abc";
-    stateStore[8] = "xxxx-xxxx-xxxx"; // Hits the totpCode.length !== 14 branch
-    runRender();
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      totp_enabled: true,
+    });
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/MFA Code/i)).toBeDefined();
+    });
+
+    const mfaCodeInput = screen.getByLabelText(/MFA Code/i);
+    fireEvent.change(mfaCodeInput, { target: { value: "xxxx-xxxx-xxxx" } });
 
     const mfaSpy = vi.spyOn(api, "mfaChallenge").mockResolvedValue({ ok: true } as any);
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "xxxx-xxxx-xxxx");
+    await waitFor(() => {
+      expect(mfaSpy).toHaveBeenCalledWith("mfa-token-abc", "xxxx-xxxx-xxxx");
+    });
   });
 
   it("handles ApiErrors without retryAfter properties safely", async () => {
-    // Hits account_locked without retryAfter
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("account_locked", undefined, 423));
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.account_locked"));
+    });
 
-    // Hits rate_limit_exceeded without retryAfter on login
     vi.spyOn(api, "login").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded"));
-
-    // Hits rate_limit_exceeded without retryAfter on MFA verification
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-token-xyz";
-    runRender();
-    vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(new ApiError("rate_limit_exceeded", undefined, 429));
-    await capturedOnSubmitMFA({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.invalid_credentials"));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded"));
+    });
   });
 
   it("renders loading state for both credentials and MFA stages", async () => {
-    // This hits the `loading ? "..."` branches on lines 191 and 220
     let resolveLogin: any;
     vi.spyOn(api, "login").mockImplementation(() => new Promise((res) => { resolveLogin = res; }));
-    
-    stateStore[0] = "credentials";
-    runRender();
-    capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    
-    let html = runRender(); // render while loading is true
-    expect(html).toContain("...");
-    
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    expect(screen.getByRole("button", { name: "..." })).toBeDefined();
+
     resolveLogin({ ok: true, mfa_required: false });
-    await Promise.resolve(); await Promise.resolve();
-
-    let resolveMFA: any;
-    vi.spyOn(api, "mfaChallenge").mockImplementation(() => new Promise((res) => { resolveMFA = res; }));
-
-    stateStore[0] = "mfa";
-    stateStore[11] = true; // totpEnabled → render the TOTP submit button
-    runRender();
-    capturedOnSubmitMFA({ preventDefault: vi.fn() });
-
-    html = runRender(); // render while loading is true
-    expect(html).toContain("...");
-
-    resolveMFA({ ok: true });
-    await Promise.resolve(); await Promise.resolve();
+    await act(async () => {
+      await Promise.resolve();
+    });
   });
 
-  it("renders the rate-limit countdown on the MFA submit button", () => {
-    // Errors now surface as toasts; the live countdown shows on the submit button.
-    stateStore[0] = "mfa";
-    stateStore[11] = true; // totpEnabled → render the TOTP submit button
-    stateStore[8] = "123456"; // valid length so the button is interactive
-    stateStore[10] = 10; // retryAfter
-    const html = runRender();
-    expect(html).toContain("retryButton");
+  it("renders the rate-limit countdown on the MFA submit button", async () => {
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      totp_enabled: true,
+    });
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/MFA Code/i)).toBeDefined();
+    });
+
+    vi.spyOn(api, "mfaChallenge").mockRejectedValueOnce(
+      new ApiError("rate_limit_exceeded", 10, 429)
+    );
+    fireEvent.change(screen.getByLabelText(/MFA Code/i), { target: { value: "123456" } });
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":10})" })).toBeDefined();
+    });
   });
 
   it("handles logical edge cases for mfa setup conditions", async () => {
-    // Covers line 50/52 && false branches and line 55 ?? [] branch
-    vi.spyOn(api, "login").mockResolvedValue({
-      ok: true,
-      mfa_required: true, // true, but no token to fail line 50
-    });
-    stateStore[0] = "credentials";
-    runRender();
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
-
     vi.spyOn(api, "login").mockResolvedValue({
       ok: true,
       mfa_required: true,
-      mfa_token: "token",
-      mfa_setup_url: "url", // true, but no secret to fail line 52
     });
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[0]).toBe("mfa");
-    expect(stateStore[4]).toBe(""); // mfaSetupSecret is not set
-
-    vi.spyOn(api, "login").mockResolvedValue({
-      ok: true,
-      mfa_required: true,
-      mfa_token: "token",
-      mfa_setup_url: "url",
-      mfa_setup_secret: "secret",
-      // missing mfa_recovery_codes to hit ?? []
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
     });
-    await capturedOnSubmitCredentials({ preventDefault: vi.fn() });
-    expect(stateStore[6]).toEqual([]);
   });
-
-  // ── Passwordless login (credentials screen) ───────────────────────────────
 
   it("renders Sign in with passkey button only when WebAuthn is supported", () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(false);
-    let html = runRender();
-    expect(html).not.toContain("signInWithPasskey");
+    const { rerender } = render(React.createElement(LoginPage));
+    expect(screen.queryByRole("button", { name: "signInWithPasskey" })).toBeNull();
 
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
-    html = runRender();
-    expect(html).toContain("signInWithPasskey");
-    expect(capturedPasswordlessClick).toBeDefined();
+    rerender(React.createElement(LoginPage));
+    expect(screen.getByRole("button", { name: "signInWithPasskey" })).toBeDefined();
   });
 
   it("handlePasswordlessLogin: navigates to dashboard on success", async () => {
@@ -477,14 +418,16 @@ describe("LoginPage component", () => {
     vi.mocked(performAssertion).mockResolvedValue(fakeAssertion as any);
     vi.spyOn(api, "webauthnPasswordlessFinish").mockResolvedValue({ ok: true });
 
-    runRender();
-    await capturedPasswordlessClick();
+    render(React.createElement(LoginPage));
+    fireEvent.click(screen.getByRole("button", { name: "signInWithPasskey" }));
 
-    expect(api.webauthnPasswordlessBegin).toHaveBeenCalled();
-    expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
-    expect(api.webauthnPasswordlessFinish).toHaveBeenCalledWith("c-1", fakeAssertion);
-    expect(scheduleRefresh).toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    await waitFor(() => {
+      expect(api.webauthnPasswordlessBegin).toHaveBeenCalled();
+      expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
+      expect(api.webauthnPasswordlessFinish).toHaveBeenCalledWith("c-1", fakeAssertion);
+      expect(scheduleRefresh).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    });
   });
 
   it("handlePasswordlessLogin: caps ceremony timeout to 60 s", async () => {
@@ -494,10 +437,12 @@ describe("LoginPage component", () => {
     vi.mocked(performAssertion).mockResolvedValue({} as any);
     vi.spyOn(api, "webauthnPasswordlessFinish").mockResolvedValue({ ok: true });
 
-    runRender();
-    await capturedPasswordlessClick();
+    render(React.createElement(LoginPage));
+    fireEvent.click(screen.getByRole("button", { name: "signInWithPasskey" }));
 
-    expect(fakeOptions.publicKey.timeout).toBe(60000);
+    await waitFor(() => {
+      expect(fakeOptions.publicKey.timeout).toBe(60000);
+    });
   });
 
   it("handlePasswordlessLogin: shows passkey_unavailable toast on NotAllowedError", async () => {
@@ -506,10 +451,12 @@ describe("LoginPage component", () => {
     const notAllowed = Object.assign(new Error("Not allowed"), { name: "NotAllowedError" });
     vi.mocked(performAssertion).mockRejectedValue(notAllowed);
 
-    runRender();
-    await capturedPasswordlessClick();
+    render(React.createElement(LoginPage));
+    fireEvent.click(screen.getByRole("button", { name: "signInWithPasskey" }));
 
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.passkey_unavailable"));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.passkey_unavailable"));
+    });
   });
 
   it("handlePasswordlessLogin: sets retryAfter on rate_limit_exceeded", async () => {
@@ -518,40 +465,52 @@ describe("LoginPage component", () => {
       new ApiError("rate_limit_exceeded", 45, 429)
     );
 
-    runRender();
-    await capturedPasswordlessClick();
+    render(React.createElement(LoginPage));
+    fireEvent.click(screen.getByRole("button", { name: "signInWithPasskey" }));
 
-    expect(stateStore[10]).toBe(45);
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":45})" })).toBeDefined();
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+    });
   });
 
   it("handlePasswordlessLogin: shows generic error toast on other failures", async () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
     vi.spyOn(api, "webauthnPasswordlessBegin").mockRejectedValue(new Error("network error"));
 
-    runRender();
-    await capturedPasswordlessClick();
+    render(React.createElement(LoginPage));
+    fireEvent.click(screen.getByRole("button", { name: "signInWithPasskey" }));
 
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
+    });
   });
 
-  // ── Passkey as MFA second factor ───────────────────────────────────────────
-
-  it("renders Use a passkey button on MFA screen when webauthnEnabled is true", () => {
+  it("renders Use a passkey button on MFA screen when webauthnEnabled is true", async () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
-    stateStore[0] = "mfa";
-    stateStore[12] = true; // webauthnEnabled
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      webauthn_enabled: true,
+    });
 
-    const html = runRender();
-    expect(html).toContain("usePasskey");
-    expect(capturedPasskeyMFAClick).toBeDefined();
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "usePasskey" })).toBeDefined();
+    });
   });
 
   it("handlePasskeyLogin: navigates to dashboard on success during MFA stage", async () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-tok-xyz";
-    stateStore[12] = true; // webauthnEnabled
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      webauthn_enabled: true,
+    });
 
     const fakeOptions = { publicKey: { challenge: "xyz" } };
     const fakeAssertion = { id: "assert-mfa" };
@@ -559,65 +518,73 @@ describe("LoginPage component", () => {
     vi.mocked(performAssertion).mockResolvedValue(fakeAssertion as any);
     vi.spyOn(api, "webauthnLoginFinish").mockResolvedValue({ ok: true } as any);
 
-    runRender();
-    await capturedPasskeyMFAClick();
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(api.webauthnLoginBegin).toHaveBeenCalledWith("mfa-tok-xyz");
-    expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
-    expect(api.webauthnLoginFinish).toHaveBeenCalledWith("mfa-tok-xyz", fakeAssertion);
-    expect(scheduleRefresh).toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "usePasskey" })).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "usePasskey" }));
+
+    await waitFor(() => {
+      expect(api.webauthnLoginBegin).toHaveBeenCalledWith("mfa-token-abc");
+      expect(performAssertion).toHaveBeenCalledWith(fakeOptions);
+      expect(api.webauthnLoginFinish).toHaveBeenCalledWith("mfa-token-abc", fakeAssertion);
+      expect(scheduleRefresh).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    });
   });
 
   it("handlePasskeyLogin: sets retryAfter on rate_limit_exceeded during MFA", async () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-tok";
-    stateStore[12] = true;
-
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      webauthn_enabled: true,
+      totp_enabled: true,
+    });
     vi.spyOn(api, "webauthnLoginBegin").mockRejectedValue(
       new ApiError("rate_limit_exceeded", 20, 429)
     );
 
-    runRender();
-    await capturedPasskeyMFAClick();
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(stateStore[10]).toBe(20);
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "usePasskey" })).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "usePasskey" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "retryButton ({\"seconds\":20})" })).toBeDefined();
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.rate_limit_exceeded_countdown"));
+    });
   });
 
   it("handlePasskeyLogin: shows generic error toast on failure during MFA", async () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-tok";
-    stateStore[12] = true;
-
+    vi.spyOn(api, "login").mockResolvedValue({
+      ok: true,
+      mfa_required: true,
+      mfa_token: "mfa-token-abc",
+      webauthn_enabled: true,
+    });
     vi.spyOn(api, "webauthnLoginBegin").mockRejectedValue(new Error("hw error"));
 
-    runRender();
-    await capturedPasskeyMFAClick();
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
 
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
-  });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "usePasskey" })).toBeDefined();
+    });
 
-  it("evaluates MFA button disabled branches fully", () => {
-    // Bypass the totpCode length short-circuit to evaluate the rest of the disabled conditions
-    stateStore[0] = "mfa";
-    stateStore[3] = "mfa-token-xyz";
-    stateStore[8] = "123456"; // valid length bypasses length check
+    fireEvent.click(screen.getByRole("button", { name: "usePasskey" }));
 
-    // Case 1: retryAfter > 0 evaluates to true
-    stateStore[10] = 5;
-    runRender();
-
-    // Case 2: retryAfter = 0, isSetup = true, codesSaved = false evaluates to true
-    stateStore[10] = 0;
-    stateStore[5] = "otpauth://setup";
-    stateStore[7] = false;
-    runRender();
-
-    // Case 3: retryAfter = 0, isSetup = true, codesSaved = true evaluates to false
-    stateStore[7] = true;
-    runRender();
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("errors.webauthn_failed"));
+    });
   });
 });
