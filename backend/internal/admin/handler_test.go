@@ -193,7 +193,7 @@ func TestHandler_UpdateRoles(t *testing.T) {
 	}
 
 	mockSessions.revokeAllErr = true
-	bodyRevokeFail := `{"roles": ["viewer"]}`
+	bodyRevokeFail := `{"roles": ["admin"]}`
 	reqRevokeFail, _ := http.NewRequest("PATCH", "/api/v1/admin/users/"+u.ID+"/roles", bytes.NewBufferString(bodyRevokeFail))
 	reqRevokeFail = reqRevokeFail.WithContext(context.WithValue(reqRevokeFail.Context(), chi.RouteCtxKey, rctx))
 	rrRevokeFail := httptest.NewRecorder()

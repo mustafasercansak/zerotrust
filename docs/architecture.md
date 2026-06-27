@@ -6,23 +6,23 @@ ZeroTrust is a self-hosted authentication platform built around a Zero Trust mod
 
 ```
                               ┌──────────────────────────────────────────────┐
-                              │                 Browser                       │
+                              │                 Browser                      │
                               │  React + Vite SPA (port 3000 in dev)         │
                               └──────────────┬───────────────────────────────┘
                                              │  HTTPS (CORS + httpOnly cookies)
                               ┌──────────────▼───────────────────────────────┐
-                              │            nginx (prod only)                  │
-                              │   TLS termination · static file serving       │
-                              └────────────┬────────────────┬─────────────────┘
+                              │            nginx (prod only)                 │
+                              │   TLS termination · static file serving      │
+                              └────────────┬────────────────┬────────────────┘
                                            │ /api/*         │ /*
                               ┌────────────▼──────┐  ┌──────▼──────┐
-                              │   Go Backend       │  │  Frontend   │
-                              │   (port 8080)      │  │  container  │
-                              └──┬──────┬──────┬───┘  └─────────────┘
+                              │   Go Backend      │  │  Frontend   │
+                              │   (port 8080)     │  │  container  │
+                              └──┬──────┬─────────┘  └─────────────┘
                                  │      │      │
                     ┌────────────▼┐ ┌───▼────┐ ┌▼────────────────┐
-                    │  PostgreSQL  │ │ Redis  │ │ OpenBao / Vault │
-                    │  (port 5432) │ │ (6379) │ │  (optional)     │
+                    │  PostgreSQL │ │ Redis  │ │ OpenBao / Vault │
+                    │  (port 5432)│ │ (6379) │ │  (optional)     │
                     └─────────────┘ └────────┘ └─────────────────┘
 ```
 
@@ -40,15 +40,15 @@ ZeroTrust is a self-hosted authentication platform built around a Zero Trust mod
 
 ```
 Browser                         Backend                         Redis / DB
-   │                               │                               │
-   │── POST /api/v1/auth/login ───▶│                               │
-   │   {email, password}           │── rate-limit check ──────────▶│
-   │                               │◀─ (counter) ──────────────────│
-   │                               │── load user ─────────────────▶│
-   │                               │◀─ (row) ──────────────────────│
+   │                               │                                │
+   │── POST /api/v1/auth/login ───▶│                                │
+   │   {email, password}           │── rate-limit check ───────────▶│
+   │                               │◀─ (counter) ───────────────────│
+   │                               │── load user ──────────────────▶│
+   │                               │◀─ (row) ───────────────────────│
    │                               │   bcrypt.CompareHashAndPassword│
    │                               │── risk score calc ────────────▶│ (geo + sessions)
-   │                               │◀─ score (0–100) ──────────────│
+   │                               │◀─ score (0–100) ───────────────│
    │                               │   [if score ≥ block threshold] │
    │                               │── issue access token (Ed25519 JWT, 1 min TTL)
    │                               │── issue refresh token (opaque, SHA-256 hash in DB)
