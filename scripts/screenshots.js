@@ -110,11 +110,16 @@ const PAGES = [
   console.log(`    Output   : ${OUT_DIR}`);
   console.log();
 
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROME_BIN || "/usr/bin/google-chrome",
+  const launchOptions = {
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  };
+  if (process.env.CHROME_BIN) {
+    launchOptions.executablePath = process.env.CHROME_BIN;
+  } else if (fs.existsSync("/usr/bin/google-chrome")) {
+    launchOptions.executablePath = "/usr/bin/google-chrome";
+  }
+  const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     colorScheme: "dark",
@@ -139,7 +144,7 @@ const PAGES = [
   // Take login page screenshot before submitting (wait for form to render)
   const loginEntry = PAGES.find(p => p.name === "login");
   if (loginEntry) {
-    await page.waitForSelector('input[type="email"]', { state: "visible", timeout: 10000 });
+    await page.waitForSelector('input[type="email"]', { state: "visible", timeout: 30000 });
     await page.waitForTimeout(500);
     await page.screenshot({ path: path.join(OUT_DIR, loginEntry.file), fullPage: false });
     console.log(`  ✓ ${loginEntry.file}`);
@@ -169,9 +174,9 @@ const PAGES = [
   const MFA_SELECTOR = 'input[placeholder="000000 or xxxx-xxxx-xxxx"]';
   let loginStage = "unknown";
   await Promise.race([
-    page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 15000 })
+    page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 30000 })
       .then(() => { loginStage = "dashboard"; }).catch(() => {}),
-    page.waitForSelector(MFA_SELECTOR, { state: "visible", timeout: 15000 })
+    page.waitForSelector(MFA_SELECTOR, { state: "visible", timeout: 30000 })
       .then(() => { loginStage = "mfa"; }).catch(() => {}),
   ]);
 
@@ -188,7 +193,7 @@ const PAGES = [
     await page.fill(MFA_SELECTOR, code);
     await page.click('button[type="submit"]');
     try {
-      await page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 15000 });
+      await page.waitForURL(`${BASE_URL}/dashboard`, { timeout: 30000 });
       loginStage = "dashboard";
     } catch (_) {
       const debugPath = path.join(OUT_DIR, "_mfa_debug.png");

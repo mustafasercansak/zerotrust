@@ -206,4 +206,4 @@ clean: ## Remove Docker images and volumes
 screenshots: ## Take UI screenshots and regenerate docs/index.md  (ADMIN_PASSWORD=<pass> make screenshots)
 	@command -v npx >/dev/null 2>&1 || (echo '❌  npx not found; install Node.js first' && exit 1)
 	@node -e "require('playwright')" 2>/dev/null || (echo '📦  Installing playwright...' && cd frontend && npm install --save-dev playwright && npx playwright install chromium)
-	node scripts/screenshots.js --url $${SCREENSHOT_URL:-http://localhost:3000} --email $${ADMIN_EMAIL:-admin@company.com} --password $${ADMIN_PASSWORD}
+	node scripts/screenshots.js --url $${SCREENSHOT_URL:-http://localhost:3000} --email $${ADMIN_EMAIL:-admin@company.com} --password "$(ADMIN_PASSWORD)" --totp-secret "$(TOTP_SECRET)" --totp-code "$(TOTP_CODE)"
