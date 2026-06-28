@@ -175,6 +175,7 @@ type EntryRow struct {
 // ListParams configures pagination, sorting, and filtering for List.
 type ListParams struct {
 	Limit              int
+	MaxLimit           int
 	Offset             int
 	SortBy             string // created_at | action | user_id | resource
 	SortDir            string // asc | desc
@@ -198,11 +199,26 @@ var auditSortCols = map[string]string{
 	"resource":   "resource",
 }
 
+const defaultListLimit = 25
+const defaultMaxListLimit = 200
+
+func normalizeListLimit(p ListParams) int {
+	maxLimit := p.MaxLimit
+	if maxLimit <= 0 {
+		maxLimit = defaultMaxListLimit
+	}
+	if p.Limit <= 0 {
+		return defaultListLimit
+	}
+	if p.Limit > maxLimit {
+		return maxLimit
+	}
+	return p.Limit
+}
+
 // List returns a filtered, sorted, paginated page of audit entries with the total count.
 func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error) {
-	if p.Limit <= 0 || p.Limit > 200 {
-		p.Limit = 25
-	}
+	p.Limit = normalizeListLimit(p)
 	col, ok := auditSortCols[p.SortBy]
 	if !ok {
 		col = "created_at"

@@ -75,6 +75,28 @@ func TestRepository_Log(t *testing.T) {
 	}
 }
 
+func TestNormalizeListLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   ListParams
+		want int
+	}{
+		{name: "default", in: ListParams{}, want: defaultListLimit},
+		{name: "normal list cap", in: ListParams{Limit: 999}, want: defaultMaxListLimit},
+		{name: "export cap override", in: ListParams{Limit: 10000, MaxLimit: 10000}, want: 10000},
+		{name: "custom cap", in: ListParams{Limit: 500, MaxLimit: 300}, want: 300},
+		{name: "within cap", in: ListParams{Limit: 50}, want: 50},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeListLimit(tt.in); got != tt.want {
+				t.Fatalf("normalizeListLimit()=%d want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepository_ListAndTrends(t *testing.T) {
 	pool, ctx, repo, userRepo := setupTestDB(t)
 	defer pool.Close()

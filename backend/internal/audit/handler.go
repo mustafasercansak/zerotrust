@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -18,6 +19,8 @@ type AuditStore interface {
 type Handler struct {
 	repo AuditStore
 }
+
+const auditExportLimit = 10000
 
 func NewHandler(repo AuditStore) *Handler {
 	return &Handler{repo: repo}
@@ -89,7 +92,8 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.repo.List(r.Context(), ListParams{
-		Limit:    10000,
+		Limit:    auditExportLimit,
+		MaxLimit: auditExportLimit,
 		Offset:   0,
 		SortBy:   "created_at",
 		SortDir:  "desc",
@@ -112,24 +116,34 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	// UTF-8 BOM for Excel compatibility
-	w.Write([]byte("\xef\xbb\xbf"))
-
-	cw := csv.NewWriter(w)
-	cw.Write([]string{"time", "action", "resource", "user_email", "user_id", "ip_address"})
+	var buf bytes.Buffer
+	buf.Write([]byte("\xef\xbb\xbf")) // UTF-8 BOM for Excel compatibility
+	cw := csv.NewWriter(&buf)
+	if err := cw.Write([]string{"time", "action", "resource", "user_email", "user_id", "ip_address"}); err != nil {
+		http.Error(w, "internal_error", http.StatusInternalServerError)
+		return
+	}
 	for _, e := range result.Entries {
-		cw.Write([]string{
+		if err := cw.Write([]string{
 			e.CreatedAt,
 			e.Action,
 			e.Resource,
 			derefStr(e.UserEmail),
 			derefStr(e.UserID),
 			derefStr(e.IPAddress),
-		})
+		}); err != nil {
+			http.Error(w, "internal_error", http.StatusInternalServerError)
+			return
+		}
 	}
 	cw.Flush()
+	if err := cw.Error(); err != nil {
+		http.Error(w, "internal_error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Write(buf.Bytes())
 }
 
 func derefStr(s *string) string {

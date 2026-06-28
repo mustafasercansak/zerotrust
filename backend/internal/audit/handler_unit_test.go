@@ -233,9 +233,9 @@ func TestHandlerExportCSV(t *testing.T) {
 		t.Fatal("missing second entry data")
 	}
 
-	// limit must be 10000, offset 0
-	if store.lastParams.Limit != 10000 || store.lastParams.Offset != 0 {
-		t.Fatalf("unexpected params: limit=%d offset=%d", store.lastParams.Limit, store.lastParams.Offset)
+	// export must request the expanded export window, not the interactive-list cap.
+	if store.lastParams.Limit != auditExportLimit || store.lastParams.MaxLimit != auditExportLimit || store.lastParams.Offset != 0 {
+		t.Fatalf("unexpected params: limit=%d max_limit=%d offset=%d", store.lastParams.Limit, store.lastParams.MaxLimit, store.lastParams.Offset)
 	}
 }
 
@@ -277,7 +277,7 @@ func TestHandlerExportFiltersPassedToRepo(t *testing.T) {
 	store := &mockAuditStore{listResult: ListResult{Entries: []EntryRow{}, Total: 0}}
 	h := NewHandler(store)
 
-	req := httptest.NewRequest("GET", "/api/v1/admin/audit/export?format=csv&action=auth.login&user_id=u1&outcome=failure", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/audit/export?format=csv&action=auth.login&user_id=u1&resource=auth&outcome=failure", nil)
 	rr := httptest.NewRecorder()
 	h.Export(rr, req)
 
@@ -286,6 +286,9 @@ func TestHandlerExportFiltersPassedToRepo(t *testing.T) {
 	}
 	if store.lastParams.UserID != "u1" {
 		t.Fatalf("user_id=%q want u1", store.lastParams.UserID)
+	}
+	if store.lastParams.Resource != "auth" {
+		t.Fatalf("resource=%q want auth", store.lastParams.Resource)
 	}
 	if store.lastParams.Outcome != "failure" {
 		t.Fatalf("outcome=%q want failure", store.lastParams.Outcome)
@@ -317,7 +320,6 @@ func TestHandlerExportStoreError(t *testing.T) {
 		t.Fatalf("status=%d want=500", rr.Code)
 	}
 }
-
 
 func TestRepositorySetters(t *testing.T) {
 	r := &Repository{}
