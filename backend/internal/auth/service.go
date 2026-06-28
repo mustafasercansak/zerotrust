@@ -23,14 +23,18 @@ import (
 // uniform when the account is missing or inactive. CheckPassword still runs a
 // full bcrypt comparison against it (a real hash, so the work actually happens),
 // closing the timing side-channel that would otherwise reveal which emails are
-// registered. See ISSUE_LIST #33.
+// registered. If random hash generation fails at startup, a fixed valid fallback
+// hash preserves the comparison work. See ISSUE_LIST #33.
 var dummyPasswordHash = mustDummyHash()
+
+const fallbackDummyPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
 func mustDummyHash() string {
 	h, err := bcrypt.GenerateFromPassword([]byte("constant-time-login-comparison-placeholder"), bcrypt.DefaultCost)
 	if err != nil {
-		// crypto failure at startup is unrecoverable; a panic surfaces it loudly.
-		panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
+		// Avoid crashing the service at startup; keep constant-time behavior with a valid fallback hash.
+		slog.Error("auth: failed to generate dummy bcrypt hash, using fallback", "error", err)
+		return fallbackDummyPasswordHash
 	}
 	return string(h)
 }
@@ -244,8 +248,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string, dev
 
 	// Always run a bcrypt comparison — even for unknown or inactive accounts —
 	// so the response time does not reveal whether the email is registered
-	// (user enumeration defense, ISSUE_LIST #33). For missing/inactive users we
-	// compare against a fixed dummy hash that can never match.
+	// (user enumeration defense, ISSUE_LIST #33). For missing/inactive users the
+	// dummy comparison result is ignored and the login is still rejected.
 	passwordHash := dummyPasswordHash
 	if u != nil && u.IsActive {
 		passwordHash = u.PasswordHash

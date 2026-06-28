@@ -17,8 +17,10 @@ cd zerotrust/scripts && ./generate-secrets.sh
 
 # Start with hot reload
 cd ../infra
-sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
+docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
 ```
+
+If Docker requires elevated privileges on your machine, prefix the command with `sudo`.
 
 ## Making Changes
 

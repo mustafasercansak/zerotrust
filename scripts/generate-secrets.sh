@@ -144,5 +144,6 @@ echo -e "  ${GREEN}secrets/jwt_primary.pem${NC}    → JWT signing private key (
 echo -e "  ${GREEN}secrets/jwt_public.pem${NC}     → JWT public key (for verifying services)"
 echo ""
 echo -e "${BOLD}Next step:${NC}"
-echo -e "  cd infra && sudo docker compose up --build"
+echo -e "  cd infra && docker compose up --build"
+echo -e "  (Use sudo only if your Docker setup requires it.)"
 echo ""

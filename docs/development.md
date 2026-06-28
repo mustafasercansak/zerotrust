@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker and Docker Compose (for the database, Redis, and full-stack environment)
-- Go 1.22+ (for running backend tests without Docker)
+- Go 1.25+ (matches backend/go.mod; for running backend tests without Docker)
 - Node.js 20+ (for frontend development)
 
 ---
@@ -16,7 +16,7 @@ cd scripts && ./generate-secrets.sh
 
 # 2. Start with hot reload
 cd infra
-sudo docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
+docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
 ```
 
 The development compose file exposes:
@@ -49,6 +49,8 @@ Run `make help` for the full list. The most common ones:
 | `make certs` | Generate a self-signed TLS cert for local HTTPS testing |
 | `make jwt-key` | Generate a persistent Ed25519 JWT signing key |
 | `make screenshots` | Capture all UI screenshots (requires a running stack) |
+
+If Docker requires elevated privileges on your machine, run targets with `SUDO=sudo` (for example: `make SUDO=sudo up`).
 
 ---
 
