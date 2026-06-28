@@ -365,7 +365,7 @@ describe("UserProfileDrawer component", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/My YubiKey/)).toBeDefined();
-      expect(screen.getByText(/12/)).toBeDefined();
+      expect(screen.getByText(/signCount:\s*12/)).toBeDefined();
       expect(screen.getByText(/lastUsed/)).toBeDefined();
       expect(screen.getByText(/unnamedPasskey/)).toBeDefined();
     });

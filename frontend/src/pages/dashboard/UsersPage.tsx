@@ -171,7 +171,7 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
               <Box key={s.id}>
                 {idx > 0 && <Divider />}
                 <ListItem
-                   secondaryAction={
+                  secondaryAction={
                     <Button size="small" color="warning" onClick={async () => {
                       try {
                         await onRevoke(user.id, s.id);
@@ -185,6 +185,7 @@ function SessionsDialog({ user, onClose, onRevoke, onRevokeAll }: SessionsDialog
                   }
                 >
                   <ListItemText
+                    disableTypography
                     primary={
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                         <Typography variant="body2">{formatSessionDevice(s)}</Typography>

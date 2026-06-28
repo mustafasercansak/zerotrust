@@ -1,4 +1,4 @@
-.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint clean screenshots
+.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint govulncheck clean screenshots
 
 TEST_DB_DOCKER_IMAGE ?= postgres:16-alpine
 TEST_DB_CONTAINER ?= zerotrust-test-db
@@ -196,6 +196,9 @@ test-coverage-all: ## Alias for test-cover-all
 lint: ## Run go vet + frontend tsc
 	cd backend && go vet ./...
 	cd frontend && npx tsc --noEmit
+
+govulncheck: ## Run Go vulnerability scan with the latest govulncheck
+	cd backend && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 clean: ## Remove Docker images and volumes
 	cd infra && $(SUDO) $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.prod.yml down -v --rmi local --remove-orphans

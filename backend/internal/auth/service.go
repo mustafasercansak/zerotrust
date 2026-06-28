@@ -381,11 +381,12 @@ func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua 
 	// 1. Check Anomalies (Impossible Travel, New Device)
 	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, userID, email, ip, ua, deviceInfo)
 	if hasAnomaly {
-		if anomalyType == "impossible_travel" {
+		switch anomalyType {
+		case "impossible_travel":
 			score += 80
 			reasons = append(reasons, "impossible_travel")
 			details = append(details, anomalyDetails)
-		} else if anomalyType == "new_device" {
+		case "new_device":
 			score += 30
 			reasons = append(reasons, "new_device")
 			details = append(details, anomalyDetails)
@@ -1039,7 +1040,8 @@ func (s *Service) EvaluateAccess(ctx context.Context, claims *Claims, ip, ua str
 	}
 
 	// 3. User or Service Account entity check
-	if claims.SubType == SubTypeUser {
+	switch claims.SubType {
+	case SubTypeUser:
 		if s.users != nil {
 			u, err := s.users.FindByID(ctx, claims.UserID)
 			if err != nil {
@@ -1053,7 +1055,7 @@ func (s *Service) EvaluateAccess(ctx context.Context, claims *Claims, ip, ua str
 				return ErrInvalidToken
 			}
 		}
-	} else if claims.SubType == SubTypeService {
+	case SubTypeService:
 		if s.saSvc != nil {
 			sa, err := s.saSvc.FindByClientID(ctx, claims.ClientID)
 			if err != nil {

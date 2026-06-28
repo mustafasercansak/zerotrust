@@ -45,6 +45,7 @@ Run `make help` for the full list. The most common ones:
 | `make test-front` | Frontend tests |
 | `make test-cover-all` | Backend + frontend tests with combined coverage |
 | `make lint` | Run `go vet` on the backend |
+| `make govulncheck` | Run the latest Go vulnerability scanner |
 | `make secrets` | Regenerate `infra/.env` |
 | `make certs` | Generate a self-signed TLS cert for local HTTPS testing |
 | `make jwt-key` | Generate a persistent Ed25519 JWT signing key |
