@@ -150,10 +150,14 @@ describe("ResourceTablePage component", () => {
     );
 
     expect(lastEventSource?.url).toBe("/api/v1/events");
-    const visibilityListener = addEventListenerSpy.mock.calls.find(
-      ([eventName]: [string]) => eventName === "visibilitychange",
-    )[1];
-    visibilityListener();
+    const visibilityCall = addEventListenerSpy.mock.calls.find(
+      ([eventName]) => eventName === "visibilitychange",
+    );
+    expect(visibilityCall).toBeDefined();
+    const visibilityListener = visibilityCall?.[1];
+    if (typeof visibilityListener === "function") {
+      visibilityListener(new Event("visibilitychange"));
+    }
     lastEventSource.onmessage?.({ data: "connected" });
     lastEventSource.onmessage?.({ data: "change" });
 
@@ -226,6 +230,66 @@ describe("ResourceTablePage component", () => {
       expect(fetcher).toHaveBeenCalledWith(expect.objectContaining({
         filters: { name: "alice" },
       }));
+    });
+  });
+
+  it("keeps false and zero filter values", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ data: [], total: 0 });
+
+    render(
+      <ResourceTablePage
+        columns={[]}
+        fetcher={fetcher}
+      />
+    );
+
+    await waitFor(() => {
+      expect(capturedDataGridProps).not.toBeNull();
+    });
+
+    act(() => {
+      capturedDataGridProps.onFilterModelChange({
+        items: [
+          { field: "is_active", value: false },
+          { field: "count", value: 0 },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(fetcher).toHaveBeenCalledWith(expect.objectContaining({
+        filters: { is_active: "false", count: "0" },
+      }));
+    });
+  });
+
+  it("notifies callers when effective filters change", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ data: [], total: 0 });
+    const onFiltersChange = vi.fn();
+    const tabs = [
+      { key: "all", label: "All Items" },
+      { key: "active", label: "Active Items", preset: { status: "active" } },
+    ];
+
+    render(
+      <ResourceTablePage
+        columns={[]}
+        fetcher={fetcher}
+        tabs={tabs}
+        onFiltersChange={onFiltersChange}
+      />
+    );
+
+    await waitFor(() => {
+      expect(onFiltersChange).toHaveBeenCalledWith({});
+    });
+
+    act(() => {
+      capturedTabsProps.onChange(null, "active");
+    });
+
+    await waitFor(() => {
+      expect(onFiltersChange).toHaveBeenCalledWith({ status: "active" });
     });
   });
 

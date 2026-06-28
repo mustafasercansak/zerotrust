@@ -183,9 +183,9 @@ describe("AuditDetailDrawer component", () => {
 
   it("renders all three section nav tabs", () => {
     render(React.createElement(AuditDetailDrawer, { entry: getMockEntry(), onClose }));
-    expect(screen.getByText("drawerInfo")).toBeDefined();
-    expect(screen.getByText("drawerClient")).toBeDefined();
-    expect(screen.getByText("drawerUser")).toBeDefined();
+    expect(screen.getByRole("tab", { name: "drawerInfo" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "drawerClient" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "drawerUser" })).toBeDefined();
   });
 
   it("calls onClose when the close button is clicked", () => {

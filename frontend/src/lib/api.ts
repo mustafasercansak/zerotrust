@@ -242,6 +242,26 @@ async function refreshTokens(): Promise<void> {
 }
 
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
+  const res = await rawRequest(path, init, retry);
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const code: string = data.error ?? "internal_error";
+    const retryAfterHeader = res.headers.get("Retry-After");
+    const retryAfter: number | undefined = data.retry_after ?? (retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined);
+
+    throw new ApiError(code, retryAfter, res.status);
+  }
+
+  return data as T;
+}
+
+async function rawRequest(path: string, init?: RequestInit, retry = true): Promise<Response> {
   const method = (init?.method ?? "GET").toUpperCase();
   const clientInfo = await cachedClientInfo();
   const isFormData = init?.body instanceof FormData;
@@ -265,21 +285,14 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
     headers,
   });
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  const data = await res.json().catch(() => ({}));
-
   if (!res.ok) {
+    const data = await res.clone().json().catch(() => ({}));
     const code: string = data.error ?? "internal_error";
-    const retryAfterHeader = res.headers.get("Retry-After");
-    const retryAfter: number | undefined = data.retry_after ?? (retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined);
 
     if (res.status === 401 && code === "token_expired" && retry) {
       try {
         await refreshTokens();
-        return request<T>(path, init, false);
+        return rawRequest(path, init, false);
       } catch (err) {
         if (err instanceof ApiError && !isAuthStatus(err.status)) {
           throw err;
@@ -290,11 +303,9 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
         throw new ApiError("missing_token", undefined, 401);
       }
     }
-
-    throw new ApiError(code, retryAfter, res.status);
   }
 
-  return data as T;
+  return res;
 }
 
 export const api = {
@@ -624,14 +635,14 @@ export const api = {
     health: () =>
       request<AdminHealthData>("/api/v1/admin/health"),
 
-    auditExport: (params: { format: "csv" | "json"; action?: string; user_id?: string; outcome?: string }) => {
+    auditExport: (params: { format: "csv" | "json"; action?: string; user_id?: string; resource?: string; outcome?: string }) => {
       const q = new URLSearchParams({ format: params.format });
       if (params.action) q.set("action", params.action);
       if (params.user_id) q.set("user_id", params.user_id);
+      if (params.resource) q.set("resource", params.resource);
       if (params.outcome) q.set("outcome", params.outcome);
-      return fetch(`/api/v1/admin/audit/export?${q}`, {
+      return rawRequest(`/api/v1/admin/audit/export?${q}`, {
         headers: { Accept: params.format === "json" ? "application/json" : "text/csv" },
-        credentials: "include",
       });
     },
   },

@@ -38,6 +38,7 @@ interface ResourceTablePageProps<T extends GridValidRowModel> {
   checkboxSelection?: boolean;
   rowSelectionModel?: GridRowSelectionModel;
   onRowSelectionModelChange?: (model: GridRowSelectionModel) => void;
+  onFiltersChange?: (filters: Record<string, string>) => void;
 }
 
 /**
@@ -65,6 +66,7 @@ export function ResourceTablePage<T extends GridValidRowModel>({
   checkboxSelection,
   rowSelectionModel,
   onRowSelectionModelChange,
+  onFiltersChange,
 }: ResourceTablePageProps<T>) {
   const { t, i18n } = useTranslation("common");
 
@@ -96,10 +98,14 @@ export function ResourceTablePage<T extends GridValidRowModel>({
     const preset = tabs?.find((tab) => tab.key === activeTab)?.preset ?? {};
     const next: Record<string, string> = {};
     for (const item of filterModel.items) {
-      if (item.field && item.value) next[item.field] = String(item.value);
+      if (item.field && item.value != null && item.value !== "") next[item.field] = String(item.value);
     }
     return { ...preset, ...next };
   }, [activeTab, filterModel, tabs]);
+
+  useEffect(() => {
+    onFiltersChange?.(filters);
+  }, [filters, onFiltersChange]);
 
   useEffect(() => {
     if (accessDenied || liveRefreshMs <= 0) return;

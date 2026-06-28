@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/dateUtils";
 import { useMeContext } from "@/contexts/MeContext";
 import { ResourceTablePage } from "@/components/ResourceTablePage";
 import { getBezierPath, getBezierAreaPath } from "@/lib/chartUtils";
+import { toast } from "sonner";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -90,7 +91,7 @@ function AuditTrendsChart({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const chartWidth = width - paddingX * 2; const chartHeight = height - paddingY * 2;
 
   const points = trends.map((pt, i) => {
-    const x = paddingX + i * (chartWidth / (trends.length - 1));
+    const x = trends.length === 1 ? paddingX + chartWidth / 2 : paddingX + i * (chartWidth / (trends.length - 1));
     const ySuccess = height - paddingY - (pt.success / maxVal) * chartHeight;
     const yFailure = height - paddingY - (pt.failure / maxVal) * chartHeight;
     return { x, ySuccess, yFailure, ...pt };
@@ -216,16 +217,22 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
       </Box>
 
       {/* Section nav */}
-      <Box sx={{ display: "flex", borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
+      <Box role="tablist" sx={{ display: "flex", borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
         {sections.map((sec) => (
           <Box
+            component="button"
+            type="button"
+            role="tab"
+            aria-selected={activeSection === sec.key}
             key={sec.key}
             onClick={() => setActiveSection(sec.key)}
             sx={{
               alignItems: "center", cursor: "pointer", display: "flex", flex: 1,
               flexDirection: "column", gap: 0.5, py: 1.25, borderBottom: 2,
+              borderLeft: 0, borderRight: 0, borderTop: 0, bgcolor: "transparent",
               borderColor: activeSection === sec.key ? "primary.main" : "transparent",
               color: activeSection === sec.key ? "primary.main" : "text.secondary",
+              font: "inherit",
               transition: "all 0.15s",
               "&:hover": { color: "primary.main", bgcolor: "action.hover" },
             }}
@@ -364,6 +371,7 @@ export default function AuditPage() {
   const [detailEntry, setDetailEntry] = useState<AuditEntry | null>(null);
   const [exportAnchor, setExportAnchor] = useState<null | HTMLElement>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportFilters, setExportFilters] = useState<Record<string, string>>({});
 
   const fetcher = useCallback(async (p: PageParams) => {
     const result = await api.listAuditLog(p);
@@ -379,8 +387,11 @@ export default function AuditPage() {
     setExportAnchor(null);
     setExporting(true);
     try {
-      const res = await api.admin.auditExport({ format });
-      if (!res.ok) return;
+      const res = await api.admin.auditExport({ format, ...exportFilters });
+      if (!res.ok) {
+        toast.error(t("exportFailed", { defaultValue: t("errors.internal_error", { defaultValue: "Export failed" }) }));
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -388,10 +399,12 @@ export default function AuditPage() {
       a.download = `audit-log.${format}`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t("exportFailed", { defaultValue: t("errors.internal_error", { defaultValue: "Export failed" }) }));
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [exportFilters, t]);
 
   const tabs = useMemo(() => [
     { key: "all", label: t("tabAll") },
@@ -405,7 +418,14 @@ export default function AuditPage() {
       renderCell: ({ row }) => {
         const outcome = row.metadata?.outcome;
         if (!outcome) return null;
-        return <Chip size="small" label={outcome === "success" ? t("success") : t("failure")} color={outcome === "success" ? "success" : "error"} variant="outlined" />;
+        return (
+          <Chip
+            size="small"
+            label={outcome === "success" ? t("success") : outcome === "failure" ? t("failure") : String(outcome)}
+            color={outcome === "success" ? "success" : outcome === "failure" ? "error" : "default"}
+            variant="outlined"
+          />
+        );
       },
     },
     {
@@ -518,6 +538,7 @@ export default function AuditPage() {
           rowHeight={64}
           onRowClick={handleRowClick}
           action={exportAction}
+          onFiltersChange={setExportFilters}
         />
       </Box>
 

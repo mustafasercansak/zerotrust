@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import AuditPage from "./AuditPage";
 import { api } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
+import { toast } from "sonner";
 
 const mockT = (key: string) => key;
 
@@ -18,36 +19,49 @@ vi.mock("@/contexts/MeContext", () => ({
   useMeContext: vi.fn(),
 }));
 
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}));
+
 vi.mock("@mui/x-data-grid", () => ({
   DataGrid: (props: any) => {
+    const cells: React.ReactNode[] = [];
     if (props.columns && props.rows) {
       for (const row of props.rows) {
         props.getRowId?.(row);
         for (const col of props.columns) {
           if (col.renderCell) {
-            col.renderCell({ row });
+            cells.push(React.createElement(React.Fragment, { key: `${row.id}-${col.field}` }, col.renderCell({ row })));
           }
         }
       }
     }
-    return React.createElement("div", null, `DataGrid rows: ${props.rows?.length ?? 0}`);
+    return React.createElement("div", null, `DataGrid rows: ${props.rows?.length ?? 0}`, cells);
   },
 }));
 
 describe("AuditPage page component", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    vi.mocked(toast.error).mockClear();
   });
 
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const getMockTrends = () => [
     { date: "2026-06-01", success: 5, failure: 0 },
     { date: "2026-06-02", success: 8, failure: 2 },
     { date: "Today", success: 0, failure: 0 },
+  ];
+
+  const getSingleTrend = () => [
+    { date: "2026-06-01", success: 1, failure: 0 },
   ];
 
   const getMockAuditLogs = (includeEdgeCases = false): any => ({
@@ -254,6 +268,44 @@ describe("AuditPage page component", () => {
     expect(listSpy).toHaveBeenCalled();
   });
 
+  it("renders a single trend point without invalid SVG coordinates", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ id: "u123", roles: ["admin"] } as any);
+    vi.spyOn(api, "listAuditLogTrends").mockResolvedValue(getSingleTrend());
+    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+
+    const { container } = render(<AuditPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("trendsTitle")).toBeDefined();
+    });
+
+    const svg = container.querySelector("svg");
+    expect(svg?.outerHTML).not.toContain("Infinity");
+    expect(svg?.outerHTML).not.toContain("NaN");
+  });
+
+  it("renders unknown outcome values without relabeling them as failures", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ id: "u123", roles: ["admin"] } as any);
+    vi.spyOn(api, "listAuditLogTrends").mockResolvedValue([]);
+    vi.spyOn(api, "listAuditLog").mockResolvedValue({
+      data: [{
+        id: "a_partial",
+        action: "auth.login",
+        resource: "users",
+        created_at: "2026-06-04T12:00:00Z",
+        metadata: { outcome: "partial" },
+      }],
+      total: 1,
+    } as any);
+
+    render(<AuditPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("partial")).toBeDefined();
+    });
+    expect(screen.queryByText("failure")).toBeNull();
+  });
+
   it("handles loading state and empty trend data gracefully", async () => {
     vi.mocked(useMeContext).mockReturnValue({ id: "u123", roles: ["admin"] } as any);
     vi.spyOn(api, "listAuditLogTrends").mockResolvedValue([]);
@@ -344,6 +396,62 @@ describe("AuditPage page component", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("export-button")).toBeDefined();
+    });
+  });
+
+  it("exports with the active audit tab filters", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ id: "u123", roles: ["admin"] } as any);
+    vi.spyOn(api, "listAuditLogTrends").mockResolvedValue([]);
+    const listSpy = vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+    const auditExportSpy = vi.spyOn(api.admin, "auditExport").mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(new Blob(["time\n"], { type: "text/csv" })),
+    } as any);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:audit"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    render(<AuditPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("export-button")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText("tabFailures"));
+
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalledWith(expect.objectContaining({
+        filters: { outcome: "failure" },
+      }));
+    });
+
+    fireEvent.click(screen.getByTestId("export-button"));
+    fireEvent.click(await screen.findByText("exportCsv"));
+
+    await waitFor(() => {
+      expect(auditExportSpy).toHaveBeenCalledWith({ format: "csv", outcome: "failure" });
+    });
+  });
+
+  it("shows a toast when audit export fails", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ id: "u123", roles: ["admin"] } as any);
+    vi.spyOn(api, "listAuditLogTrends").mockResolvedValue([]);
+    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+    vi.spyOn(api.admin, "auditExport").mockResolvedValue(new Response("nope", { status: 500 }) as any);
+
+    render(<AuditPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("export-button")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("export-button"));
+    fireEvent.click(await screen.findByText("exportCsv"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("exportFailed");
     });
   });
 

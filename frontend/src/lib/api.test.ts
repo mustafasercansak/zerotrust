@@ -681,13 +681,14 @@ describe("api helper library", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse);
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await api.admin.auditExport({ format: "csv", action: "auth.login", user_id: "uid1" });
+    const res = await api.admin.auditExport({ format: "csv", action: "auth.login", user_id: "uid1", resource: "users" });
     expect(res).toBe(mockResponse);
     const [path, init] = fetchMock.mock.calls[0];
     expect(path).toContain("/api/v1/admin/audit/export");
     expect(path).toContain("format=csv");
     expect(path).toContain("action=auth.login");
     expect(path).toContain("user_id=uid1");
+    expect(path).toContain("resource=users");
     expect(init.headers.Accept).toBe("text/csv");
     expect(init.credentials).toBe("include");
   });
@@ -699,6 +700,23 @@ describe("api helper library", () => {
     await api.admin.auditExport({ format: "json" });
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Accept).toBe("application/json");
+  });
+
+  it("retries admin.auditExport after refreshing an expired access token", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(401, { error: "token_expired" }))
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(new Response("time\n", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await api.admin.auditExport({ format: "csv" });
+
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/admin/audit/export");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/auth/refresh");
+    expect(fetchMock.mock.calls[2][0]).toContain("/api/v1/admin/audit/export");
   });
 
   it("omits undefined audit export filters from the query string", async () => {
