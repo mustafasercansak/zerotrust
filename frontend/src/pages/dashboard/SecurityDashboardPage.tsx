@@ -10,6 +10,10 @@ import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
+import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
+import PhonelinkSetupIcon from "@mui/icons-material/PhonelinkSetup";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import WarningIcon from "@mui/icons-material/Warning";
 
 type DashboardRange = SecurityDashboardData["range"];
 
@@ -17,10 +21,24 @@ const ranges: DashboardRange[] = ["24h", "7d", "30d"];
 
 function MetricCard({ label, value, accent }: { label: string; value: number; accent: string }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2.5, minWidth: 0, position: "relative", overflow: "hidden" }}>
-      <Box sx={{ position: "absolute", inset: "0 auto 0 0", width: 3, bgcolor: accent }} />
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="h4" sx={{ mt: 0.75, fontWeight: 750, letterSpacing: -0.5 }}>{value}</Typography>
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2.5,
+        minWidth: 0,
+        position: "relative",
+        overflow: "hidden",
+        transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+        "&:hover": {
+          boxShadow: 3,
+          borderColor: accent,
+          transform: "translateY(-2px)",
+        },
+      }}
+    >
+      <Box sx={{ position: "absolute", inset: "0 auto 0 0", width: 4, bgcolor: accent }} />
+      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{label}</Typography>
+      <Typography variant="h4" sx={{ mt: 0.75, fontWeight: 800, letterSpacing: -1, color: accent }}>{value}</Typography>
     </Paper>
   );
 }
@@ -280,6 +298,13 @@ function ActivityChart({ data }: { data: SecurityDashboardData["auth_activity"] 
   );
 }
 
+const ANOMALY_ICONS: Record<string, React.ReactNode> = {
+  "impossible_travel": <FlightTakeoffIcon sx={{ fontSize: 16, mr: 0.75, color: "#f43f5e", alignSelf: "center" }} />,
+  "new_device": <PhonelinkSetupIcon sx={{ fontSize: 16, mr: 0.75, color: "#3b82f6", alignSelf: "center" }} />,
+  "suspicious_hours": <AccessTimeIcon sx={{ fontSize: 16, mr: 0.75, color: "#a855f7", alignSelf: "center" }} />,
+  "multiple_failed_attempts": <WarningIcon sx={{ fontSize: 16, mr: 0.75, color: "#f59e0b", alignSelf: "center" }} />,
+};
+
 function RankingCard({
   title,
   items,
@@ -304,11 +329,27 @@ function RankingCard({
             return (
             <Box key={item.name}>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.5 }}>
-                <Typography variant="body2" noWrap title={label}>{label}</Typography>
+                <Box sx={{ display: "flex", minWidth: 0, alignItems: "center" }}>
+                  {ANOMALY_ICONS[item.name]}
+                  <Typography variant="body2" noWrap title={label}>{label}</Typography>
+                </Box>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.count}</Typography>
               </Box>
               <Box sx={{ height: 5, borderRadius: 4, bgcolor: "action.hover", overflow: "hidden" }}>
-                <Box sx={{ width: `${(item.count / maxCount) * 100}%`, height: "100%", bgcolor: "primary.main", borderRadius: 4 }} />
+                <Box
+                  sx={{
+                    width: `${(item.count / maxCount) * 100}%`,
+                    height: "100%",
+                    bgcolor: (() => {
+                      if (item.name === "impossible_travel") return "#f43f5e";
+                      if (item.name === "new_device") return "#3b82f6";
+                      if (item.name === "suspicious_hours") return "#a855f7";
+                      if (item.name === "multiple_failed_attempts") return "#f59e0b";
+                      return "primary.main";
+                    })(),
+                    borderRadius: 4
+                  }}
+                />
               </Box>
             </Box>
             );

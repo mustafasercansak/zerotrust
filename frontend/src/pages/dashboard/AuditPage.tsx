@@ -21,6 +21,7 @@ import ComputerIcon from "@mui/icons-material/Computer";
 import DownloadIcon from "@mui/icons-material/Download";
 import InfoIcon from "@mui/icons-material/Info";
 import PersonIcon from "@mui/icons-material/Person";
+import WarningIcon from "@mui/icons-material/Warning";
 import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
 
 type AuditClientInfo = NonNullable<AuditEntry["metadata"]>["client_info"];
@@ -171,7 +172,7 @@ interface AuditDetailDrawerProps {
 }
 
 export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
-  const { t } = useTranslation("audit");
+  const { t } = useTranslation(["audit", "securityDashboard"]);
   const { i18n } = useTranslation();
   const [activeSection, setActiveSection] = useState<"info" | "client" | "user">("info");
   const [showRaw, setShowRaw] = useState(false);
@@ -248,50 +249,128 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
       {/* Content */}
       <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
 
-        {/* Info section */}
-        {activeSection === "info" && (
-          <Box sx={{ display: "grid", gap: 2 }}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1.5 }}>
-                {t("eventDetails")}
-              </Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 1 }}>
-                {([
-                  { label: t("action"), value: entry.action },
-                  { label: t("resource"), value: entry.resource || "—" },
-                  { label: t("ip"), value: entry.ip_address || "—" },
-                  ...(location ? [{ label: t("location"), value: location }] : []),
-                  ...(entry.metadata?.status != null ? [{ label: t("status"), value: String(entry.metadata.status) }] : []),
-                  ...(entry.metadata?.reason ? [{ label: t("reason"), value: String(entry.metadata.reason) }] : []),
-                ] as { label: string; value: string }[]).map(({ label, value }) => (
-                  <React.Fragment key={label}>
-                    <Typography variant="body2" color="text.secondary">{label}</Typography>
-                    <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all", fontSize: 12 }}>{value}</Typography>
-                  </React.Fragment>
-                ))}
-              </Box>
-            </Paper>
-
-            {/* Raw metadata toggle */}
-            {entry.metadata && (
-              <Box>
-                <Box onClick={() => setShowRaw((v) => !v)} sx={{ display: "flex", alignItems: "center", gap: 0.75, cursor: "pointer", mb: 1 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
-                    {t("rawMetadata")}
-                  </Typography>
-                  <Typography variant="caption" color="primary">{showRaw ? "▲" : "▼"}</Typography>
-                </Box>
-                {showRaw && (
-                  <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "background.default" }}>
-                    <Typography component="pre" variant="caption" sx={{ fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all", m: 0 }}>
-                      {JSON.stringify(entry.metadata, null, 2)}
+        {activeSection === "info" && (() => {
+          const score = typeof entry.metadata?.risk_score === "number" ? entry.metadata.risk_score : undefined;
+          const anomalyType = typeof entry.metadata?.anomaly_type === "string" ? entry.metadata.anomaly_type : undefined;
+          const details = typeof entry.metadata?.details === "string" ? entry.metadata.details : undefined;
+          
+          return (
+            <Box sx={{ display: "grid", gap: 2 }}>
+              {score !== undefined && (
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2.5,
+                    display: "grid",
+                    gap: 1.5,
+                    border: "1px solid",
+                    borderColor: (theme) => {
+                      if (score >= 80) return theme.palette.error.main;
+                      if (score >= 40) return theme.palette.warning.main;
+                      return theme.palette.success.main;
+                    },
+                    bgcolor: "action.hover",
+                    position: "relative",
+                    overflow: "hidden",
+                  }}
+                >
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", textTransform: "uppercase", letterSpacing: 0.8 }}>
+                      {t("riskSeverity", { defaultValue: "Risk Level" })}
                     </Typography>
-                  </Paper>
-                )}
-              </Box>
-            )}
-          </Box>
-        )}
+                    <Chip
+                      size="small"
+                      label={(() => {
+                        if (score >= 80) return t("riskSeverityHigh", { defaultValue: "High Risk" });
+                        if (score >= 40) return t("riskSeverityMedium", { defaultValue: "Medium Risk" });
+                        return t("riskSeverityLow", { defaultValue: "Low Risk" });
+                      })()}
+                      color={(() => {
+                        if (score >= 80) return "error";
+                        if (score >= 40) return "warning";
+                        return "success";
+                      })()}
+                      sx={{ fontWeight: "bold" }}
+                    />
+                  </Box>
+                  
+                  <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5 }}>
+                    <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: -1, lineHeight: 1 }}>
+                      {score}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">/ 100</Typography>
+                  </Box>
+
+                  <Box sx={{ height: 6, borderRadius: 3, bgcolor: "action.selected", overflow: "hidden", width: "100%" }}>
+                    <Box
+                      sx={{
+                        width: `${score}%`,
+                        height: "100%",
+                        bgcolor: (theme) => {
+                          if (score >= 80) return theme.palette.error.main;
+                          if (score >= 40) return theme.palette.warning.main;
+                          return theme.palette.success.main;
+                        },
+                        borderRadius: 3,
+                      }}
+                    />
+                  </Box>
+
+                  {anomalyType && (
+                    <Box sx={{ mt: 0.5, p: 1.5, borderRadius: 1, bgcolor: "background.paper", borderLeft: 3, borderColor: "warning.main" }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "warning.main", mb: 0.25 }}>
+                        {t("anomalousSignals", { defaultValue: "Anomalous Signals" })}: {t(`securityDashboard:anomalyTypes.${anomalyType}`, { defaultValue: anomalyType })}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {details || t("anomalousEventWarning", { defaultValue: "Anomalous event flagged during authentication." })}
+                      </Typography>
+                    </Box>
+                  )}
+                </Paper>
+              )}
+
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1.5 }}>
+                  {t("eventDetails")}
+                </Typography>
+                <Box sx={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 1 }}>
+                  {([
+                    { label: t("action"), value: entry.action },
+                    { label: t("resource"), value: entry.resource || "—" },
+                    { label: t("ip"), value: entry.ip_address || "—" },
+                    ...(location ? [{ label: t("location"), value: location }] : []),
+                    ...(entry.metadata?.status != null ? [{ label: t("status"), value: String(entry.metadata.status) }] : []),
+                    ...(entry.metadata?.reason ? [{ label: t("reason"), value: String(entry.metadata.reason) }] : []),
+                  ] as { label: string; value: string }[]).map(({ label, value }) => (
+                    <React.Fragment key={label}>
+                      <Typography variant="body2" color="text.secondary">{label}</Typography>
+                      <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all", fontSize: 12 }}>{value}</Typography>
+                    </React.Fragment>
+                  ))}
+                </Box>
+              </Paper>
+
+              {/* Raw metadata toggle */}
+              {entry.metadata && (
+                <Box>
+                  <Box onClick={() => setShowRaw((v) => !v)} sx={{ display: "flex", alignItems: "center", gap: 0.75, cursor: "pointer", mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                      {t("rawMetadata")}
+                    </Typography>
+                    <Typography variant="caption" color="primary">{showRaw ? "▲" : "▼"}</Typography>
+                  </Box>
+                  {showRaw && (
+                    <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "background.default" }}>
+                      <Typography component="pre" variant="caption" sx={{ fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all", m: 0 }}>
+                        {JSON.stringify(entry.metadata, null, 2)}
+                      </Typography>
+                    </Paper>
+                  )}
+                </Box>
+              )}
+            </Box>
+          );
+        })()}
 
         {/* Client section */}
         {activeSection === "client" && (
@@ -363,7 +442,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AuditPage() {
-  const { t } = useTranslation("audit");
+  const { t } = useTranslation(["audit", "securityDashboard"]);
   const { i18n } = useTranslation();
   const me = useMeContext();
   const isAdmin = me?.roles.includes("admin") ?? false;
@@ -429,9 +508,30 @@ export default function AuditPage() {
       },
     },
     {
+      field: "risk_score", headerName: t("riskScore"), width: 100, sortable: false,
+      renderCell: ({ row }) => {
+        const score = typeof row.metadata?.risk_score === "number" ? row.metadata.risk_score : undefined;
+        if (score === undefined) return null;
+        let color: "success" | "warning" | "error" = "success";
+        if (score >= 80) color = "error";
+        else if (score >= 40) color = "warning";
+        return (
+          <Chip
+            size="small"
+            label={`${score}`}
+            color={color}
+            sx={{ fontWeight: 800, width: 44, "& .MuiChip-label": { px: 0 } }}
+          />
+        );
+      },
+    },
+    {
       field: "action", headerName: t("action"), minWidth: 180, flex: 1,
       renderCell: ({ row }) => (
-        <Typography variant="caption" color="primary" sx={{ fontFamily: "monospace" }}>{row.action}</Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          {row.action === "login.anomaly" && <WarningIcon sx={{ color: "error.main", fontSize: 16 }} />}
+          <Typography variant="caption" color="primary" sx={{ fontFamily: "monospace" }}>{row.action}</Typography>
+        </Box>
       ),
     },
     {

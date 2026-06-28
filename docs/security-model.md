@@ -81,16 +81,16 @@ Trusted proxy IPs (configured via `TRUSTED_PROXIES`) are trusted for `X-Forwarde
 
 ### 7. Risk-Based Adaptive Authentication
 
-When enabled (`risk_based_auth_enabled = true` in [system settings](settings.md)), the login flow computes a risk score (0–100) from three signals:
+When enabled (`risk_based_auth_enabled = true` in [system settings](settings.md)), the login flow computes a risk score (0–100) from multiple signals. The values below are defaults and are runtime-configurable:
 
 | Signal | Score contribution | Notes |
 |---|---|---|
 | Impossible travel | +80 | Velocity > 800 km/h between current and any active session IP, within 24 hours |
-| New device | +30 | User-agent not seen in any of the user's active sessions |
+| New device | +30 | Device fingerprint (or fallback user-agent) not seen in any active session |
 | Suspicious hour | +20 | Login between 23:00–05:00 server local time |
 | Recent failed attempts | +15 per attempt, max +45 | Based on the lockout counter at the time of the successful login |
 
-Scores are clamped to 100. The risk score is evaluated **after** the password is verified (never before, to avoid leaking information), and the failed-attempt counter is cleared before scoring so that the attempts can still contribute to the score for this login without persisting into future logins.
+Scores are clamped to 100. The risk score is evaluated **after** the password is verified (never before, to avoid leaking information), and the failed-attempt counter is cleared after scoring so that the attempts can still contribute to the score for this login without persisting into future logins.
 
 **Thresholds** (configurable in system settings):
 

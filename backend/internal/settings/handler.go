@@ -134,6 +134,46 @@ var allowedKeys = map[string]func(string) bool{
 		n, err := strconv.Atoi(v)
 		return err == nil && n >= 1 && n <= 100
 	},
+	"risk_score_impossible_travel": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 100
+	},
+	"risk_score_new_device": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 100
+	},
+	"risk_score_suspicious_hours": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 100
+	},
+	"risk_score_failed_attempt": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 50
+	},
+	"risk_failed_attempt_max_score": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 100
+	},
+	"risk_suspicious_hour_start": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 23
+	},
+	"risk_suspicious_hour_end": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 0 && n <= 23
+	},
+	"risk_impossible_travel_velocity_kmh": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 100 && n <= 2000
+	},
+	"risk_impossible_travel_window_hours": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1 && n <= 168
+	},
+	"risk_impossible_travel_min_distance_km": func(v string) bool {
+		n, err := strconv.Atoi(v)
+		return err == nil && n >= 1 && n <= 500
+	},
 }
 
 type Handler struct {

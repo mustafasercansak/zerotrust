@@ -38,8 +38,20 @@ All values are stored as text strings. The type column below indicates how the v
 | `risk_based_auth_enabled` | boolean | `false` | Master switch for adaptive authentication. When `false`, risk scores are computed and logged but no enforcement action is taken. |
 | `risk_threshold_mfa` | integer | `40` | If the risk score meets or exceeds this value and the user has MFA enrolled, MFA is required for this login session regardless of `global_mfa_required`. |
 | `risk_threshold_block` | integer | `80` | If the risk score meets or exceeds this value, the login is blocked outright (`high_risk_blocked`). |
+| `risk_score_impossible_travel` | integer | `80` | Score added when impossible travel is detected. |
+| `risk_score_new_device` | integer | `30` | Score added when the login comes from a previously unseen device fingerprint. |
+| `risk_score_suspicious_hours` | integer | `20` | Score added for logins inside the suspicious-hour window. |
+| `risk_score_failed_attempt` | integer | `15` | Score added per recent failed attempt. |
+| `risk_failed_attempt_max_score` | integer | `45` | Upper cap for failed-attempt contribution. |
+| `risk_suspicious_hour_start` | integer | `23` | Suspicious-hour window start (0-23). |
+| `risk_suspicious_hour_end` | integer | `5` | Suspicious-hour window end (0-23). |
+| `risk_impossible_travel_velocity_kmh` | integer | `800` | Velocity threshold for impossible travel detection. |
+| `risk_impossible_travel_window_hours` | integer | `24` | Time window considered for impossible travel checks. |
+| `risk_impossible_travel_min_distance_km` | integer | `10` | Minimum geo distance before travel checks are evaluated. |
 
-Risk score components: impossible travel (+80), new device (+30), suspicious hour (+20), recent failed attempts (+15 per attempt, max +45). See [security model](security-model.md#7-risk-based-adaptive-authentication) for details.
+Risk score defaults: impossible travel (+80), new device (+30), suspicious hour (+20), recent failed attempts (+15 per attempt, max +45). See [security model](security-model.md#7-risk-based-adaptive-authentication) for details.
+
+New-device detection uses a normalized device fingerprint (`os`, `os_version`, `browser`, browser major version, mobile flag, architecture) when client device metadata is available. It falls back to normalized user-agent matching when metadata is missing.
 
 ---
 

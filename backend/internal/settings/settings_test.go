@@ -253,6 +253,36 @@ func TestSettingsHandler(t *testing.T) {
 	if !allowedKeys["max_login_attempts"]("5") || allowedKeys["max_login_attempts"]("99") || allowedKeys["max_login_attempts"]("abc") {
 		t.Fatal("Validator max_login_attempts failed")
 	}
+	if !allowedKeys["risk_score_impossible_travel"]("80") || allowedKeys["risk_score_impossible_travel"]("-1") {
+		t.Fatal("Validator risk_score_impossible_travel failed")
+	}
+	if !allowedKeys["risk_score_new_device"]("30") || allowedKeys["risk_score_new_device"]("101") {
+		t.Fatal("Validator risk_score_new_device failed")
+	}
+	if !allowedKeys["risk_score_suspicious_hours"]("20") || allowedKeys["risk_score_suspicious_hours"]("-5") {
+		t.Fatal("Validator risk_score_suspicious_hours failed")
+	}
+	if !allowedKeys["risk_score_failed_attempt"]("15") || allowedKeys["risk_score_failed_attempt"]("51") {
+		t.Fatal("Validator risk_score_failed_attempt failed")
+	}
+	if !allowedKeys["risk_failed_attempt_max_score"]("45") || allowedKeys["risk_failed_attempt_max_score"]("101") {
+		t.Fatal("Validator risk_failed_attempt_max_score failed")
+	}
+	if !allowedKeys["risk_suspicious_hour_start"]("23") || allowedKeys["risk_suspicious_hour_start"]("24") {
+		t.Fatal("Validator risk_suspicious_hour_start failed")
+	}
+	if !allowedKeys["risk_suspicious_hour_end"]("5") || allowedKeys["risk_suspicious_hour_end"]("-1") {
+		t.Fatal("Validator risk_suspicious_hour_end failed")
+	}
+	if !allowedKeys["risk_impossible_travel_velocity_kmh"]("800") || allowedKeys["risk_impossible_travel_velocity_kmh"]("50") {
+		t.Fatal("Validator risk_impossible_travel_velocity_kmh failed")
+	}
+	if !allowedKeys["risk_impossible_travel_window_hours"]("24") || allowedKeys["risk_impossible_travel_window_hours"]("0") {
+		t.Fatal("Validator risk_impossible_travel_window_hours failed")
+	}
+	if !allowedKeys["risk_impossible_travel_min_distance_km"]("10") || allowedKeys["risk_impossible_travel_min_distance_km"]("0") {
+		t.Fatal("Validator risk_impossible_travel_min_distance_km failed")
+	}
 
 	// Test update bad json
 	reqBadJson, _ := http.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString("{bad"))

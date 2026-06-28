@@ -1097,4 +1097,124 @@ describe("SettingsPage page component", () => {
       }));
     });
   });
+
+  it("initializes advanced risk-based tuning settings and saves updated values", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+      risk_based_auth_enabled: "true",
+      risk_threshold_mfa: "45",
+      risk_threshold_block: "85",
+      risk_score_impossible_travel: "75",
+      risk_score_new_device: "25",
+      risk_score_suspicious_hours: "15",
+      risk_score_failed_attempt: "10",
+      risk_failed_attempt_max_score: "35",
+      risk_suspicious_hour_start: "22",
+      risk_suspicious_hour_end: "6",
+      risk_impossible_travel_velocity_kmh: "700",
+      risk_impossible_travel_window_hours: "12",
+      risk_impossible_travel_min_distance_km: "8",
+    });
+    const updateSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
+
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    // Check initialized values
+    expect((screen.getByTestId("settings-risk-score-impossible-travel") as HTMLInputElement).value).toBe("75");
+    expect((screen.getByTestId("settings-risk-score-new-device") as HTMLInputElement).value).toBe("25");
+    expect((screen.getByTestId("settings-risk-score-suspicious-hours") as HTMLInputElement).value).toBe("15");
+    expect((screen.getByTestId("settings-risk-score-failed-attempt") as HTMLInputElement).value).toBe("10");
+    expect((screen.getByTestId("settings-risk-failed-attempt-max-score") as HTMLInputElement).value).toBe("35");
+    expect((screen.getByTestId("settings-risk-suspicious-hour-start") as HTMLInputElement).value).toBe("22");
+    expect((screen.getByTestId("settings-risk-suspicious-hour-end") as HTMLInputElement).value).toBe("6");
+    expect((screen.getByTestId("settings-risk-impossible-travel-velocity-kmh") as HTMLInputElement).value).toBe("700");
+    expect((screen.getByTestId("settings-risk-impossible-travel-window-hours") as HTMLInputElement).value).toBe("12");
+    expect((screen.getByTestId("settings-risk-impossible-travel-min-distance-km") as HTMLInputElement).value).toBe("8");
+
+    // Modify values
+    fireEvent.change(screen.getByTestId("settings-risk-score-impossible-travel"), { target: { value: "90" } });
+    fireEvent.change(screen.getByTestId("settings-risk-score-new-device"), { target: { value: "35" } });
+    fireEvent.change(screen.getByTestId("settings-risk-score-suspicious-hours"), { target: { value: "25" } });
+    fireEvent.change(screen.getByTestId("settings-risk-score-failed-attempt"), { target: { value: "20" } });
+    fireEvent.change(screen.getByTestId("settings-risk-failed-attempt-max-score"), { target: { value: "50" } });
+    fireEvent.change(screen.getByTestId("settings-risk-suspicious-hour-start"), { target: { value: "20" } });
+    fireEvent.change(screen.getByTestId("settings-risk-suspicious-hour-end"), { target: { value: "4" } });
+    fireEvent.change(screen.getByTestId("settings-risk-impossible-travel-velocity-kmh"), { target: { value: "900" } });
+    fireEvent.change(screen.getByTestId("settings-risk-impossible-travel-window-hours"), { target: { value: "18" } });
+    fireEvent.change(screen.getByTestId("settings-risk-impossible-travel-min-distance-km"), { target: { value: "15" } });
+
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
+        risk_score_impossible_travel: "90",
+        risk_score_new_device: "35",
+        risk_score_suspicious_hours: "25",
+        risk_score_failed_attempt: "20",
+        risk_failed_attempt_max_score: "50",
+        risk_suspicious_hour_start: "20",
+        risk_suspicious_hour_end: "4",
+        risk_impossible_travel_velocity_kmh: "900",
+        risk_impossible_travel_window_hours: "18",
+        risk_impossible_travel_min_distance_km: "15",
+      }));
+    });
+  });
+
+  it("shows error toast when new risk settings are out of valid bounds", async () => {
+    vi.mocked(useMeContext).mockReturnValue({
+      user_id: "u123", email: "admin@example.com", first_name: "Admin", last_name: "User",
+      has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      roles: ["admin"], locale: "en",
+    } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+      risk_based_auth_enabled: "true",
+    });
+
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const saveBtn = screen.getByTestId("settings-system-save");
+
+    // Invalid impossible travel score (> 100)
+    fireEvent.change(screen.getByTestId("settings-risk-score-impossible-travel"), { target: { value: "101" } });
+    fireEvent.submit(saveBtn.closest("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
+    fireEvent.change(screen.getByTestId("settings-risk-score-impossible-travel"), { target: { value: "80" } });
+
+    // Invalid velocity (< 100)
+    fireEvent.change(screen.getByTestId("settings-risk-impossible-travel-velocity-kmh"), { target: { value: "50" } });
+    fireEvent.submit(saveBtn.closest("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
+  });
 });

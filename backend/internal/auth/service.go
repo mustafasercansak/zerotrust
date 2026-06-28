@@ -138,6 +138,17 @@ const (
 	settingSessionIdleTimeoutSec      = "session_idle_timeout_seconds"
 	settingSessionIdleTimeoutAdminSec = "session_idle_timeout_seconds_admin"
 	settingSessionAbsoluteTimeoutSec  = "session_absolute_timeout_seconds"
+
+	settingRiskScoreImpossibleTravel = "risk_score_impossible_travel"
+	settingRiskScoreNewDevice        = "risk_score_new_device"
+	settingRiskScoreSuspiciousHours  = "risk_score_suspicious_hours"
+	settingRiskScoreFailedAttempt    = "risk_score_failed_attempt"
+	settingRiskFailedAttemptMaxScore = "risk_failed_attempt_max_score"
+	settingRiskSuspiciousHourStart   = "risk_suspicious_hour_start"
+	settingRiskSuspiciousHourEnd     = "risk_suspicious_hour_end"
+	settingRiskTravelVelocityKmh     = "risk_impossible_travel_velocity_kmh"
+	settingRiskTravelWindowHours     = "risk_impossible_travel_window_hours"
+	settingRiskTravelMinDistanceKm   = "risk_impossible_travel_min_distance_km"
 )
 
 var (
@@ -377,26 +388,33 @@ func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua 
 	score := 0
 	var reasons []string
 	var details []string
+	impossibleTravelScore := s.riskSettingInt(ctx, settingRiskScoreImpossibleTravel, 80)
+	newDeviceScore := s.riskSettingInt(ctx, settingRiskScoreNewDevice, 30)
+	suspiciousHourScore := s.riskSettingInt(ctx, settingRiskScoreSuspiciousHours, 20)
+	failedAttemptUnitScore := s.riskSettingInt(ctx, settingRiskScoreFailedAttempt, 15)
+	failedAttemptMaxScore := s.riskSettingInt(ctx, settingRiskFailedAttemptMaxScore, 45)
+	suspiciousHourStart := s.riskSettingInt(ctx, settingRiskSuspiciousHourStart, 23)
+	suspiciousHourEnd := s.riskSettingInt(ctx, settingRiskSuspiciousHourEnd, 5)
 
 	// 1. Check Anomalies (Impossible Travel, New Device)
 	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, userID, email, ip, ua, deviceInfo)
 	if hasAnomaly {
 		switch anomalyType {
 		case "impossible_travel":
-			score += 80
+			score += impossibleTravelScore
 			reasons = append(reasons, "impossible_travel")
 			details = append(details, anomalyDetails)
 		case "new_device":
-			score += 30
+			score += newDeviceScore
 			reasons = append(reasons, "new_device")
 			details = append(details, anomalyDetails)
 		}
 	}
 
-	// 2. Suspicious Hours Check (11 PM - 5 AM)
+	// 2. Suspicious Hours Check (configurable window)
 	hour := time.Now().Hour()
-	if hour >= 23 || hour < 5 {
-		score += 20
+	if isWithinSuspiciousHoursWindow(hour, suspiciousHourStart, suspiciousHourEnd) {
+		score += suspiciousHourScore
 		reasons = append(reasons, "suspicious_hours")
 		details = append(details, fmt.Sprintf("Login attempt at suspicious hour: %d:00", hour))
 	}
@@ -406,10 +424,9 @@ func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua 
 		fkey := failKey(email)
 		val, err := s.rdb.Get(ctx, fkey).Int64()
 		if err == nil && val > 0 {
-			// Add 15 per failed attempt, max 45
-			failedScore := int(val) * 15
-			if failedScore > 45 {
-				failedScore = 45
+			failedScore := int(val) * failedAttemptUnitScore
+			if failedScore > failedAttemptMaxScore {
+				failedScore = failedAttemptMaxScore
 			}
 			score += failedScore
 			reasons = append(reasons, "multiple_failed_attempts")
@@ -431,7 +448,7 @@ func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua 
 	return score, reasonStr, detailStr
 }
 
-func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ string, currentIP, currentUA string, _ map[string]string) (bool, string, string) {
+func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ string, currentIP, currentUA string, currentDeviceInfo map[string]string) (bool, string, string) {
 	if s.geoip == nil {
 		return false, "", ""
 	}
@@ -456,11 +473,12 @@ func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ strin
 		return false, "", ""
 	}
 
-	// Check if device/browser has been seen before for this user
+	// Check whether this device fingerprint has been seen before for this user.
+	// This is more robust than raw user-agent matching and reduces false positives.
+	currentFingerprint := deviceFingerprint(currentUA, currentDeviceInfo)
 	isFirstTimeDevice := true
 	for _, sess := range activeSessions {
-		ua, _ := sess["user_agent"].(string)
-		if ua == currentUA {
+		if sessionDeviceFingerprint(sess) == currentFingerprint {
 			isFirstTimeDevice = false
 			break
 		}
@@ -481,9 +499,6 @@ func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ strin
 		}
 
 		distance := haversineDistance(currLoc.Latitude, currLoc.Longitude, sessLoc.Latitude, sessLoc.Longitude)
-		if distance < 10.0 {
-			continue
-		}
 
 		var lastActive time.Time
 		if val, exists := sess["last_used_at"]; exists && val != nil {
@@ -512,8 +527,15 @@ func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ strin
 		// Calculate velocity in km/h
 		velocity := distance / timeDiff.Hours()
 
-		// If velocity > 800 km/h and time difference is under 24 hours, flag it
-		if velocity > 800.0 && timeDiff < 24*time.Hour {
+		velocityThreshold := float64(s.riskSettingInt(ctx, settingRiskTravelVelocityKmh, 800))
+		maxTravelWindow := time.Duration(s.riskSettingInt(ctx, settingRiskTravelWindowHours, 24)) * time.Hour
+		minTravelDistance := float64(s.riskSettingInt(ctx, settingRiskTravelMinDistanceKm, 10))
+
+		if distance < minTravelDistance {
+			continue
+		}
+
+		if velocity > velocityThreshold && timeDiff < maxTravelWindow {
 			travelAnomalyDetails = fmt.Sprintf("Impossible travel detected from %s (%s) to %s (%s). Distance: %.1f km, Time elapsed: %s, Velocity: %.1f km/h",
 				ip, formatLocation(sessLoc),
 				currentIP, formatLocation(currLoc),
@@ -531,6 +553,107 @@ func (s *Service) detectLoginAnomaly(ctx context.Context, userID string, _ strin
 	}
 
 	return false, "", ""
+}
+
+func (s *Service) riskSettingInt(ctx context.Context, key string, defaultVal int) int {
+	v := defaultVal
+	if s.settings != nil {
+		v = s.settings.GetInt(ctx, key, defaultVal)
+	}
+	if v < 0 {
+		return defaultVal
+	}
+	return v
+}
+
+func isWithinSuspiciousHoursWindow(hour, start, end int) bool {
+	if hour < 0 || hour > 23 {
+		return false
+	}
+	if start < 0 || start > 23 || end < 0 || end > 23 {
+		return hour >= 23 || hour < 5
+	}
+	if start == end {
+		return false
+	}
+	if start < end {
+		return hour >= start && hour < end
+	}
+	return hour >= start || hour < end
+}
+
+func deviceFingerprint(ua string, info map[string]string) string {
+	if len(info) == 0 {
+		return normalizeUserAgent(ua)
+	}
+	parts := []string{
+		strings.ToLower(strings.TrimSpace(info["os"])),
+		strings.ToLower(strings.TrimSpace(info["os_version"])),
+		strings.ToLower(strings.TrimSpace(info["browser"])),
+		majorVersion(strings.TrimSpace(info["browser_version"])),
+		strings.ToLower(strings.TrimSpace(info["mobile"])),
+		strings.ToLower(strings.TrimSpace(info["architecture"])),
+	}
+	fp := strings.Join(parts, "|")
+	if strings.ReplaceAll(fp, "|", "") == "" {
+		return normalizeUserAgent(ua)
+	}
+	return fp
+}
+
+func sessionDeviceFingerprint(sess map[string]any) string {
+	ua, _ := sess["user_agent"].(string)
+	if raw, ok := sess["device_info"]; ok {
+		if info := coerceDeviceInfo(raw); len(info) > 0 {
+			return deviceFingerprint(ua, info)
+		}
+	}
+	return normalizeUserAgent(ua)
+}
+
+func coerceDeviceInfo(raw any) map[string]string {
+	switch v := raw.(type) {
+	case map[string]string:
+		return v
+	case map[string]any:
+		out := make(map[string]string, len(v))
+		for k, val := range v {
+			if s, ok := val.(string); ok {
+				out[k] = s
+			}
+		}
+		return out
+	case []byte:
+		var decoded map[string]any
+		if err := json.Unmarshal(v, &decoded); err != nil {
+			return nil
+		}
+		out := make(map[string]string, len(decoded))
+		for k, val := range decoded {
+			if s, ok := val.(string); ok {
+				out[k] = s
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func majorVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
+}
+
+func normalizeUserAgent(ua string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(ua)), " "))
 }
 
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {

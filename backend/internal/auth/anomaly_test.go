@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -377,5 +378,73 @@ func TestLogin_RiskScoreIncludesRecentFailedAttemptsBeforeClearing(t *testing.T)
 	}
 	if mr.Exists(failKey(email)) {
 		t.Fatal("expected failed-attempt counter to be cleared after successful password check")
+	}
+}
+
+func TestSuspiciousHoursWindow(t *testing.T) {
+	tests := []struct {
+		name       string
+		hour       int
+		start      int
+		end        int
+		expectedIn bool
+	}{
+		{name: "overnight in window", hour: 23, start: 23, end: 5, expectedIn: true},
+		{name: "overnight after midnight", hour: 2, start: 23, end: 5, expectedIn: true},
+		{name: "overnight out of window", hour: 12, start: 23, end: 5, expectedIn: false},
+		{name: "same-day in window", hour: 14, start: 9, end: 18, expectedIn: true},
+		{name: "same-day out of window", hour: 20, start: 9, end: 18, expectedIn: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isWithinSuspiciousHoursWindow(tc.hour, tc.start, tc.end); got != tc.expectedIn {
+				t.Fatalf("isWithinSuspiciousHoursWindow(%d,%d,%d)=%v want=%v", tc.hour, tc.start, tc.end, got, tc.expectedIn)
+			}
+		})
+	}
+}
+
+func TestDetectLoginAnomaly_KnownDeviceFingerprintNotFlaggedAsNew(t *testing.T) {
+	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true}
+	reader := &dummyUserReader{u: u}
+
+	deviceInfo := map[string]any{
+		"os":              "macos",
+		"os_version":      "14.2",
+		"browser":         "chrome",
+		"browser_version": "120.1.10",
+		"mobile":          "false",
+		"architecture":    "arm64",
+	}
+	deviceJSON, _ := json.Marshal(deviceInfo)
+
+	sessions := []map[string]any{
+		{
+			"ip_address":   "100.0.0.3", // New York
+			"user_agent":   "Mozilla/5.0 Chrome/120.0.0",
+			"device_info":  deviceJSON,
+			"created_at":   time.Now().Add(-1 * time.Hour),
+			"last_used_at": time.Now().Add(-30 * time.Minute),
+		},
+	}
+
+	store := &testAnomalySessionStore{sessions: sessions}
+	ks, _ := LoadOrGenerateKeyStore("", "")
+	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
+	svc.ConfigureSecurityAnomalies(geoip.NewService(""), nil)
+
+	currentInfo := map[string]string{
+		"os":              "macOS",
+		"os_version":      "14.2",
+		"browser":         "Chrome",
+		"browser_version": "120.9.99",
+		"mobile":          "false",
+		"architecture":    "arm64",
+	}
+
+	has, kind, _ := svc.detectLoginAnomaly(context.Background(), u.ID, u.Email, "100.0.0.3", "Mozilla/5.0 Chrome/120.9.99", currentInfo)
+	if has && kind == "new_device" {
+		t.Fatalf("expected known fingerprint not to be flagged as new_device")
 	}
 }

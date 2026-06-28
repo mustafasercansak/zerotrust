@@ -402,6 +402,7 @@ func (r *Repository) GetActiveSessions(ctx context.Context, userID string) ([]ma
 	rows, err := r.db.Query(ctx, `
 		SELECT COALESCE(ip_address::text, ''),
 		       user_agent,
+		       COALESCE(device_info, '{}'::jsonb),
 		       created_at,
 		       last_used_at
 		FROM sessions
@@ -417,14 +418,16 @@ func (r *Repository) GetActiveSessions(ctx context.Context, userID string) ([]ma
 	var list []map[string]any
 	for rows.Next() {
 		var ip, ua string
+		var deviceInfo []byte
 		var created time.Time
 		var lastUsed *time.Time
-		if err := rows.Scan(&ip, &ua, &created, &lastUsed); err != nil {
+		if err := rows.Scan(&ip, &ua, &deviceInfo, &created, &lastUsed); err != nil {
 			return nil, err
 		}
 		list = append(list, map[string]any{
 			"ip_address":   ip,
 			"user_agent":   ua,
+			"device_info":  deviceInfo,
 			"created_at":   created,
 			"last_used_at": lastUsed,
 		})

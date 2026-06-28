@@ -143,6 +143,17 @@ export default function SettingsPage() {
   const [riskBasedAuthEnabled, setRiskBasedAuthEnabled] = useState("false");
   const [riskThresholdMfa, setRiskThresholdMfa] = useState("40");
   const [riskThresholdBlock, setRiskThresholdBlock] = useState("80");
+  const [riskScoreImpossibleTravel, setRiskScoreImpossibleTravel] = useState("80");
+  const [riskScoreNewDevice, setRiskScoreNewDevice] = useState("30");
+  const [riskScoreSuspiciousHours, setRiskScoreSuspiciousHours] = useState("20");
+  const [riskScoreFailedAttempt, setRiskScoreFailedAttempt] = useState("15");
+  const [riskFailedAttemptMaxScore, setRiskFailedAttemptMaxScore] = useState("45");
+  const [riskSuspiciousHourStart, setRiskSuspiciousHourStart] = useState("23");
+  const [riskSuspiciousHourEnd, setRiskSuspiciousHourEnd] = useState("5");
+  const [riskImpossibleTravelVelocityKmh, setRiskImpossibleTravelVelocityKmh] = useState("800");
+  const [riskImpossibleTravelWindowHours, setRiskImpossibleTravelWindowHours] = useState("24");
+  const [riskImpossibleTravelMinDistanceKm, setRiskImpossibleTravelMinDistanceKm] = useState("10");
+
 
   useEffect(() => {
     if (me) setNotifySecurityEmails(me.notify_security_emails ?? true);
@@ -203,6 +214,16 @@ export default function SettingsPage() {
         setRiskBasedAuthEnabled(s["risk_based_auth_enabled"] ?? "false");
         setRiskThresholdMfa(s["risk_threshold_mfa"] ?? "40");
         setRiskThresholdBlock(s["risk_threshold_block"] ?? "80");
+        setRiskScoreImpossibleTravel(s["risk_score_impossible_travel"] ?? "80");
+        setRiskScoreNewDevice(s["risk_score_new_device"] ?? "30");
+        setRiskScoreSuspiciousHours(s["risk_score_suspicious_hours"] ?? "20");
+        setRiskScoreFailedAttempt(s["risk_score_failed_attempt"] ?? "15");
+        setRiskFailedAttemptMaxScore(s["risk_failed_attempt_max_score"] ?? "45");
+        setRiskSuspiciousHourStart(s["risk_suspicious_hour_start"] ?? "23");
+        setRiskSuspiciousHourEnd(s["risk_suspicious_hour_end"] ?? "5");
+        setRiskImpossibleTravelVelocityKmh(s["risk_impossible_travel_velocity_kmh"] ?? "800");
+        setRiskImpossibleTravelWindowHours(s["risk_impossible_travel_window_hours"] ?? "24");
+        setRiskImpossibleTravelMinDistanceKm(s["risk_impossible_travel_min_distance_km"] ?? "10");
       })
       .catch(() => toast.error(t("errors.internal_error")))
       .finally(() => setSystemLoading(false));
@@ -346,6 +367,26 @@ export default function SettingsPage() {
     const rBlock = parseInt(riskThresholdBlock, 10);
     if (isNaN(rBlock) || rBlock < 1 || rBlock > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     if (rMfa > rBlock) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const scoreTravel = parseInt(riskScoreImpossibleTravel, 10);
+    if (isNaN(scoreTravel) || scoreTravel < 0 || scoreTravel > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const scoreNewDevice = parseInt(riskScoreNewDevice, 10);
+    if (isNaN(scoreNewDevice) || scoreNewDevice < 0 || scoreNewDevice > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const scoreSuspiciousHours = parseInt(riskScoreSuspiciousHours, 10);
+    if (isNaN(scoreSuspiciousHours) || scoreSuspiciousHours < 0 || scoreSuspiciousHours > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const scoreFailedAttempt = parseInt(riskScoreFailedAttempt, 10);
+    if (isNaN(scoreFailedAttempt) || scoreFailedAttempt < 0 || scoreFailedAttempt > 50) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const scoreFailedMax = parseInt(riskFailedAttemptMaxScore, 10);
+    if (isNaN(scoreFailedMax) || scoreFailedMax < 0 || scoreFailedMax > 100) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const hourStart = parseInt(riskSuspiciousHourStart, 10);
+    if (isNaN(hourStart) || hourStart < 0 || hourStart > 23) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const hourEnd = parseInt(riskSuspiciousHourEnd, 10);
+    if (isNaN(hourEnd) || hourEnd < 0 || hourEnd > 23) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const velocity = parseInt(riskImpossibleTravelVelocityKmh, 10);
+    if (isNaN(velocity) || velocity < 100 || velocity > 2000) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const travelWindow = parseInt(riskImpossibleTravelWindowHours, 10);
+    if (isNaN(travelWindow) || travelWindow < 1 || travelWindow > 168) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
+    const minDistance = parseInt(riskImpossibleTravelMinDistanceKm, 10);
+    if (isNaN(minDistance) || minDistance < 1 || minDistance > 500) { toast.error(t("errors.invalid_value", { defaultValue: t("errors.internal_error") })); return; }
     setSavingSystem(true);
     try {
       await runWithStepUp(() => api.admin.updateSettings({
@@ -374,6 +415,16 @@ export default function SettingsPage() {
         risk_based_auth_enabled: riskBasedAuthEnabled,
         risk_threshold_mfa: String(rMfa),
         risk_threshold_block: String(rBlock),
+        risk_score_impossible_travel: String(scoreTravel),
+        risk_score_new_device: String(scoreNewDevice),
+        risk_score_suspicious_hours: String(scoreSuspiciousHours),
+        risk_score_failed_attempt: String(scoreFailedAttempt),
+        risk_failed_attempt_max_score: String(scoreFailedMax),
+        risk_suspicious_hour_start: String(hourStart),
+        risk_suspicious_hour_end: String(hourEnd),
+        risk_impossible_travel_velocity_kmh: String(velocity),
+        risk_impossible_travel_window_hours: String(travelWindow),
+        risk_impossible_travel_min_distance_km: String(minDistance),
       }), "settings_update");
       toast.success(t("saved"));
     } catch (err) {
@@ -864,25 +915,133 @@ export default function SettingsPage() {
                   />
 
                   {riskBasedAuthEnabled === "true" && (
-                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mt: 1 }}>
-                      <TextField
-                        label={t("riskThresholdMfa")}
-                        type="number"
-                        value={riskThresholdMfa}
-                        onChange={(e) => setRiskThresholdMfa(e.target.value)}
-                        helperText={t("riskThresholdMfaDesc")}
-                        size="small"
-                        slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-mfa" } }}
-                      />
-                      <TextField
-                        label={t("riskThresholdBlock")}
-                        type="number"
-                        value={riskThresholdBlock}
-                        onChange={(e) => setRiskThresholdBlock(e.target.value)}
-                        helperText={t("riskThresholdBlockDesc")}
-                        size="small"
-                        slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-block" } }}
-                      />
+                    <Box sx={{ display: "grid", gap: 2.5, mt: 1 }}>
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                        <TextField
+                          label={t("riskThresholdMfa")}
+                          type="number"
+                          value={riskThresholdMfa}
+                          onChange={(e) => setRiskThresholdMfa(e.target.value)}
+                          helperText={t("riskThresholdMfaDesc")}
+                          size="small"
+                          slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-mfa" } }}
+                        />
+                        <TextField
+                          label={t("riskThresholdBlock")}
+                          type="number"
+                          value={riskThresholdBlock}
+                          onChange={(e) => setRiskThresholdBlock(e.target.value)}
+                          helperText={t("riskThresholdBlockDesc")}
+                          size="small"
+                          slotProps={{ htmlInput: { ...numericProps(1, 100), "data-testid": "settings-risk-threshold-block" } }}
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.85rem", borderBottom: "1px solid", borderColor: "divider", pb: 0.5, mb: 1.5 }}>
+                          {t("riskScoreWeightsTitle", { defaultValue: "Risk Score Weights" })}
+                        </Typography>
+                        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
+                          <TextField
+                            label={t("riskScoreImpossibleTravel")}
+                            type="number"
+                            value={riskScoreImpossibleTravel}
+                            onChange={(e) => setRiskScoreImpossibleTravel(e.target.value)}
+                            helperText={t("riskScoreImpossibleTravelDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 100), "data-testid": "settings-risk-score-impossible-travel" } }}
+                          />
+                          <TextField
+                            label={t("riskScoreNewDevice")}
+                            type="number"
+                            value={riskScoreNewDevice}
+                            onChange={(e) => setRiskScoreNewDevice(e.target.value)}
+                            helperText={t("riskScoreNewDeviceDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 100), "data-testid": "settings-risk-score-new-device" } }}
+                          />
+                          <TextField
+                            label={t("riskScoreSuspiciousHours")}
+                            type="number"
+                            value={riskScoreSuspiciousHours}
+                            onChange={(e) => setRiskScoreSuspiciousHours(e.target.value)}
+                            helperText={t("riskScoreSuspiciousHoursDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 100), "data-testid": "settings-risk-score-suspicious-hours" } }}
+                          />
+                          <TextField
+                            label={t("riskScoreFailedAttempt")}
+                            type="number"
+                            value={riskScoreFailedAttempt}
+                            onChange={(e) => setRiskScoreFailedAttempt(e.target.value)}
+                            helperText={t("riskScoreFailedAttemptDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 50), "data-testid": "settings-risk-score-failed-attempt" } }}
+                          />
+                          <TextField
+                            label={t("riskFailedAttemptMaxScore")}
+                            type="number"
+                            value={riskFailedAttemptMaxScore}
+                            onChange={(e) => setRiskFailedAttemptMaxScore(e.target.value)}
+                            helperText={t("riskFailedAttemptMaxScoreDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 100), "data-testid": "settings-risk-failed-attempt-max-score" } }}
+                          />
+                        </Box>
+                      </Box>
+
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.85rem", borderBottom: "1px solid", borderColor: "divider", pb: 0.5, mb: 1.5 }}>
+                          {t("riskDetectionParamsTitle", { defaultValue: "Anomaly Detection Parameters" })}
+                        </Typography>
+                        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
+                          <TextField
+                            label={t("riskSuspiciousHourStart")}
+                            type="number"
+                            value={riskSuspiciousHourStart}
+                            onChange={(e) => setRiskSuspiciousHourStart(e.target.value)}
+                            helperText={t("riskSuspiciousHourStartDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 23), "data-testid": "settings-risk-suspicious-hour-start" } }}
+                          />
+                          <TextField
+                            label={t("riskSuspiciousHourEnd")}
+                            type="number"
+                            value={riskSuspiciousHourEnd}
+                            onChange={(e) => setRiskSuspiciousHourEnd(e.target.value)}
+                            helperText={t("riskSuspiciousHourEndDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(0, 23), "data-testid": "settings-risk-suspicious-hour-end" } }}
+                          />
+                          <TextField
+                            label={t("riskImpossibleTravelVelocityKmh")}
+                            type="number"
+                            value={riskImpossibleTravelVelocityKmh}
+                            onChange={(e) => setRiskImpossibleTravelVelocityKmh(e.target.value)}
+                            helperText={t("riskImpossibleTravelVelocityKmhDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(100, 2000), "data-testid": "settings-risk-impossible-travel-velocity-kmh" } }}
+                          />
+                          <TextField
+                            label={t("riskImpossibleTravelWindowHours")}
+                            type="number"
+                            value={riskImpossibleTravelWindowHours}
+                            onChange={(e) => setRiskImpossibleTravelWindowHours(e.target.value)}
+                            helperText={t("riskImpossibleTravelWindowHoursDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(1, 168), "data-testid": "settings-risk-impossible-travel-window-hours" } }}
+                          />
+                          <TextField
+                            label={t("riskImpossibleTravelMinDistanceKm")}
+                            type="number"
+                            value={riskImpossibleTravelMinDistanceKm}
+                            onChange={(e) => setRiskImpossibleTravelMinDistanceKm(e.target.value)}
+                            helperText={t("riskImpossibleTravelMinDistanceKmDesc")}
+                            size="small"
+                            slotProps={{ htmlInput: { ...numericProps(1, 500), "data-testid": "settings-risk-impossible-travel-min-distance-km" } }}
+                          />
+                        </Box>
+                      </Box>
                     </Box>
                   )}
                 </Box>
