@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { AuditDetailDrawer } from "./AuditPage";
 import type { AuditEntry } from "@/lib/api";
 
@@ -43,6 +43,7 @@ describe("AuditDetailDrawer component", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -124,7 +125,7 @@ describe("AuditDetailDrawer component", () => {
     fireEvent.click(screen.getByText("drawerClient"));
 
     expect(screen.getByText("clientDetails")).toBeDefined();
-    expect(screen.getByText("Chrome")).toBeDefined();
+    expect(screen.getByText("Chrome 120")).toBeDefined();
     expect(screen.getByText("Windows 10")).toBeDefined();
     expect(screen.getByText("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")).toBeDefined();
   });

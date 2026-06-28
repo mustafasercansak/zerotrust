@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import SettingsPage from "./SettingsPage";
 import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { toast } from "sonner";
-import { renderToString } from "react-dom/server";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
-// Mock react-router-dom and react-i18next
+// Mock react-router-dom
 vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn(),
 }));
@@ -32,102 +32,23 @@ vi.mock("./SessionsPage", () => ({
   default: () => React.createElement("div", null, "SessionsPageMock"),
 }));
 
-const capturedSubmits: any[] = [];
-const capturedButtonClicks: any[] = [];
-const capturedInputs: any[] = [];
-const capturedTabChanges: any[] = [];
-const capturedTextFieldChanges: any[] = [];
-const capturedSwitchChanges: any[] = [];
-
-// State Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
+// Conditionally mock MUI Button to allow clicking the webhook test button when disabled
+vi.mock("@mui/material/Button", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@mui/material/Button")>();
   return {
     ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
+    default: (props: any) => {
+      if (props["data-testid"] === "settings-webhook-test") {
+        return React.createElement("button", {
+          "data-testid": props["data-testid"],
+          onClick: props.onClick,
+          type: props.type,
+        }, props.children);
       }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 65) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      fn();
-    },
+      return React.createElement(original.default, props);
+    }
   };
 });
-
-vi.mock("@mui/material/Paper", () => ({
-  default: (props: any) => {
-    if (props.onSubmit) {
-      capturedSubmits.push(props.onSubmit);
-    }
-    return React.createElement("div", null, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) {
-      capturedButtonClicks.push(props.onClick);
-    }
-    // Safely check for input children
-    React.Children.forEach(props.children, (child: any) => {
-      if (child && child.props && child.props.type === "file" && child.props.onChange) {
-        capturedInputs.push(child.props.onChange);
-      }
-    });
-    return React.createElement("button", { onClick: props.onClick, type: props.type }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Tabs", () => ({
-  default: (props: any) => {
-    if (props.onChange) {
-      capturedTabChanges.push(props.onChange);
-    }
-    return React.createElement("div", null, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Tab", () => ({
-  default: (props: any) => {
-    return React.createElement("div", { id: props.id }, props.label);
-  }
-}));
-
-vi.mock("@mui/material/TextField", () => ({
-  default: (props: any) => {
-    if (props.onChange) {
-      capturedTextFieldChanges.push(props.onChange);
-    }
-    return React.createElement("input", { onChange: props.onChange, value: props.value });
-  }
-}));
-
-vi.mock("@mui/material/Switch", () => ({
-  default: (props: any) => {
-    if (props.onChange) {
-      capturedSwitchChanges.push(props.onChange);
-    }
-    return React.createElement("input", { type: "checkbox", onChange: props.onChange, checked: props.checked });
-  }
-}));
 
 const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
 
@@ -148,15 +69,6 @@ vi.mock("@/components/StepUpMfaDialog", () => ({
 
 describe("SettingsPage page component", () => {
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    capturedSubmits.length = 0;
-    capturedButtonClicks.length = 0;
-    capturedInputs.length = 0;
-    capturedTabChanges.length = 0;
-    capturedTextFieldChanges.length = 0;
-    capturedSwitchChanges.length = 0;
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.info).mockClear();
@@ -166,20 +78,17 @@ describe("SettingsPage page component", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  const runRender = () => {
-    callIdx = 0;
-    return renderToString(React.createElement(SettingsPage));
-  };
-
   it("renders loader or profiles correctly", async () => {
     // 1st: me is null
     vi.mocked(useMeContext).mockReturnValue(null);
-    let html = runRender();
-    expect(html).toContain("CircularProgress");
+    const { unmount } = render(<SettingsPage />);
+    expect(screen.getByRole("progressbar")).toBeDefined();
+    unmount();
 
     // 2nd: me is present
     vi.mocked(useMeContext).mockReturnValue({
@@ -201,12 +110,11 @@ describe("SettingsPage page component", () => {
       max_login_attempts: "5",
     });
 
-    runRender(); // run once to trigger useEffect and update stateStore
-    html = runRender(); // run again to capture the updated HTML
-    expect(html).toContain("John");
-    expect(html).toContain("Doe");
+    render(<SettingsPage />);
+    expect(screen.getByDisplayValue("John")).toBeDefined();
+    expect(screen.getByDisplayValue("Doe")).toBeDefined();
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(getSettingsSpy).toHaveBeenCalled();
     });
   });
@@ -231,17 +139,24 @@ describe("SettingsPage page component", () => {
       last_name: "DoeUpdated",
     } as any);
 
-    runRender();
-
-    expect(capturedSubmits[0]).toBeDefined();
+    render(<SettingsPage />);
 
     // Trigger form submit
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(updateSpy).toHaveBeenCalled();
+    const saveBtn = screen.getByTestId("settings-profile-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith({ first_name: "John", last_name: "Doe" });
+    });
 
     // Trigger update profile failure
-    vi.spyOn(api, "updateProfile").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    const updateFailSpy = vi.spyOn(api, "updateProfile").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateFailSpy).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+    });
   });
 
   it("handles avatar change and delete paths", async () => {
@@ -261,21 +176,29 @@ describe("SettingsPage page component", () => {
     const uploadSpy = vi.spyOn(api, "uploadAvatar").mockResolvedValue({} as any);
     const deleteSpy = vi.spyOn(api, "deleteAvatar").mockResolvedValue({} as any);
 
-    runRender();
+    render(<SettingsPage />);
+
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).toBeDefined();
 
     // Test Avatar Change Too Large
-    expect(capturedInputs[0]).toBeDefined();
-    capturedInputs[0]({ target: { files: [{ size: 3 * 1024 * 1024 }] } });
+    fireEvent.change(fileInput!, { target: { files: [{ size: 3 * 1024 * 1024 }] } });
+    expect(toast.error).toHaveBeenCalledWith("errors.file_too_large");
 
     // Test Avatar Change Success
-    const file = { size: 1024 };
-    await capturedInputs[0]({ target: { files: [file] } });
-    expect(uploadSpy).toHaveBeenCalledWith(file);
+    const file = new File(["avatar"], "avatar.png", { type: "image/png" });
+    Object.defineProperty(file, "size", { value: 1024 });
+    fireEvent.change(fileInput!, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(uploadSpy).toHaveBeenCalledWith(file);
+    });
 
     // Test Avatar Delete Success
-    expect(capturedButtonClicks[0]).toBeDefined();
-    await capturedButtonClicks[0]();
-    expect(deleteSpy).toHaveBeenCalled();
+    const deleteBtn = screen.getByText("deleteButton");
+    fireEvent.click(deleteBtn);
+    await waitFor(() => {
+      expect(deleteSpy).toHaveBeenCalled();
+    });
   });
 
   it("ignores avatar input changes when no file is selected", async () => {
@@ -294,9 +217,10 @@ describe("SettingsPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
     const uploadSpy = vi.spyOn(api, "uploadAvatar").mockResolvedValue({} as any);
 
-    runRender();
-    expect(capturedInputs[0]).toBeDefined();
-    await capturedInputs[0]({ target: { files: [] } });
+    render(<SettingsPage />);
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).toBeDefined();
+    fireEvent.change(fileInput!, { target: { files: [] } });
 
     expect(uploadSpy).not.toHaveBeenCalled();
   });
@@ -314,33 +238,41 @@ describe("SettingsPage page component", () => {
       locale: "en",
     });
 
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    const getSettingsSpy = vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+    });
     const updateSettingsSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
 
-    // Render with activeTab = 2 (System)
-    stateStore[0] = 2; // set activeTab state to 2
-    runRender();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(getSettingsSpy).toHaveBeenCalled();
+    });
 
-    // Await getSettings API resolution to update maxSessions/maxLoginAttempts to "5"
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender(); // re-render to populate closures
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
 
-    expect(capturedSubmits[capturedSubmits.length - 1]).toBeDefined();
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    // Save settings success
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(updateSettingsSpy).toHaveBeenCalled();
+    const maxSessionsInput = screen.getByTestId("settings-max-sessions") as HTMLInputElement;
+    expect(maxSessionsInput.value).toBe("5");
 
-    // Test invalid values (sessions out of range)
-    stateStore[6] = "99";
-    runRender(); // re-render with new state
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(updateSettingsSpy).toHaveBeenCalled();
+    });
+
+    // Test invalid values (sessions out of range) - submit form directly to bypass native HTML5 validation constraints
+    fireEvent.change(maxSessionsInput, { target: { value: "99" } });
+    fireEvent.submit(saveBtn.closest("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.invalid_value");
+    });
 
     // Test MFA Step-up: simulate useStepUp catching mfa_required and retrying
-    stateStore[6] = "5";
-    runRender();
+    fireEvent.change(maxSessionsInput, { target: { value: "5" } });
     vi.spyOn(api.admin, "updateSettings").mockRejectedValueOnce(new ApiError("mfa_required", undefined, 403));
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
@@ -348,8 +280,10 @@ describe("SettingsPage page component", () => {
       catch { await api.mfaStepUp("123456"); return action(); }
     });
 
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(stepUpSpy).toHaveBeenCalledWith("123456");
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(stepUpSpy).toHaveBeenCalledWith("123456");
+    });
   });
 
   it("handles system settings load and save failure branches", async () => {
@@ -366,23 +300,48 @@ describe("SettingsPage page component", () => {
     });
 
     vi.spyOn(api.admin, "getSettings").mockRejectedValue(new Error("settings unavailable"));
-    stateStore[0] = 2;
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    render(<SettingsPage />);
 
-    stateStore[6] = "5";
-    stateStore[9] = "99";
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    });
 
-    stateStore[9] = "5";
+    cleanup();
+    vi.mocked(toast.error).mockClear();
+
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+    });
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const maxLoginAttemptsInput = screen.getByTestId("settings-max-login-attempts");
+
+    // Invalid max login attempts - submit form directly to bypass native HTML5 validation constraints
+    fireEvent.change(maxLoginAttemptsInput, { target: { value: "99" } });
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.submit(saveBtn.closest("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
+
+    // Reset and mock updateSettings failure
+    vi.mocked(toast.error).mockClear();
+    fireEvent.change(maxLoginAttemptsInput, { target: { value: "5" } });
     vi.spyOn(api.admin, "updateSettings").mockRejectedValueOnce(new Error("save failed"));
-    runRender();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    });
   });
 
   it("does not complete system save when step-up MFA prompt is empty", async () => {
@@ -398,22 +357,34 @@ describe("SettingsPage page component", () => {
       locale: "en",
     });
 
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+    });
     const updateSpy = vi.spyOn(api.admin, "updateSettings").mockRejectedValue(new ApiError("mfa_required", undefined, 403));
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
-    // Simulate useStepUp not calling mfaStepUp when action throws non-mfa_required
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
-      return action(); // just propagate the mfa_required throw without step-up
+      return action();
     });
-    stateStore[0] = 2;
-    stateStore[6] = "5";
-    stateStore[9] = "5";
-    runRender();
 
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() }).catch(() => {});
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(stepUpSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const saveBtn = screen.getByTestId("settings-system-save");
+
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(stepUpSpy).not.toHaveBeenCalled();
+    });
   });
 
   it("triggers interactive form and tab controls", async () => {
@@ -429,39 +400,51 @@ describe("SettingsPage page component", () => {
       locale: "en",
     });
 
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
-    
-    // 1st render (profile tab)
-    runRender();
-
-    // Call tab onChange (switch to tab 1, then tab 2)
-    expect(capturedTabChanges[0]).toBeDefined();
-    capturedTabChanges[0](null, 1);
-    capturedTabChanges[0](null, 2);
-
-    // Call firstName/lastName textfields onChange
-    expect(capturedTextFieldChanges[0]).toBeDefined();
-    capturedTextFieldChanges[0]({ target: { value: "JohnNew" } });
-    capturedTextFieldChanges[1]({ target: { value: "DoeNew" } });
-
-    // Await getSettings
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // Render on activeTab = 2 (System)
-    stateStore[0] = 2;
-    runRender();
-
-    // Now under system tab, textfields should be populated/captured
-    capturedTextFieldChanges.forEach((tfChange) => {
-      tfChange({ target: { value: "8" } });
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+      global_mfa_required: "false",
     });
 
-    // Call Switch onChange
-    expect(capturedSwitchChanges[0]).toBeDefined();
-    capturedSwitchChanges[0]({ target: { checked: true } });
-    capturedSwitchChanges[0]({ target: { checked: false } });
+    render(<SettingsPage />);
+
+    // Click tab security
+    fireEvent.click(screen.getByTestId("tab-security-sessions"));
+    expect(screen.getByText("SessionsPageMock")).toBeDefined();
+
+    // Click tab system
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    // Click tab profile
+    fireEvent.click(screen.getByTestId("tab-profile-settings"));
+
+    const firstNameInput = screen.getByTestId("settings-first-name") as HTMLInputElement;
+    const lastNameInput = screen.getByTestId("settings-last-name") as HTMLInputElement;
+    fireEvent.change(firstNameInput, { target: { value: "JohnNew" } });
+    fireEvent.change(lastNameInput, { target: { value: "DoeNew" } });
+
+    expect(firstNameInput.value).toBe("JohnNew");
+    expect(lastNameInput.value).toBe("DoeNew");
+
+    // Click tab system again
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const maxSessionsInput = screen.getByTestId("settings-max-sessions") as HTMLInputElement;
+    fireEvent.change(maxSessionsInput, { target: { value: "8" } });
+    expect(maxSessionsInput.value).toBe("8");
+
+    const switches = screen.getAllByRole("switch");
+    const mfaSwitch = switches[0];
+    fireEvent.click(mfaSwitch);
+    fireEvent.click(mfaSwitch);
   });
 
   it("renders email initials, no-avatar profile, and the security tab", async () => {
@@ -478,14 +461,15 @@ describe("SettingsPage page component", () => {
     } as any);
     const getSettingsSpy = vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
 
-    let html = runRender();
-    expect(html).toContain("FA");
-    expect(html).not.toContain("/api/v1/users/u123/avatar");
+    render(<SettingsPage />);
+    expect(screen.getByText("FA")).toBeDefined();
+
+    const avatarImg = document.querySelector('img[src*="/avatar"]');
+    expect(avatarImg).toBeNull();
     expect(getSettingsSpy).not.toHaveBeenCalled();
 
-    stateStore[0] = 1;
-    html = runRender();
-    expect(html).toContain("SessionsPageMock");
+    fireEvent.click(screen.getByTestId("tab-security-sessions"));
+    expect(screen.getByText("SessionsPageMock")).toBeDefined();
   });
 
   it("renders saving labels and shows success toasts on save", async () => {
@@ -500,32 +484,50 @@ describe("SettingsPage page component", () => {
       roles: ["admin"],
       locale: "en",
     });
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
-    vi.spyOn(api, "updateProfile").mockResolvedValue({} as any);
-    vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
-    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
-    vi.stubGlobal("CustomEvent", class {
-      type: string;
-      detail: unknown;
-      constructor(type: string, init?: { detail?: unknown }) {
-        this.type = type;
-        this.detail = init?.detail;
-      }
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
     });
 
-    stateStore[3] = true; // savingProfile → renders the "saving" label
-    expect(runRender()).toContain("saving");
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(toast.success).toHaveBeenCalledWith("saved");
+    let resolveProfile: any;
+    const profilePromise = new Promise((resolve) => {
+      resolveProfile = resolve;
+    });
+    vi.spyOn(api, "updateProfile").mockReturnValue(profilePromise as any);
 
-    stateStore[0] = 2;
-    stateStore[6] = "5";
-    stateStore[9] = "5";
-    stateStore[10] = false; // systemLoading
-    stateStore[11] = true; // savingSystem → renders the "saving" label
-    expect(runRender()).toContain("saving");
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(toast.success).toHaveBeenCalledWith("saved");
+    render(<SettingsPage />);
+
+    const profileSaveBtn = screen.getByTestId("settings-profile-save");
+    fireEvent.click(profileSaveBtn);
+
+    expect(screen.getByText("saving")).toBeDefined();
+
+    resolveProfile({});
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("saved");
+    });
+
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const systemSaveBtn = screen.getByTestId("settings-system-save");
+
+    let resolveSystem: any;
+    const systemPromise = new Promise((resolve) => {
+      resolveSystem = resolve;
+    });
+    vi.spyOn(api.admin, "updateSettings").mockReturnValue(systemPromise as any);
+
+    fireEvent.click(systemSaveBtn);
+    expect(screen.getByText("saving")).toBeDefined();
+
+    resolveSystem({});
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("saved");
+    });
   });
 
   it("handles avatar ApiError failures", async () => {
@@ -544,12 +546,21 @@ describe("SettingsPage page component", () => {
     vi.spyOn(api, "uploadAvatar").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
     vi.spyOn(api, "deleteAvatar").mockRejectedValue(new ApiError("invalid_value", undefined, 400));
 
-    runRender();
-    await capturedInputs[0]({ target: { files: [{ size: 1024 }] } });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    render(<SettingsPage />);
 
-    await capturedButtonClicks[0]();
-    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).toBeDefined();
+
+    fireEvent.change(fileInput!, { target: { files: [{ size: 1024 }] } });
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
+
+    const deleteBtn = screen.getByText("deleteButton");
+    fireEvent.click(deleteBtn);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
   });
 
   it("handles nonnumeric login attempts and undefined MFA prompt returns", async () => {
@@ -564,25 +575,40 @@ describe("SettingsPage page component", () => {
       roles: ["admin"],
       locale: "en",
     });
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+    });
     const updateSpy = vi.spyOn(api.admin, "updateSettings").mockRejectedValue(new ApiError("mfa_required", undefined, 403));
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
-    // Simulate useStepUp propagating the mfa_required error without calling mfaStepUp
     mockRunWithStepUp.mockImplementation(async (action: any) => action());
 
-    stateStore[0] = 2;
-    stateStore[6] = "5";
-    stateStore[9] = "nope";
-    stateStore[10] = false;
-    runRender();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    stateStore[9] = "5";
-    runRender();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() }).catch(() => {});
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(stepUpSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    const maxLoginAttemptsInput = screen.getByTestId("settings-max-login-attempts");
+    fireEvent.change(maxLoginAttemptsInput, { target: { value: "nope" } });
+
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.submit(saveBtn.closest("form")!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_value");
+    });
+
+    fireEvent.change(maxLoginAttemptsInput, { target: { value: "5" } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(stepUpSpy).not.toHaveBeenCalled();
+    });
   });
 
   it("shows a success toast after a profile save", async () => {
@@ -599,21 +625,15 @@ describe("SettingsPage page component", () => {
     });
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
     const updateProfileSpy = vi.spyOn(api, "updateProfile").mockResolvedValue({} as any);
-    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
-    vi.stubGlobal("CustomEvent", class {
-      type: string;
-      detail: unknown;
 
-      constructor(type: string, init?: { detail?: unknown }) {
-        this.type = type;
-        this.detail = init?.detail;
-      }
+    render(<SettingsPage />);
+    const profileSaveBtn = screen.getByTestId("settings-profile-save");
+    fireEvent.click(profileSaveBtn);
+
+    await waitFor(() => {
+      expect(updateProfileSpy).toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith("saved");
     });
-
-    runRender();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(updateProfileSpy).toHaveBeenCalled();
-    expect(toast.success).toHaveBeenCalledWith("saved");
   });
 
   it("shows error when new passwords do not match", async () => {
@@ -630,14 +650,16 @@ describe("SettingsPage page component", () => {
     } as any);
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
 
-    // newPassword (idx 13) and confirmPassword (idx 14) differ
-    stateStore[13] = "NewPass1!";
-    stateStore[14] = "DifferentPass1!";
-    runRender();
+    render(<SettingsPage />);
 
-    expect(capturedSubmits[1]).toBeDefined();
-    await capturedSubmits[1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.passwords_do_not_match");
+    fireEvent.change(screen.getByTestId("settings-new-password"), { target: { value: "NewPass1!" } });
+    fireEvent.change(screen.getByTestId("settings-confirm-password"), { target: { value: "DifferentPass1!" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "changePassword.submit" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.passwords_do_not_match");
+    });
   });
 
   it("handles password change success", async () => {
@@ -655,15 +677,18 @@ describe("SettingsPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
     const changePasswordSpy = vi.spyOn(api, "changePassword").mockResolvedValue(undefined);
 
-    stateStore[12] = "Current1!";
-    stateStore[13] = "NewPass1!";
-    stateStore[14] = "NewPass1!";
-    runRender();
+    render(<SettingsPage />);
 
-    expect(capturedSubmits[1]).toBeDefined();
-    await capturedSubmits[1]({ preventDefault: vi.fn() });
-    expect(changePasswordSpy).toHaveBeenCalledWith("Current1!", "NewPass1!");
-    expect(toast.success).toHaveBeenCalledWith("changePassword.success");
+    fireEvent.change(screen.getByTestId("settings-current-password"), { target: { value: "Current1!" } });
+    fireEvent.change(screen.getByTestId("settings-new-password"), { target: { value: "NewPass1!" } });
+    fireEvent.change(screen.getByTestId("settings-confirm-password"), { target: { value: "NewPass1!" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "changePassword.submit" }));
+
+    await waitFor(() => {
+      expect(changePasswordSpy).toHaveBeenCalledWith("Current1!", "NewPass1!");
+      expect(toast.success).toHaveBeenCalledWith("changePassword.success");
+    });
   });
 
   it("handles password change api errors", async () => {
@@ -680,23 +705,30 @@ describe("SettingsPage page component", () => {
     } as any);
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
 
+    render(<SettingsPage />);
+
+    fireEvent.change(screen.getByTestId("settings-current-password"), { target: { value: "WrongCurrent!" } });
+    fireEvent.change(screen.getByTestId("settings-new-password"), { target: { value: "NewPass1!" } });
+    fireEvent.change(screen.getByTestId("settings-confirm-password"), { target: { value: "NewPass1!" } });
+
     // wrong_password error
     vi.spyOn(api, "changePassword").mockRejectedValueOnce(new ApiError("wrong_password", undefined, 401));
-    stateStore[12] = "WrongCurrent!";
-    stateStore[13] = "NewPass1!";
-    stateStore[14] = "NewPass1!";
-    runRender();
-    await capturedSubmits[1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.wrong_password");
+    fireEvent.click(screen.getByRole("button", { name: "changePassword.submit" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.wrong_password");
+    });
 
     // generic error
     vi.spyOn(api, "changePassword").mockRejectedValueOnce(new Error("network"));
-    runRender();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.internal_error");
+    fireEvent.click(screen.getByRole("button", { name: "changePassword.submit" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenLastCalledWith("changePassword.errors.internal_error");
+    });
   });
 
-  it("renders changing label while password change is in progress", () => {
+  it("renders changing label while password change is in progress", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u123",
       email: "test@example.com",
@@ -710,12 +742,20 @@ describe("SettingsPage page component", () => {
     } as any);
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
 
-    stateStore[15] = true; // changingPassword
-    const html = runRender();
-    expect(html).toContain("changePassword.submitting");
-  });
+    vi.spyOn(api, "changePassword").mockReturnValue(new Promise(() => {}));
 
-  // ── Activity / Login History tab ────────────────────────────────────────────
+    render(<SettingsPage />);
+
+    fireEvent.change(screen.getByTestId("settings-current-password"), { target: { value: "Current1!" } });
+    fireEvent.change(screen.getByTestId("settings-new-password"), { target: { value: "NewPass1!" } });
+    fireEvent.change(screen.getByTestId("settings-confirm-password"), { target: { value: "NewPass1!" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "changePassword.submit" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("changePassword.submitting")).toBeDefined();
+    });
+  });
 
   it("renders activity tab for admin at index 3 and calls listMyAudit", async () => {
     vi.mocked(useMeContext).mockReturnValue({
@@ -726,13 +766,12 @@ describe("SettingsPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
     const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
 
-    // activityTabIndex for admin = 3
-    stateStore[0] = 3;
-    runRender();
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
 
-    expect(auditSpy).toHaveBeenCalledWith(25, 0);
-    // historyLoading is set to true synchronously by the effect
-    expect(stateStore[23]).toBe(true);
+    await waitFor(() => {
+      expect(auditSpy).toHaveBeenCalledWith(25, 0);
+    });
   });
 
   it("renders activity tab for non-admin at index 2 and calls listMyAudit", async () => {
@@ -743,11 +782,12 @@ describe("SettingsPage page component", () => {
     } as any);
     const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
 
-    // activityTabIndex for non-admin = 2
-    stateStore[0] = 2;
-    runRender();
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
 
-    expect(auditSpy).toHaveBeenCalledWith(25, 0);
+    await waitFor(() => {
+      expect(auditSpy).toHaveBeenCalledWith(25, 0);
+    });
   });
 
   it("renders empty state when no activity entries", async () => {
@@ -758,38 +798,38 @@ describe("SettingsPage page component", () => {
     } as any);
     vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
 
-    stateStore[0] = 2;          // activityTabIndex for non-admin
-    stateStore[22] = [];        // historyEntries = []
-    stateStore[23] = false;     // historyLoading = false
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
 
-    const html = runRender();
-    expect(html).toContain("activityTitle");
-    expect(html).toContain("activityEmpty");
+    await waitFor(() => {
+      expect(screen.getByText("activityTitle")).toBeDefined();
+      expect(screen.getByText("activityEmpty")).toBeDefined();
+    });
   });
 
-  it("renders loading spinner on activity tab while fetching", () => {
+  it("renders loading spinner on activity tab while fetching", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["user"], locale: "en",
     } as any);
-    vi.spyOn(api, "listMyAudit").mockReturnValue(new Promise(() => {})); // never resolves
+    vi.spyOn(api, "listMyAudit").mockReturnValue(new Promise(() => {}));
 
-    stateStore[0] = 2;
-    stateStore[23] = true; // historyLoading = true
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
 
-    const html = runRender();
-    expect(html).toContain("activityTitle");
-    expect(html).toContain("CircularProgress");
+    await waitFor(() => {
+      expect(screen.getByText("activityTitle")).toBeDefined();
+      expect(screen.getByRole("progressbar")).toBeDefined();
+    });
   });
 
-  it("renders history entries with action, outcome, and location", () => {
+  it("renders history entries with action, outcome, and location", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["user"], locale: "en",
     } as any);
-    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
 
     const entries = [
       {
@@ -808,37 +848,41 @@ describe("SettingsPage page component", () => {
       },
     ];
 
-    stateStore[0] = 2;
-    stateStore[22] = entries;   // historyEntries
-    stateStore[23] = false;     // historyLoading
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: entries, total: 2 });
 
-    const html = runRender();
-    expect(html).toContain("Login");           // formatAction("auth.login")
-    expect(html).toContain("Password Changed"); // formatAction("user.password_changed")
-    expect(html).toContain("Istanbul");
-    expect(html).toContain("success");
-    expect(html).toContain("failure");
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Login")).toBeDefined();
+      expect(screen.getByText("Password Changed")).toBeDefined();
+      expect(screen.getByText("Istanbul, TR")).toBeDefined();
+      expect(screen.getByText("success")).toBeDefined();
+      expect(screen.getByText("failure")).toBeDefined();
+    });
   });
 
-  it("shows pagination controls when historyTotal > 25", () => {
+  it("shows pagination controls when historyTotal > 25", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["user"], locale: "en",
     } as any);
-    vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
+    vi.spyOn(api, "listMyAudit").mockResolvedValue({
+      data: [{ id: "x", action: "auth.login", resource: "", user_id: null, user_email: null, ip_address: null, user_agent: null, metadata: null, created_at: "2026-06-20T00:00:00Z" }],
+      total: 50
+    });
 
-    stateStore[0] = 2;
-    stateStore[22] = [{ id: "x", action: "auth.login", resource: "", user_id: null, user_email: null, ip_address: null, user_agent: null, metadata: null, created_at: "2026-06-20T00:00:00Z" }];
-    stateStore[23] = false;
-    stateStore[24] = 50; // historyTotal > 25 → show pagination
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("tab-login-activity"));
 
-    const html = runRender();
-    expect(html).toContain("activityPrev");
-    expect(html).toContain("activityNext");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "activityPrev" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "activityNext" })).toBeDefined();
+    });
   });
 
-  it("does not call listMyAudit when not on activity tab", () => {
+  it("does not call listMyAudit when not on activity tab", async () => {
     vi.mocked(useMeContext).mockReturnValue({
       user_id: "u456", email: "user@example.com", first_name: "", last_name: "",
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
@@ -846,13 +890,9 @@ describe("SettingsPage page component", () => {
     } as any);
     const auditSpy = vi.spyOn(api, "listMyAudit").mockResolvedValue({ data: [], total: 0 });
 
-    stateStore[0] = 0; // Profile tab — NOT activity tab
-    runRender();
-
+    render(<SettingsPage />);
     expect(auditSpy).not.toHaveBeenCalled();
   });
-
-  // ── Webhook test button ─────────────────────────────────────────────────────
 
   it("calls testWebhook and shows success toast on delivery", async () => {
     vi.mocked(useMeContext).mockReturnValue({
@@ -860,21 +900,30 @@ describe("SettingsPage page component", () => {
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"], locale: "en",
     } as any);
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      webhook_enabled: "true",
+      webhook_url: "https://hooks.slack.com/services/test",
+    });
     const testSpy = vi.spyOn(api.admin, "testWebhook").mockResolvedValue(undefined);
 
-    stateStore[0] = 2;   // System tab
-    stateStore[10] = false; // systemLoading = false so content renders
-    stateStore[26] = "true";
-    stateStore[27] = "https://hooks.slack.com/services/test";
-    runRender();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    // On the system tab the only onClick button is the webhook test button
-    expect(capturedButtonClicks[0]).toBeDefined();
-    await capturedButtonClicks[0]();
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    expect(testSpy).toHaveBeenCalledWith("https://hooks.slack.com/services/test");
-    expect(toast.success).toHaveBeenCalledWith("webhookTestSuccess");
+    const testBtn = screen.getByTestId("settings-webhook-test");
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith("https://hooks.slack.com/services/test");
+      expect(toast.success).toHaveBeenCalledWith("webhookTestSuccess");
+    });
   });
 
   it("shows error toast when testWebhook delivery fails", async () => {
@@ -883,18 +932,29 @@ describe("SettingsPage page component", () => {
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"], locale: "en",
     } as any);
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      webhook_enabled: "true",
+      webhook_url: "https://hooks.slack.com/services/test",
+    });
     vi.spyOn(api.admin, "testWebhook").mockRejectedValue(new ApiError("webhook_delivery_failed"));
 
-    stateStore[0] = 2;
-    stateStore[10] = false;
-    stateStore[26] = "true";
-    stateStore[27] = "https://hooks.slack.com/services/test";
-    runRender();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    await capturedButtonClicks[0]();
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    expect(toast.error).toHaveBeenCalledWith("webhookTestFailed");
+    const testBtn = screen.getByTestId("settings-webhook-test");
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("webhookTestFailed");
+    });
   });
 
   it("shows info toast and skips API call when testWebhook URL is empty", async () => {
@@ -903,22 +963,33 @@ describe("SettingsPage page component", () => {
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"], locale: "en",
     } as any);
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      webhook_enabled: "true",
+      webhook_url: "",
+    });
     const testSpy = vi.spyOn(api.admin, "testWebhook");
 
-    stateStore[0] = 2;
-    stateStore[10] = false;
-    stateStore[26] = "true";
-    stateStore[27] = ""; // no URL
-    runRender();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    await capturedButtonClicks[0]();
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    expect(testSpy).not.toHaveBeenCalled();
-    expect(toast.info).toHaveBeenCalledWith("webhookTestNoUrl");
+    const testBtn = screen.getByTestId("settings-webhook-test") as HTMLButtonElement;
+    
+    // Fire a click directly on the conditionally mocked button (which ignores disabled state)
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(testSpy).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith("webhookTestNoUrl");
+    });
   });
-
-  // ── IP / Country allowlist settings ─────────────────────────────────────────
 
   it("initializes ip_allowlist and country_allowlist from settings API response", async () => {
     vi.mocked(useMeContext).mockReturnValue({
@@ -933,15 +1004,20 @@ describe("SettingsPage page component", () => {
       webhook_enabled: "true",
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    expect(stateStore[29]).toBe("10.0.0.0/8,192.168.1.1"); // ipAllowlist
-    expect(stateStore[30]).toBe("TR,US");                   // countryAllowlist
-    expect(stateStore[27]).toBe("https://hooks.slack.com/services/xyz"); // webhookUrl
-    expect(stateStore[26]).toBe("true");                    // webhookEnabled
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
+
+    expect((screen.getByTestId("settings-ip-allowlist") as HTMLInputElement).value).toBe("10.0.0.0/8,192.168.1.1");
+    expect((screen.getByTestId("settings-country-allowlist") as HTMLInputElement).value).toBe("TR,US");
+    expect((screen.getByTestId("settings-webhook-url") as HTMLInputElement).value).toBe("https://hooks.slack.com/services/xyz");
   });
 
   it("includes ip_allowlist and country_allowlist in system settings save payload", async () => {
@@ -950,27 +1026,35 @@ describe("SettingsPage page component", () => {
       has_avatar: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
       roles: ["admin"], locale: "en",
     });
-    vi.spyOn(api.admin, "getSettings").mockResolvedValue({});
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
+    });
     const updateSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
 
-    stateStore[0] = 2;        // System tab
-    stateStore[6] = "5";      // maxSessions (valid: 1-20)
-    stateStore[9] = "5";      // maxLoginAttempts (valid: 1-20)
-    stateStore[10] = false;   // systemLoading = false → content renders
-    stateStore[16] = "300";   // idleTimeout (valid: 60-3600)
-    stateStore[17] = "180";   // adminIdleTimeout (valid: 60-1800)
-    stateStore[18] = "28800"; // absoluteTimeout (valid: 1800-172800)
-    stateStore[29] = "10.0.0.1,172.16.0.0/12"; // ipAllowlist
-    stateStore[30] = "TR,DE"; // countryAllowlist
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    runRender();
-    expect(capturedSubmits[capturedSubmits.length - 1]).toBeDefined();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      ip_allowlist: "10.0.0.1,172.16.0.0/12",
-      country_allowlist: "TR,DE",
-    }));
+    fireEvent.change(screen.getByTestId("settings-ip-allowlist"), { target: { value: "10.0.0.1,172.16.0.0/12" } });
+    fireEvent.change(screen.getByTestId("settings-country-allowlist"), { target: { value: "TR,DE" } });
+
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
+        ip_allowlist: "10.0.0.1,172.16.0.0/12",
+        country_allowlist: "TR,DE",
+      }));
+    });
   });
 
   it("initializes risk-based auth settings and includes them in the save payload", async () => {
@@ -980,37 +1064,37 @@ describe("SettingsPage page component", () => {
       roles: ["admin"], locale: "en",
     } as any);
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({
+      max_sessions_per_user: "5",
+      max_login_attempts: "5",
       risk_based_auth_enabled: "true",
       risk_threshold_mfa: "45",
       risk_threshold_block: "85",
     });
     const updateSpy = vi.spyOn(api.admin, "updateSettings").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-system-settings")).toBeDefined();
+    });
 
-    expect(stateStore[41]).toBe("true"); // riskBasedAuthEnabled
-    expect(stateStore[42]).toBe("45");   // riskThresholdMfa
-    expect(stateStore[43]).toBe("85");   // riskThresholdBlock
+    fireEvent.click(screen.getByTestId("tab-system-settings"));
+    
+    await waitFor(() => {
+      expect(screen.queryByText("loading")).toBeNull();
+    });
 
-    stateStore[0] = 2;        // System tab
-    stateStore[6] = "5";      // maxSessions (valid: 1-20)
-    stateStore[9] = "5";      // maxLoginAttempts (valid: 1-20)
-    stateStore[10] = false;   // systemLoading = false → content renders
-    stateStore[16] = "300";   // idleTimeout (valid: 60-3600)
-    stateStore[17] = "180";   // adminIdleTimeout (valid: 60-1800)
-    stateStore[18] = "28800"; // absoluteTimeout (valid: 1800-172800)
+    expect((screen.getByTestId("settings-risk-threshold-mfa") as HTMLInputElement).value).toBe("45");
+    expect((screen.getByTestId("settings-risk-threshold-block") as HTMLInputElement).value).toBe("85");
 
-    runRender();
-    expect(capturedSubmits[capturedSubmits.length - 1]).toBeDefined();
-    await capturedSubmits[capturedSubmits.length - 1]({ preventDefault: vi.fn() });
+    const saveBtn = screen.getByTestId("settings-system-save");
+    fireEvent.click(saveBtn);
 
-    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      risk_based_auth_enabled: "true",
-      risk_threshold_mfa: "45",
-      risk_threshold_block: "85",
-    }));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({
+        risk_based_auth_enabled: "true",
+        risk_threshold_mfa: "45",
+        risk_threshold_block: "85",
+      }));
+    });
   });
 });

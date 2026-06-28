@@ -1,81 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { UserProfileDrawer } from "./UsersPage";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { renderToString } from "react-dom/server";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+const mockT = (key: string, options?: any) => {
+  if (options?.date) return `${key}:${options.date}`;
+  return key;
+};
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: mockT,
     i18n: { language: "en" },
   }),
 }));
 
 vi.mock("@mui/material/Drawer", () => ({
-  default: (props: any) => React.createElement("div", null, props.children),
+  default: (props: any) => React.createElement("div", { "data-testid": "drawer" }, props.children),
 }));
 
 vi.mock("@mui/material/Tooltip", () => ({
   default: (props: any) => props.children,
 }));
 
-// Prevent SessionCard and AuditEntryCard from consuming state indices
 vi.mock("@/components/SessionCard", () => ({
   SessionCard: ({ session }: any) =>
-    React.createElement("div", { className: "mock-session" }, `session:${session.id}`),
+    React.createElement("div", { "data-testid": "mock-session" }, `session:${session.id}`),
 }));
+
 vi.mock("@/components/AuditEntryCard", () => ({
   AuditEntryCard: ({ entry }: any) =>
-    React.createElement("div", { className: "mock-audit" }, `audit:${entry.id}`),
-}));
-
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-let effectCleanups: Array<() => void> = [];
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 20) callIdx = 0;
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      const cleanup = fn();
-      if (typeof cleanup === "function") effectCleanups.push(cleanup);
-    },
-  };
-});
-
-const capturedButtonClicks: any[] = [];
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedButtonClicks.push(props.onClick);
-    return React.createElement(
-      "button",
-      { onClick: props.onClick, disabled: props.disabled },
-      props.children,
-    );
-  },
+    React.createElement("div", { "data-testid": "mock-audit" }, `audit:${entry.id}`),
 }));
 
 describe("UserProfileDrawer component", () => {
@@ -83,6 +44,10 @@ describe("UserProfileDrawer component", () => {
   const onRevoke = vi.fn().mockResolvedValue(undefined);
   const onRevokeAll = vi.fn().mockResolvedValue(undefined);
   const onStatusChange = vi.fn().mockResolvedValue(undefined);
+
+  let listUserSessionsSpy: any;
+  let listAuditLogSpy: any;
+  let listUserMfaSpy: any;
 
   const getMockUser = (overrides: any = {}): any => ({
     id: "u1",
@@ -110,304 +75,284 @@ describe("UserProfileDrawer component", () => {
   });
 
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    effectCleanups = [];
-    capturedButtonClicks.length = 0;
+    vi.useRealTimers();
     onClose.mockClear();
     onRevoke.mockClear();
     onRevokeAll.mockClear();
     onStatusChange.mockClear();
     vi.mocked(toast.error).mockClear();
+
+    listUserSessionsSpy = vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
+    listAuditLogSpy = vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+    listUserMfaSpy = vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({ totp_enabled: false, webauthn_credentials: [] });
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
-
-  const runRender = (props?: any) => {
-    callIdx = 0;
-    capturedButtonClicks.length = 0;
-    return renderToString(
-      React.createElement(UserProfileDrawer, props ?? defaultProps()),
-    );
-  };
 
   // ── Profile section (default) ─────────────────────────────────────────────
 
   it("renders profile section with user name, email, and account info", () => {
-    const html = runRender();
-    expect(html).toContain("Alice");
-    expect(html).toContain("Smith");
-    expect(html).toContain("alice@example.com");
-    expect(html).toContain("accountInfo");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    expect(screen.getAllByText(/Alice/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Smith/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("alice@example.com").length).toBeGreaterThan(0);
+    expect(screen.getByText("accountInfo")).toBeDefined();
   });
 
   it("falls back to email as display name when first_name and last_name are empty", () => {
-    const html = runRender(defaultProps({ first_name: "", last_name: "" }));
-    expect(html).toContain("alice@example.com");
+    render(<UserProfileDrawer {...defaultProps({ first_name: "", last_name: "" })} />);
+    expect(screen.getAllByText("alice@example.com").length).toBeGreaterThan(0);
   });
 
   it("derives initials from email when no name parts are present", () => {
-    const html = runRender(defaultProps({ first_name: "", last_name: "" }));
-    expect(html).toContain("AL"); // email.slice(0,2).toUpperCase()
+    render(<UserProfileDrawer {...defaultProps({ first_name: "", last_name: "" })} />);
+    expect(screen.getByText("AL")).toBeDefined();
   });
 
   it("shows deactivate button when user is active and isSelf is false", () => {
-    runRender(defaultProps({ is_active: true }));
-    const hasDeactivateBtn = capturedButtonClicks.length > 0;
-    expect(hasDeactivateBtn).toBe(true);
+    render(<UserProfileDrawer {...defaultProps({ is_active: true })} />);
+    expect(screen.getByRole("button", { name: "deactivate" })).toBeDefined();
   });
 
   it("hides action buttons entirely when isSelf is true", () => {
-    runRender(defaultProps({}, { isSelf: true }));
-    // No status-change or revoke buttons should appear
-    expect(capturedButtonClicks.length).toBe(0);
+    render(<UserProfileDrawer {...defaultProps({}, { isSelf: true })} />);
+    expect(screen.queryByRole("button", { name: "deactivate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "activate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "revokeAllSessions" })).toBeNull();
   });
 
   it("hides revokeAll button in profile section when effectiveSessionCount is 0", () => {
-    // active_sessions=0 and sessionCount=null → effectiveSessionCount=0
-    runRender(defaultProps({ active_sessions: 0 }));
-    // Only 1 button: deactivate (no revokeAll)
-    expect(capturedButtonClicks.length).toBe(1);
+    render(<UserProfileDrawer {...defaultProps({ active_sessions: 0 })} />);
+    expect(screen.queryByRole("button", { name: "revokeAllSessions" })).toBeNull();
   });
 
   it("shows revokeAll button in profile section when effectiveSessionCount > 0", () => {
-    // active_sessions=2 and sessionCount=null → effectiveSessionCount=2
-    runRender(defaultProps({ active_sessions: 2 }));
-    expect(capturedButtonClicks.length).toBe(2);
+    render(<UserProfileDrawer {...defaultProps({ active_sessions: 2 })} />);
+    expect(screen.getByRole("button", { name: "revokeAllSessions" })).toBeDefined();
   });
 
-  it("uses sessionCount over active_sessions for effectiveSessionCount when non-null", () => {
-    stateStore[3] = 0; // sessionCount = 0 (overrides active_sessions=2)
-    runRender(defaultProps({ active_sessions: 2 }));
-    // effectiveSessionCount = 0 → revokeAll button hidden
-    expect(capturedButtonClicks.length).toBe(1); // only deactivate
+  it("uses sessionCount over active_sessions for effectiveSessionCount when non-null", async () => {
+    listUserSessionsSpy.mockResolvedValue([]);
+
+    render(<UserProfileDrawer {...defaultProps({ active_sessions: 2 })} />);
+    expect(screen.getByRole("button", { name: "revokeAllSessions" })).toBeDefined();
+
+    fireEvent.click(screen.getByText("drawerSessions"));
+    await waitFor(() => {
+      expect(screen.getByText("noSessionsFound")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText("drawerProfile"));
+    expect(screen.queryByRole("button", { name: "revokeAllSessions" })).toBeNull();
   });
 
   it("profile section shows avatar with initials when has_avatar is false", () => {
-    const html = runRender();
-    expect(html).toContain("AS"); // Alice Smith initials
+    render(<UserProfileDrawer {...defaultProps()} />);
+    expect(screen.getByText("AS")).toBeDefined();
   });
 
   it("renders active chip for active user", () => {
-    const html = runRender();
-    expect(html).toContain("active");
+    render(<UserProfileDrawer {...defaultProps({ is_active: true })} />);
+    expect(screen.getByText("active")).toBeDefined();
   });
 
   it("renders inactive chip for inactive user", () => {
-    const html = runRender(defaultProps({ is_active: false }));
-    expect(html).toContain("inactive");
+    render(<UserProfileDrawer {...defaultProps({ is_active: false })} />);
+    expect(screen.getByText("inactive")).toBeDefined();
   });
 
   it("renders role chips", () => {
-    const html = runRender();
-    expect(html).toContain("admin");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    expect(screen.getByText("admin")).toBeDefined();
   });
 
   it("calls onStatusChange when deactivate button is clicked", async () => {
-    runRender();
-    expect(capturedButtonClicks[0]).toBeDefined();
-    await capturedButtonClicks[0]();
+    render(<UserProfileDrawer {...defaultProps({ is_active: true })} />);
+    const deactivateBtn = screen.getByRole("button", { name: "deactivate" });
+    fireEvent.click(deactivateBtn);
     expect(onStatusChange).toHaveBeenCalledWith("u1", false);
   });
 
   it("calls onRevokeAll and resets sessionCount when revokeAll is clicked in profile", async () => {
-    stateStore[3] = 3; // sessionCount = 3
-    runRender(defaultProps({ active_sessions: 2 }));
-    expect(capturedButtonClicks[1]).toBeDefined(); // revokeAll button
-    await capturedButtonClicks[1]();
+    render(<UserProfileDrawer {...defaultProps({ active_sessions: 2 })} />);
+    const revokeAllBtn = screen.getByRole("button", { name: "revokeAllSessions" });
+    fireEvent.click(revokeAllBtn);
+
     expect(onRevokeAll).toHaveBeenCalledWith("u1");
-    expect(stateStore[3]).toBe(0);  // sessionCount reset
-    expect(stateStore[1]).toEqual([]); // sessions cleared
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "revokeAllSessions" })).toBeNull();
+    });
   });
 
   it("renders four section nav tabs", () => {
-    const html = runRender();
-    expect(html).toContain("drawerProfile");
-    expect(html).toContain("drawerSessions");
-    expect(html).toContain("drawerAudit");
-    expect(html).toContain("drawerMfa");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    expect(screen.getByText("drawerProfile")).toBeDefined();
+    expect(screen.getByText("drawerSessions")).toBeDefined();
+    expect(screen.getByText("drawerAudit")).toBeDefined();
+    expect(screen.getByText("drawerMfa")).toBeDefined();
   });
 
   // ── Sessions section ──────────────────────────────────────────────────────
 
   it("shows LinearProgress while sessions are loading", () => {
-    stateStore[0] = "sessions"; // jump to sessions section
-    vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
+    listUserSessionsSpy.mockReturnValue(new Promise(() => {}));
 
-    runRender(); // effect fires → sessionsLoading becomes true
-    const html = runRender(); // second render sees sessionsLoading = true
-    expect(html).toContain("LinearProgress");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerSessions"));
+    expect(screen.getByRole("progressbar")).toBeDefined();
   });
 
   it("shows noSessionsFound when sessions load empty", async () => {
-    stateStore[0] = "sessions";
-    vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
+    listUserSessionsSpy.mockResolvedValue([]);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("noSessionsFound");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerSessions"));
+
+    await waitFor(() => {
+      expect(screen.getByText("noSessionsFound")).toBeDefined();
+    });
   });
 
   it("renders loaded sessions as SessionCard mocks", async () => {
-    stateStore[0] = "sessions";
-    vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([
+    listUserSessionsSpy.mockResolvedValue([
       { id: "s1", is_current: true, ip_address: "1.1.1.1", user_agent: "Mozilla", created_at: "2026-06-01T00:00:00Z", last_used_at: null, device_info: null },
       { id: "s2", is_current: false, ip_address: "2.2.2.2", user_agent: "Safari", created_at: "2026-06-02T00:00:00Z", last_used_at: null, device_info: null },
-    ] as any[]);
-
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("session:s1");
-    expect(html).toContain("session:s2");
-  });
-
-  it("updates sessionCount after sessions load", async () => {
-    stateStore[0] = "sessions";
-    vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([
-      { id: "s1" } as any,
-      { id: "s2" } as any,
     ]);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-    expect(stateStore[3]).toBe(2); // sessionCount set to data.length
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerSessions"));
+
+    await waitFor(() => {
+      expect(screen.getByText("session:s1")).toBeDefined();
+      expect(screen.getByText("session:s2")).toBeDefined();
+    });
   });
 
   it("does not re-fetch sessions when already loaded", async () => {
-    stateStore[0] = "sessions";
-    stateStore[1] = [{ id: "s1" }]; // sessions already loaded
-    const spy = vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
+    listUserSessionsSpy.mockResolvedValue([{ id: "s1" } as any]);
 
-    runRender();
-    expect(spy).not.toHaveBeenCalled();
+    render(<UserProfileDrawer {...defaultProps()} />);
+
+    fireEvent.click(screen.getByText("drawerSessions"));
+    await waitFor(() => {
+      expect(screen.getByText("session:s1")).toBeDefined();
+    });
+    expect(listUserSessionsSpy).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByText("drawerProfile"));
+    fireEvent.click(screen.getByText("drawerSessions"));
+
+    expect(listUserSessionsSpy).toHaveBeenCalledOnce();
   });
 
   it("shows empty sessions on API error", async () => {
-    stateStore[0] = "sessions";
-    vi.spyOn(api.admin, "listUserSessions").mockRejectedValue(new Error("network error"));
+    listUserSessionsSpy.mockRejectedValue(new Error("network error"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("noSessionsFound");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerSessions"));
+
+    await waitFor(() => {
+      expect(screen.getByText("noSessionsFound")).toBeDefined();
+    });
   });
 
   // ── Audit section ─────────────────────────────────────────────────────────
 
   it("shows LinearProgress while audit is loading", () => {
-    stateStore[0] = "audit";
-    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+    listAuditLogSpy.mockReturnValue(new Promise(() => {}));
 
-    runRender(); // effect fires → auditLoading = true
-    const html = runRender();
-    expect(html).toContain("LinearProgress");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerAudit"));
+    expect(screen.getByRole("progressbar")).toBeDefined();
   });
 
   it("shows noAuditEntries when audit loads empty", async () => {
-    stateStore[0] = "audit";
-    vi.spyOn(api, "listAuditLog").mockResolvedValue({ data: [], total: 0 });
+    listAuditLogSpy.mockResolvedValue({ data: [], total: 0 });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("noAuditEntries");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerAudit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("noAuditEntries")).toBeDefined();
+    });
   });
 
   it("renders loaded audit entries as AuditEntryCard mocks", async () => {
-    stateStore[0] = "audit";
-    vi.spyOn(api, "listAuditLog").mockResolvedValue({
+    listAuditLogSpy.mockResolvedValue({
       data: [
         { id: "a1", action: "auth.login", created_at: "2026-06-01T00:00:00Z" },
         { id: "a2", action: "users.update", created_at: "2026-06-02T00:00:00Z" },
-      ] as any[],
+      ],
       total: 2,
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("audit:a1");
-    expect(html).toContain("audit:a2");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerAudit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("audit:a1")).toBeDefined();
+      expect(screen.getByText("audit:a2")).toBeDefined();
+    });
   });
 
   it("shows empty audit on API error", async () => {
-    stateStore[0] = "audit";
-    vi.spyOn(api, "listAuditLog").mockRejectedValue(new Error("error"));
+    listAuditLogSpy.mockRejectedValue(new Error("error"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("noAuditEntries");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerAudit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("noAuditEntries")).toBeDefined();
+    });
   });
 
   // ── MFA section ───────────────────────────────────────────────────────────
 
   it("shows LinearProgress while MFA is loading", () => {
-    stateStore[0] = "mfa";
-    vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({ totp_enabled: false, webauthn_credentials: [] });
+    listUserMfaSpy.mockReturnValue(new Promise(() => {}));
 
-    runRender(); // effect fires → mfaLoading = true
-    const html = runRender();
-    expect(html).toContain("LinearProgress");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+    expect(screen.getByRole("progressbar")).toBeDefined();
   });
 
   it("renders TOTP enabled state with success chip", async () => {
-    stateStore[0] = "mfa";
-    vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({
+    listUserMfaSpy.mockResolvedValue({
       totp_enabled: true,
       webauthn_credentials: [],
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("totpLabel");
-    expect(html).toContain("totpEnabled");
-    expect(html).toContain("enabled");
-    expect(html).toContain("noPasskeys");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    await waitFor(() => {
+      expect(screen.getByText("totpLabel")).toBeDefined();
+      expect(screen.getByText("totpEnabled")).toBeDefined();
+      expect(screen.getByText("enabled")).toBeDefined();
+      expect(screen.getByText("noPasskeys")).toBeDefined();
+    });
   });
 
   it("renders TOTP disabled state with default chip", async () => {
-    stateStore[0] = "mfa";
-    vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({
+    listUserMfaSpy.mockResolvedValue({
       totp_enabled: false,
       webauthn_credentials: [],
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("totpDisabled");
-    expect(html).toContain("disabled");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    await waitFor(() => {
+      expect(screen.getByText("totpDisabled")).toBeDefined();
+      expect(screen.getByText("disabled")).toBeDefined();
+    });
   });
 
   it("renders passkeys list with name, sign_count, and created_at", async () => {
-    stateStore[0] = "mfa";
-    vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({
+    listUserMfaSpy.mockResolvedValue({
       totp_enabled: false,
       webauthn_credentials: [
         { id: "k1", name: "My YubiKey", sign_count: 12, created_at: "2026-01-01T00:00:00Z", last_used_at: "2026-06-01T00:00:00Z" },
@@ -415,36 +360,43 @@ describe("UserProfileDrawer component", () => {
       ],
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("My YubiKey");
-    expect(html).toContain("12");
-    expect(html).toContain("lastUsed");
-    expect(html).toContain("unnamedPasskey"); // fallback for empty name
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/My YubiKey/)).toBeDefined();
+      expect(screen.getByText(/12/)).toBeDefined();
+      expect(screen.getByText(/lastUsed/)).toBeDefined();
+      expect(screen.getByText(/unnamedPasskey/)).toBeDefined();
+    });
   });
 
   it("uses default MFA info on API error", async () => {
-    stateStore[0] = "mfa";
-    vi.spyOn(api.admin, "listUserMfa").mockRejectedValue(new Error("mfa error"));
+    listUserMfaSpy.mockRejectedValue(new Error("mfa error"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("totpDisabled");
-    expect(html).toContain("noPasskeys");
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    await waitFor(() => {
+      expect(screen.getByText("totpDisabled")).toBeDefined();
+      expect(screen.getByText("noPasskeys")).toBeDefined();
+    });
   });
 
   it("does not re-fetch MFA when already loaded", async () => {
-    stateStore[0] = "mfa";
-    stateStore[6] = { totp_enabled: true, webauthn_credentials: [] }; // mfa already set
-    const spy = vi.spyOn(api.admin, "listUserMfa").mockResolvedValue({ totp_enabled: false, webauthn_credentials: [] });
+    listUserMfaSpy.mockResolvedValue({ totp_enabled: true, webauthn_credentials: [] });
 
-    runRender();
-    expect(spy).not.toHaveBeenCalled();
+    render(<UserProfileDrawer {...defaultProps()} />);
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    await waitFor(() => {
+      expect(screen.getByText("totpEnabled")).toBeDefined();
+    });
+    expect(listUserMfaSpy).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByText("drawerProfile"));
+    fireEvent.click(screen.getByText("drawerMfa"));
+
+    expect(listUserMfaSpy).toHaveBeenCalledOnce();
   });
 });

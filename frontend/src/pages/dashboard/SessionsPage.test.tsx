@@ -1,54 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import SessionsPage from "./SessionsPage";
 import { api, ApiError, type Session } from "@/lib/api";
-import { renderToString } from "react-dom/server";
 import { toast } from "sonner";
-
-// State and Ref Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-let refStore: any = {};
-let refIdx = 0;
-let effectCleanups: Array<() => void> = [];
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 120) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useRef: (init: any) => {
-      const idx = refIdx;
-      refIdx++;
-      if (!(idx in refStore)) {
-        refStore[idx] = { current: init };
-      }
-      return refStore[idx];
-    },
-    useEffect: (fn: any) => {
-      const cleanup = fn();
-      if (typeof cleanup === "function") effectCleanups.push(cleanup);
-    },
-  };
-});
 
 const navigateSpy = vi.fn();
 vi.mock("react-router-dom", () => ({
@@ -71,7 +26,6 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-const capturedButtonClicks: any[] = [];
 let capturedOnFilterChange: any = null;
 let capturedOnSortChange: any = null;
 
@@ -89,77 +43,41 @@ vi.mock("@mui/x-data-grid", () => ({
         props.getRowId?.(row);
         for (const col of props.columns) {
           if (col.renderCell) {
-            renderedCells.push(col.renderCell({ row }));
+            renderedCells.push(
+              React.createElement("div", { key: `${row.id}-${col.field}`, "data-testid": `cell-${row.id}-${col.field}` }, col.renderCell({ row }))
+            );
           }
         }
       }
     }
-    return React.createElement("div", null, ...renderedCells);
+    return React.createElement("div", { "data-testid": "mock-datagrid" }, ...renderedCells);
   },
 }));
 
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) {
-      capturedButtonClicks.push(props.onClick);
-    }
-    return React.createElement("button", { onClick: props.onClick, disabled: props.disabled }, props.children);
-  }
-}));
-
 describe("SessionsPage page component", () => {
-  let confirmMock = vi.fn().mockReturnValue(true);
-  let alertMock = vi.fn();
-  const intervalCallbacks: any[] = [];
-
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    refStore = {};
-    callIdx = 0;
-    refIdx = 0;
-    effectCleanups = [];
-    capturedButtonClicks.length = 0;
-    capturedOnFilterChange = null;
-    capturedOnSortChange = null;
-    confirmMock = vi.fn().mockReturnValue(true);
-    alertMock = vi.fn();
+    vi.useRealTimers();
     navigateSpy.mockReset();
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.warning).mockClear();
     vi.mocked(toast.info).mockClear();
     vi.mocked(toast.error).mockClear();
-    intervalCallbacks.length = 0;
+    capturedOnFilterChange = null;
+    capturedOnSortChange = null;
 
-    vi.stubGlobal("document", {
-      visibilityState: "visible",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    vi.stubGlobal("window", {
-      setInterval: vi.fn((fn: any, delay: number) => {
-        intervalCallbacks.push(fn);
-        return 123;
-      }),
-      clearInterval: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    vi.stubGlobal("confirm", confirmMock);
-    vi.stubGlobal("alert", alertMock);
+    vi.spyOn(window, "setInterval");
+    vi.spyOn(window, "clearInterval");
+    vi.spyOn(window, "addEventListener");
+    vi.spyOn(window, "removeEventListener");
+    vi.spyOn(window, "dispatchEvent");
+    vi.spyOn(window, "confirm");
+    vi.spyOn(window, "alert");
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
-
-  const runRender = () => {
-    callIdx = 0;
-    refIdx = 0;
-    capturedButtonClicks.length = 0;
-    return renderToString(React.createElement(SessionsPage));
-  };
 
   const getSessionsMockData = (): Session[] => [
     {
@@ -319,31 +237,25 @@ describe("SessionsPage page component", () => {
 
   it("renders page, handles device list and detects session changes", async () => {
     let mockData = getSessionsMockData();
-    const listSpy = vi.spyOn(api, "listSessions").mockImplementation(async () => {
-      return mockData;
+    const listSpy = vi.spyOn(api, "listSessions").mockImplementation(async () => mockData);
+
+    render(<SessionsPage />);
+
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalled();
     });
-    if (!window.dispatchEvent) {
-      Object.defineProperty(window, "dispatchEvent", { value: vi.fn(), writable: true });
-    }
-    const dispatchEventSpy = vi.spyOn(window, "dispatchEvent");
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Extract the callback registered to setInterval
+    const inspectCallback = vi.mocked(window.setInterval).mock.calls.find(call =>
+      call[0].toString().includes("inspectSessions")
+    )?.[0] as () => void;
+    expect(inspectCallback).toBeDefined();
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(listSpy).toHaveBeenCalled();
-
-    // Now test interval triggers and notification:
     // 1. Add session s3
     mockData = [
       ...getSessionsMockData(),
       {
-        id: "s3",
+        id: "s3_new",
         is_current: false,
         ip_address: "3.3.3.3",
         user_agent: "curl/7.68.0",
@@ -353,98 +265,74 @@ describe("SessionsPage page component", () => {
       }
     ];
 
-    const inspectCallback = intervalCallbacks.find(fn => fn.toString().includes("inspectSessions"));
-    expect(inspectCallback).toBeDefined();
+    inspectCallback();
+    await waitFor(() => {
+      expect(window.dispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:new_device" })
+      );
+    });
 
-    inspectCallback(); // trigger inspectSessions(true)
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(dispatchEventSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "session:new_device" }),
-    );
-
-    // 2. Remove session s3
+    // 2. Remove session s3_new
     mockData = getSessionsMockData();
-    inspectCallback(); // trigger inspectSessions(true)
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(dispatchEventSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "session:ended" }),
-    );
+    inspectCallback();
+    await waitFor(() => {
+      expect(window.dispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session:ended" })
+      );
+    });
   });
 
   it("handles revoking current session", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     const logoutSpy = vi.spyOn(api, "logout").mockResolvedValue({} as any);
+    vi.mocked(window.confirm).mockReturnValue(true);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    expect(capturedButtonClicks[1]).toBeDefined();
-    await capturedButtonClicks[1]();
+    const currentRevokeBtn = await screen.findByRole("button", { name: "signOutThisDevice" });
+    fireEvent.click(currentRevokeBtn);
 
-    expect(logoutSpy).toHaveBeenCalled();
-    expect(navigateSpy).toHaveBeenCalledWith("/auth/login");
+    await waitFor(() => {
+      expect(logoutSpy).toHaveBeenCalled();
+      expect(navigateSpy).toHaveBeenCalledWith("/auth/login");
+    });
   });
 
   it("handles revoking other session", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     const revokeSpy = vi.spyOn(api, "revokeSession").mockResolvedValue({} as any);
+    vi.mocked(window.confirm).mockReturnValue(true);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    expect(capturedButtonClicks[2]).toBeDefined();
-    await capturedButtonClicks[2]();
+    const otherRevokeBtns = await screen.findAllByRole("button", { name: "signOut" });
+    fireEvent.click(otherRevokeBtns[0]);
 
     expect(revokeSpy).toHaveBeenCalledWith("s2");
   });
 
   it("cancels revocation if confirm is rejected", async () => {
-    confirmMock.mockReturnValue(false);
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     const logoutSpy = vi.spyOn(api, "logout");
+    vi.mocked(window.confirm).mockReturnValue(false);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    await capturedButtonClicks[1]();
+    const currentRevokeBtn = await screen.findByRole("button", { name: "signOutThisDevice" });
+    fireEvent.click(currentRevokeBtn);
+
     expect(logoutSpy).not.toHaveBeenCalled();
   });
 
   it("cancels revoking all other sessions when confirm is rejected", async () => {
-    confirmMock.mockReturnValue(false);
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     const revokeOthersSpy = vi.spyOn(api, "revokeOtherSessions").mockResolvedValue({} as any);
+    vi.mocked(window.confirm).mockReturnValue(false);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    await capturedButtonClicks[0]();
+    const revokeOthersBtn = await screen.findByRole("button", { name: "signOutOthers" });
+    fireEvent.click(revokeOthersBtn);
 
     expect(revokeOthersSpy).not.toHaveBeenCalled();
   });
@@ -452,29 +340,27 @@ describe("SessionsPage page component", () => {
   it("handles API error during session revocation", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     vi.spyOn(api, "revokeSession").mockRejectedValue(new Error("API Error"));
+    vi.mocked(window.confirm).mockReturnValue(true);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    await capturedButtonClicks[2]();
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const otherRevokeBtns = await screen.findAllByRole("button", { name: "signOut" });
+    fireEvent.click(otherRevokeBtns[0]);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles revoking all other sessions", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     const revokeOthersSpy = vi.spyOn(api, "revokeOtherSessions").mockResolvedValue({} as any);
+    vi.mocked(window.confirm).mockReturnValue(true);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    expect(capturedButtonClicks[0]).toBeDefined();
-    await capturedButtonClicks[0]();
+    const revokeOthersBtn = await screen.findByRole("button", { name: "signOutOthers" });
+    fireEvent.click(revokeOthersBtn);
 
     expect(revokeOthersSpy).toHaveBeenCalled();
   });
@@ -482,37 +368,34 @@ describe("SessionsPage page component", () => {
   it("handles API error during revoking all other sessions", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
     vi.spyOn(api, "revokeOtherSessions").mockRejectedValue(new Error("API Error"));
+    vi.mocked(window.confirm).mockReturnValue(true);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    await capturedButtonClicks[0]();
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const revokeOthersBtn = await screen.findByRole("button", { name: "signOutOthers" });
+    fireEvent.click(revokeOthersBtn);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles API authentication error by redirecting to login page", async () => {
     vi.spyOn(api, "listSessions").mockRejectedValue(new ApiError("missing_token"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<SessionsPage />);
 
-    expect(navigateSpy).toHaveBeenCalledWith("/auth/login", { replace: true });
+    await waitFor(() => {
+      expect(navigateSpy).toHaveBeenCalledWith("/auth/login", { replace: true });
+    });
   });
 
   it("ignores non-auth session inspection errors", async () => {
     vi.spyOn(api, "listSessions").mockRejectedValue(new Error("network down"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<SessionsPage />);
 
+    await Promise.resolve();
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 
@@ -524,104 +407,87 @@ describe("SessionsPage page component", () => {
       }),
     );
 
-    runRender();
+    const { unmount } = render(<SessionsPage />);
     expect(listSpy).toHaveBeenCalledTimes(1);
 
-    const inspectCallback = intervalCallbacks.find(fn => fn.toString().includes("inspectSessions"));
+    const inspectCallback = vi.mocked(window.setInterval).mock.calls.find(call =>
+      call[0].toString().includes("inspectSessions")
+    )?.[0] as () => void;
     expect(inspectCallback).toBeDefined();
+
     inspectCallback();
     inspectCallback();
     expect(listSpy).toHaveBeenCalledTimes(1);
 
     resolveSessions(getSessionsMockData());
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalledTimes(1);
+    });
 
-    expect(effectCleanups[0]).toBeDefined();
-    effectCleanups[0]();
+    unmount();
     expect(window.removeEventListener).toHaveBeenCalledWith("sessions:changed", expect.any(Function));
-    expect(window.clearInterval).toHaveBeenCalledWith(123);
+    expect(window.clearInterval).toHaveBeenCalled();
   });
 
   it("refreshes from session change events and ignores unchanged notification checks", async () => {
     const listSpy = vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<SessionsPage />);
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalled();
+    });
 
     const onChanged = vi.mocked(window.addEventListener).mock.calls.find(([event]) => event === "sessions:changed")?.[1] as () => void;
     expect(onChanged).toBeDefined();
     onChanged();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
 
-    const inspectCallback = intervalCallbacks.find(fn => fn.toString().includes("inspectSessions"));
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalled();
+    });
+
+    const inspectCallback = vi.mocked(window.setInterval).mock.calls.find(call =>
+      call[0].toString().includes("inspectSessions")
+    )?.[0] as () => void;
     expect(inspectCallback).toBeDefined();
     inspectCallback();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
 
-    expect(listSpy).toHaveBeenCalled();
     expect(toast.warning).not.toHaveBeenCalled();
     expect(toast.info).not.toHaveBeenCalled();
   });
 
   it("handles filtering in list fetcher", async () => {
-    vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const listSpy = vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
+    render(<SessionsPage />);
 
-    expect(capturedOnFilterChange).toBeDefined();
+    await waitFor(() => {
+      expect(capturedOnFilterChange).toBeDefined();
+    });
+
     capturedOnFilterChange({ items: [{ field: "ip_address", value: "2.2.2.2" }] });
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalled();
+    });
   });
 
   it("handles empty filters and no sort key in the table fetcher", async () => {
-    vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const listSpy = vi.spyOn(api, "listSessions").mockResolvedValue(getSessionsMockData());
+    render(<SessionsPage />);
 
-    expect(capturedOnFilterChange).toBeDefined();
+    await waitFor(() => {
+      expect(capturedOnFilterChange).toBeDefined();
+    });
+
     capturedOnFilterChange({ items: [] });
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    await waitFor(() => {
+      expect(capturedOnSortChange).toBeDefined();
+    });
 
-    expect(capturedOnSortChange).toBeDefined();
     capturedOnSortChange([]);
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-
     capturedOnSortChange([{ field: "created_at", sort: "asc" }]);
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-
     capturedOnFilterChange({ items: [{ field: "missing_field", value: "missing" }] });
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalled();
+    });
   });
 });

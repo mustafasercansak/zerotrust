@@ -1,49 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent, waitFor, cleanup, within, waitForElementToBeRemoved } from "@testing-library/react";
 import UsersPage from "./UsersPage";
 import { api, ApiError } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { toast } from "sonner";
-import { renderToString } from "react-dom/server";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
-
-// State Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-let effectCleanups: Array<() => void> = [];
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 50) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      const cleanup = fn();
-      if (typeof cleanup === "function") effectCleanups.push(cleanup);
-    },
-  };
-});
 
 vi.mock("@/contexts/MeContext", () => ({
   useMeContext: vi.fn(),
@@ -51,80 +16,13 @@ vi.mock("@/contexts/MeContext", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: any) => {
+      if (options?.count !== undefined) return `${key}:${options.count}`;
+      return key;
+    },
+    tCommon: (key: string) => key,
     i18n: { language: "en" },
   }),
-}));
-
-const capturedButtonClicks: any[] = [];
-const capturedMenuItemClicks: any[] = [];
-const capturedChipClicks: any[] = [];
-const capturedIconButtonClicks: any[] = [];
-const capturedSubmits: any[] = [];
-const capturedInputs: any[] = [];
-const capturedDialogCloses: any[] = [];
-const capturedMenuCloses: any[] = [];
-const capturedMenuClicks: any[] = [];
-
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedButtonClicks.push(props.onClick);
-    return React.createElement("button", { onClick: props.onClick, type: props.type, disabled: props.disabled }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/MenuItem", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedMenuItemClicks.push(props.onClick);
-    return React.createElement("li", { onClick: props.onClick }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Chip", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedChipClicks.push(props.onClick);
-    return React.createElement("div", { onClick: props.onClick }, props.children ?? props.label);
-  }
-}));
-
-vi.mock("@mui/material/IconButton", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedIconButtonClicks.push(props.onClick);
-    return React.createElement("button", { onClick: props.onClick }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Box", () => ({
-  default: (props: any) => {
-    if (props.onSubmit) capturedSubmits.push(props.onSubmit);
-    return React.createElement("div", { onSubmit: props.onSubmit }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/TextField", () => ({
-  default: (props: any) => {
-    if (props.onChange) capturedInputs.push(props.onChange);
-    return React.createElement("input", { type: props.type, value: props.value, onChange: props.onChange });
-  }
-}));
-
-vi.mock("@mui/material/Dialog", () => ({
-  default: (props: any) => {
-    if (props.onClose) capturedDialogCloses.push(props.onClose);
-    return props.open ? React.createElement("div", null, props.children) : null;
-  }
-}));
-
-vi.mock("@mui/material/Menu", () => ({
-  default: (props: any) => {
-    if (props.onClose) capturedMenuCloses.push(props.onClose);
-    if (props.onClick) capturedMenuClicks.push(props.onClick);
-    return props.open ? React.createElement("div", null, props.children) : null;
-  }
-}));
-
-vi.mock("@mui/material/Tooltip", () => ({
-  default: (props: any) => props.children
 }));
 
 const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
@@ -148,14 +46,36 @@ vi.mock("@mui/x-data-grid", () => ({
   DataGrid: (props: any) => {
     const renderedRows = (props.rows ?? []).map((row: any) => {
       props.getRowId?.(row);
-      return React.createElement("div", { key: row.id, className: "mock-row" },
+      return React.createElement("div", { key: row.id, className: "mock-row", "data-testid": `row-${row.id}` },
         (props.columns ?? []).map((col: any) => {
           const cellContent = col.renderCell ? col.renderCell({ row }) : row[col.field];
           return React.createElement("div", { key: col.field, className: "mock-cell" }, cellContent);
         })
       );
     });
-    return React.createElement("div", { className: "mock-datagrid" }, renderedRows);
+    return React.createElement("div", { className: "mock-datagrid" },
+      React.createElement("button", {
+        "data-testid": "mock-select-rows-u1-u2",
+        onClick: () => props.onRowSelectionModelChange?.({ type: "include", ids: new Set(["u1", "u2"]) })
+      }),
+      React.createElement("button", {
+        "data-testid": "mock-select-rows-u2",
+        onClick: () => props.onRowSelectionModelChange?.({ type: "include", ids: new Set(["u2"]) })
+      }),
+      React.createElement("button", {
+        "data-testid": "mock-select-rows-u2-u3",
+        onClick: () => props.onRowSelectionModelChange?.({ type: "include", ids: new Set(["u2", "u3"]) })
+      }),
+      React.createElement("button", {
+        "data-testid": "mock-select-rows-u1",
+        onClick: () => props.onRowSelectionModelChange?.({ type: "include", ids: new Set(["u1"]) })
+      }),
+      React.createElement("button", {
+        "data-testid": "mock-select-rows-nonexistent",
+        onClick: () => props.onRowSelectionModelChange?.({ type: "include", ids: new Set(["nonexistent-id"]) })
+      }),
+      renderedRows
+    );
   },
   getGridStringOperators: () => [
     { value: "contains", label: "contains", getApplyFilterFn: () => null },
@@ -169,67 +89,27 @@ describe("UsersPage page component", () => {
   let alertMock = vi.fn();
 
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    effectCleanups = [];
-    capturedButtonClicks.length = 0;
-    capturedMenuItemClicks.length = 0;
-    capturedChipClicks.length = 0;
-    capturedIconButtonClicks.length = 0;
-    capturedSubmits.length = 0;
-    capturedInputs.length = 0;
-    capturedDialogCloses.length = 0;
-    capturedMenuCloses.length = 0;
-    capturedMenuClicks.length = 0;
     confirmMock = vi.fn().mockReturnValue(true);
     promptMock = vi.fn().mockReturnValue("123456");
     alertMock = vi.fn();
+    vi.stubGlobal("confirm", confirmMock);
+    vi.stubGlobal("prompt", promptMock);
+    vi.stubGlobal("alert", alertMock);
+
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
     mockRunWithStepUp.mockClear();
     mockRunWithStepUp.mockImplementation(async (action: any) => action());
 
-    vi.stubGlobal("document", {
-      visibilityState: "visible",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    vi.stubGlobal("window", {
-      setInterval: vi.fn((fn: any, delay: number) => {
-        fn();
-        return 123;
-      }),
-      clearInterval: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      confirm: confirmMock,
-      prompt: promptMock,
-      alert: alertMock,
-    });
-    vi.stubGlobal("confirm", confirmMock);
-    vi.stubGlobal("prompt", promptMock);
-    vi.stubGlobal("alert", alertMock);
+    vi.spyOn(window, "addEventListener");
+    vi.spyOn(window, "removeEventListener");
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
-
-  const runRender = () => {
-    callIdx = 0;
-    capturedButtonClicks.length = 0;
-    capturedMenuItemClicks.length = 0;
-    capturedChipClicks.length = 0;
-    capturedIconButtonClicks.length = 0;
-    capturedSubmits.length = 0;
-    capturedInputs.length = 0;
-    capturedDialogCloses.length = 0;
-    capturedMenuCloses.length = 0;
-    capturedMenuClicks.length = 0;
-    return renderToString(React.createElement(UsersPage));
-  };
 
   const getMockUsers = () => ({
     data: [
@@ -308,13 +188,12 @@ describe("UsersPage page component", () => {
     });
     const listSpy = vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    const html = runRender();
-    expect(html).toContain("createUser");
+    await waitFor(() => {
+      expect(screen.getByTestId("create-user-button")).toBeDefined();
+    });
+
     expect(getSettingsSpy).toHaveBeenCalled();
     expect(listSpy).toHaveBeenCalled();
   });
@@ -330,45 +209,32 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const createSpy = vi.spyOn(api.admin, "createUser").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // Trigger openCreate (createUser button is the first action button)
-    expect(capturedButtonClicks[0]).toBeDefined();
-    capturedButtonClicks[0]();
-    runRender(); // re-render to open dialog
+    const createBtn = await screen.findByTestId("create-user-button");
+    fireEvent.click(createBtn);
 
-    // Inputs:
-    // [0] -> email
-    // [1] -> firstName
-    // [2] -> lastName
-    // [3] -> password
-    expect(capturedInputs[0]).toBeDefined();
-    capturedInputs[0]({ target: { value: "new@example.com" } });
-    capturedInputs[1]({ target: { value: "Bob" } });
-    capturedInputs[2]({ target: { value: "Jones" } });
-    capturedInputs[3]({ target: { value: "password123" } });
+    await screen.findByText("createUserTitle");
 
-    // Roles Chip click: [0] -> admin, [1] -> user
-    expect(capturedChipClicks[0]).toBeDefined();
-    capturedChipClicks[0](); // toggle admin
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText(/firstName/i), { target: { value: "Bob" } });
+    fireEvent.change(screen.getByLabelText(/lastName/i), { target: { value: "Jones" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password123" } });
 
-    runRender();
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("admin"));
 
-    // Submit form
-    expect(capturedSubmits[0]).toBeDefined();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    const submitBtn = screen.getByRole("button", { name: "create" });
+    fireEvent.click(submitBtn);
 
-    expect(createSpy).toHaveBeenCalledWith({
-      email: "new@example.com",
-      first_name: "Bob",
-      last_name: "Jones",
-      password: "password123",
-      locale: "en",
-      roles: ["user", "admin"],
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        email: "new@example.com",
+        first_name: "Bob",
+        last_name: "Jones",
+        password: "password123",
+        locale: "en",
+        roles: ["user", "admin"],
+      });
     });
   });
 
@@ -381,37 +247,31 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     
-    // Mock user status change throwing MFA error first, then succeeding
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
     const statusSpy = vi.spyOn(api.admin, "setUserStatus")
       .mockRejectedValueOnce(new ApiError("mfa_required"))
       .mockResolvedValueOnce({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-
-    // capturedIconButtonClicks[1] is the RowActions icon button for row 2 (id u2, is_active: false)
-    expect(capturedIconButtonClicks[1]).toBeDefined();
-    capturedIconButtonClicks[1]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender(); // render menu
-
-    // MenuItem:
-    // [0] -> viewSessions for Bob (u2)
-    // [1] -> activate/deactivate for Bob (u2 is not self, status is inactive)
-    expect(capturedMenuItemClicks[1]).toBeDefined();
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
       try { return await action(); }
       catch { await api.mfaStepUp("123456"); return action(); }
     });
-    await capturedMenuItemClicks[1]();
 
-    expect(statusSpy).toHaveBeenCalledWith("u2", true);
-    expect(mockRunWithStepUp).toHaveBeenCalled();
-    expect(stepUpSpy).toHaveBeenCalledWith("123456");
-    expect(statusSpy).toHaveBeenCalledTimes(2);
+    render(<UsersPage />);
+
+    const rowEl = await screen.findByTestId("row-u2");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
+
+    const activateItem = await screen.findByText("activate");
+    fireEvent.click(activateItem);
+
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledWith("u2", true);
+      expect(mockRunWithStepUp).toHaveBeenCalled();
+      expect(stepUpSpy).toHaveBeenCalledWith("123456");
+      expect(statusSpy).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("handles revoking all sessions for user", async () => {
@@ -424,21 +284,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const revokeAllSpy = vi.spyOn(api.admin, "revokeAllUserSessions").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // capturedIconButtonClicks[0] is RowActions for Alice (u1)
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
+    const rowEl = await screen.findByTestId("row-u1");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
 
-    // MenuItem [1] -> revokeAllSessions for Alice
-    expect(capturedMenuItemClicks[1]).toBeDefined();
-    await capturedMenuItemClicks[1]();
+    const revokeAllItem = await screen.findByText("revokeAllSessions");
+    fireEvent.click(revokeAllItem);
 
-    expect(revokeAllSpy).toHaveBeenCalledWith("u1");
+    await waitFor(() => {
+      expect(revokeAllSpy).toHaveBeenCalledWith("u1");
+    });
   });
 
   it("handles sessions dialog with single session revocation and revoke all sessions", async () => {
@@ -450,12 +307,20 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     
-    // Mock user sessions
     const userSessions = [
       {
         id: "s1",
         is_current: true,
         ip_address: "127.0.0.1",
+        user_agent: "Mozilla/5.0",
+        created_at: "2026-06-04T12:00:00Z",
+        last_used_at: "2026-06-04T12:00:00Z",
+        device_info: { browser: "Chrome", browser_version: "120", os: "Windows", os_version: "10" },
+      },
+      {
+        id: "s2",
+        is_current: false,
+        ip_address: "127.0.0.2",
         user_agent: "Mozilla/5.0",
         created_at: "2026-06-04T12:00:00Z",
         last_used_at: "2026-06-04T12:00:00Z",
@@ -466,35 +331,30 @@ describe("UsersPage page component", () => {
     const revokeSessionSpy = vi.spyOn(api.admin, "revokeUserSession").mockResolvedValue({} as any);
     const revokeAllSpy = vi.spyOn(api.admin, "revokeAllUserSessions").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // Open sessions dialog: Alice (u1) -> RowActions
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
+    const rowEl = await screen.findByTestId("row-u1");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
 
-    // MenuItem [0] -> viewSessions
-    capturedMenuItemClicks[0]();
-    
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
 
-    // Inside Dialog, we have buttons:
-    // [1] -> revokeSession button in ListItem
-    // [2] -> revokeAllSessions in DialogActions
-    expect(capturedButtonClicks[1]).toBeDefined(); // revokeSession button
-    await capturedButtonClicks[1]();
-    expect(revokeSessionSpy).toHaveBeenCalledWith("u1", "s1");
+    await screen.findByText("IP: 127.0.0.1");
 
-    expect(capturedButtonClicks[2]).toBeDefined(); // revokeAllSessions button
-    await capturedButtonClicks[2]();
-    expect(revokeAllSpy).toHaveBeenCalledWith("u1");
+    const revokeSessBtn = screen.getAllByRole("button", { name: "revokeSession" })[0];
+    fireEvent.click(revokeSessBtn);
+
+    await waitFor(() => {
+      expect(revokeSessionSpy).toHaveBeenCalledWith("u1", "s1");
+    });
+
+    const revokeAllBtn = screen.getByRole("button", { name: "revokeAllSessions" });
+    fireEvent.click(revokeAllBtn);
+
+    await waitFor(() => {
+      expect(revokeAllSpy).toHaveBeenCalledWith("u1");
+    });
   });
 
   it("handles createUser API error", async () => {
@@ -503,20 +363,22 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "createUser").mockRejectedValue(new ApiError("already_exists"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedButtonClicks[0](); // open create
-    runRender();
+    const createBtn = await screen.findByTestId("create-user-button");
+    fireEvent.click(createBtn);
 
-    capturedInputs[0]({ target: { value: "new@example.com" } });
-    capturedInputs[3]({ target: { value: "password" } });
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    await screen.findByText("createUserTitle");
 
-    expect(toast.error).toHaveBeenCalledWith("errors.already_exists");
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+
+    const submitBtn = screen.getByRole("button", { name: "create" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.already_exists");
+    });
   });
 
   it("handles cancel/empty MFA prompt on step-up", async () => {
@@ -525,17 +387,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new ApiError("mfa_required"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[1]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[1](); // Bob status toggle (index 1 when Alice menu is closed)
+    const rowEl = await screen.findByTestId("row-u2");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
 
-    expect(mockRunWithStepUp).toHaveBeenCalled();
+    const activateItem = await screen.findByText("activate");
+    fireEvent.click(activateItem);
+
+    await waitFor(() => {
+      expect(mockRunWithStepUp).toHaveBeenCalled();
+    });
   });
 
   it("handles settings load failure and cleanup", async () => {
@@ -543,14 +406,12 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockRejectedValue(new Error("settings failed"));
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const { unmount } = render(<UsersPage />);
 
-    expect(effectCleanups[0]).toBeDefined();
-    effectCleanups[0]();
+    await screen.findByTestId("create-user-button");
+
+    unmount();
+
     expect(window.removeEventListener).toHaveBeenCalledWith("sessions:changed", expect.any(Function));
   });
 
@@ -569,35 +430,31 @@ describe("UsersPage page component", () => {
         last_used_at: null,
       }
     ]);
-    const revokeSessionSpy = vi.spyOn(api.admin, "revokeUserSession").mockRejectedValue(new Error("API Error"));
-    const revokeAllSpy = vi.spyOn(api.admin, "revokeAllUserSessions").mockRejectedValue(new Error("API Error"));
+    vi.spyOn(api.admin, "revokeUserSession").mockRejectedValue(new Error("API Error"));
+    vi.spyOn(api.admin, "revokeAllUserSessions").mockRejectedValue(new Error("API Error"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0](); // viewSessions
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const rowEl = await screen.findByTestId("row-u1");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
 
-    // Revoke single
-    try {
-      await capturedButtonClicks[1]();
-    } catch (e) {}
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
 
-    // Revoke all
-    try {
-      await capturedButtonClicks[2]();
-    } catch (e) {}
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    await screen.findByText("IP: 1.1.1.1");
+
+    const revokeSessBtn = screen.getByRole("button", { name: "revokeSession" });
+    fireEvent.click(revokeSessBtn);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+
+    const revokeAllBtn = screen.getByRole("button", { name: "revokeAllSessions" });
+    fireEvent.click(revokeAllBtn);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("does not load admin data when the viewer is not an admin", async () => {
@@ -605,11 +462,9 @@ describe("UsersPage page component", () => {
     const getSettingsSpy = vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     const listSpy = vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    const html = runRender();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    expect(html).toContain("accessDenied");
+    await screen.findByText("accessDenied");
     expect(getSettingsSpy).not.toHaveBeenCalled();
     expect(listSpy).not.toHaveBeenCalled();
   });
@@ -620,15 +475,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockReturnValue(new Promise((resolve) => { resolveSettings = resolve; }));
     const listSpy = vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    const sessionsChanged = vi.mocked(window.addEventListener).mock.calls.find(([event]) => event === "sessions:changed")?.[1] as () => void;
-    expect(sessionsChanged).toBeDefined();
+    const { unmount } = render(<UsersPage />);
+
+    const addEventListenerSpy = vi.mocked(window.addEventListener);
+    const call = addEventListenerSpy.mock.calls.find(([event]) => event === "sessions:changed");
+    expect(call).toBeDefined();
+    const sessionsChanged = call![1] as () => void;
+
     sessionsChanged();
-    effectCleanups[0]();
+
+    unmount();
     resolveSettings({ max_sessions_per_user: "9" });
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+
     await Promise.resolve();
     await Promise.resolve();
 
@@ -641,19 +499,19 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[1]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
+    const rowEl = await screen.findByTestId("row-u2");
+    const actionsBtn = within(rowEl).getByRole("button");
+    fireEvent.click(actionsBtn);
 
-    expect(capturedMenuCloses[0]).toBeDefined();
-    capturedMenuCloses[0]();
-    expect(capturedMenuClicks[0]).toBeDefined();
-    capturedMenuClicks[0]();
+    const activateItem = await screen.findByText("activate");
+
+    fireEvent.keyDown(activateItem, { key: "Escape", code: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByText("activate")).toBeNull();
+    });
   });
 
   it("handles deactivate cancellation and generic status errors", async () => {
@@ -662,24 +520,25 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const statusSpy = vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new Error("status failed"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
     confirmMock.mockReturnValueOnce(false);
-    capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[2]();
+    const rowEl3 = await screen.findByTestId("row-u3");
+    fireEvent.click(within(rowEl3).getByRole("button"));
+    const deactivateItem = await screen.findByText("deactivate");
+    fireEvent.click(deactivateItem);
+
     expect(statusSpy).not.toHaveBeenCalled();
 
     confirmMock.mockReturnValueOnce(true);
-    capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[2]();
-    expect(statusSpy).toHaveBeenCalledWith("u3", false);
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    fireEvent.click(within(rowEl3).getByRole("button"));
+    const deactivateItem2 = await screen.findByText("deactivate");
+    fireEvent.click(deactivateItem2);
+
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledWith("u3", false);
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles revoke-all cancellation, MFA retry cancellation, and generic errors", async () => {
@@ -690,27 +549,33 @@ describe("UsersPage page component", () => {
       .mockRejectedValueOnce(new ApiError("mfa_required"))
       .mockRejectedValueOnce(new Error("revoke failed"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
     confirmMock.mockReturnValueOnce(false);
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[1]();
+    const rowEl1 = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const revokeAllItem = await screen.findByText("revokeAllSessions");
+    fireEvent.click(revokeAllItem);
+
     expect(revokeAllSpy).not.toHaveBeenCalled();
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[1]();
-    expect(revokeAllSpy).toHaveBeenCalledTimes(1);
+    confirmMock.mockReturnValueOnce(true);
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const revokeAllItem2 = await screen.findByText("revokeAllSessions");
+    fireEvent.click(revokeAllItem2);
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[1]();
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    await waitFor(() => {
+      expect(revokeAllSpy).toHaveBeenCalledTimes(1);
+    });
+
+    confirmMock.mockReturnValueOnce(true);
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const revokeAllItem3 = await screen.findByText("revokeAllSessions");
+    fireEvent.click(revokeAllItem3);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles create dialog cancel, close, role removal, and non-ApiError create failures", async () => {
@@ -719,33 +584,34 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const createSpy = vi.spyOn(api.admin, "createUser").mockRejectedValue(new Error("create failed"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedButtonClicks[0]();
-    runRender();
-    expect(capturedDialogCloses[0]).toBeDefined();
-    capturedDialogCloses[0]();
-    runRender();
+    const createBtn = await screen.findByTestId("create-user-button");
+    fireEvent.click(createBtn);
+    const dialogTitle = await screen.findByText("createUserTitle");
+    fireEvent.keyDown(dialogTitle, { key: "Escape" });
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
 
-    capturedButtonClicks[0]();
-    runRender();
-    expect(capturedButtonClicks[1]).toBeDefined();
-    capturedButtonClicks[1]();
-    runRender();
+    fireEvent.click(createBtn);
+    const cancelBtn = await screen.findByRole("button", { name: "cancel" });
+    fireEvent.click(cancelBtn);
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
 
-    capturedButtonClicks[0]();
-    runRender();
-    capturedInputs[0]({ target: { value: "roleless@example.com" } });
-    capturedInputs[3]({ target: { value: "password" } });
-    capturedChipClicks[1]();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    fireEvent.click(createBtn);
+    await screen.findByText("createUserTitle");
 
-    expect(createSpy).toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "roleless@example.com" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("user"));
+
+    const submitBtn = screen.getByRole("button", { name: "create" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("renders empty sessions dialogs", async () => {
@@ -754,23 +620,22 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const listSessionsSpy = vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0]();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(runRender()).toContain("noSessionsFound");
-    const closeEmptyDialog = capturedDialogCloses[capturedDialogCloses.length - 1];
-    expect(closeEmptyDialog).toBeDefined();
-    closeEmptyDialog();
+    const rowEl = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl).getByRole("button"));
+
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
+
+    await screen.findByText("noSessionsFound");
+
+    const closeBtn = screen.getByRole("button", { name: "cancel" });
+    fireEvent.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText("noSessionsFound")).toBeNull();
+    });
     expect(listSessionsSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -780,20 +645,15 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const listSessionsSpy = vi.spyOn(api.admin, "listUserSessions").mockRejectedValue(new Error("sessions failed"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0]();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(runRender()).toContain("errors.internal_error");
+    const rowEl = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl).getByRole("button"));
+
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
+
+    await screen.findByText("errors.internal_error");
     expect(listSessionsSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -824,25 +684,26 @@ describe("UsersPage page component", () => {
     const revokeSessionSpy = vi.spyOn(api.admin, "revokeUserSession").mockRejectedValue(new ApiError("mfa_required"));
     const revokeAllSpy = vi.spyOn(api.admin, "revokeAllUserSessions").mockRejectedValue(new ApiError("mfa_required"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0]();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("Linux x64");
-    expect(html).toContain("Firefox");
+    const rowEl = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl).getByRole("button"));
 
-    await capturedButtonClicks[1]();
-    await capturedButtonClicks[3]();
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
+
+    await screen.findByText("Linux x64");
+    expect(screen.getByText(/Firefox/)).toBeDefined();
+
+    const revokeSessBtn = screen.getAllByRole("button", { name: "revokeSession" })[0];
+    try {
+      await fireEvent.click(revokeSessBtn);
+    } catch (e) {}
+
+    const revokeAllBtn = screen.getByRole("button", { name: "revokeAllSessions" });
+    try {
+      await fireEvent.click(revokeAllBtn);
+    } catch (e) {}
 
     expect(revokeSessionSpy).toHaveBeenCalledWith("u1", "s1");
     expect(revokeAllSpy).toHaveBeenCalledWith("u1");
@@ -852,68 +713,71 @@ describe("UsersPage page component", () => {
   it("evaluates loading states, edge case fallback branches, and non-MFA ApiErrors", async () => {
     vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
     
-    // 1. Invalid max_sessions_per_user to hit the false branch in getSettings parsing
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "invalid" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     
-    // 2. Mock createUser to freeze on creating = true to hit the creating ? "creating" : "create" branch
     let resolveCreate: any;
-    vi.spyOn(api.admin, "createUser").mockReturnValue(new Promise((res) => { resolveCreate = res; }));
+    const createPromise = new Promise((res) => { resolveCreate = res; });
+    vi.spyOn(api.admin, "createUser").mockReturnValue(createPromise as any);
     
-    // 3. Mock setUserStatus to throw a non-MFA ApiError to hit the err.message !== "mfa_required" branch in runWithStepUp
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new ApiError("forbidden"));
 
-    // 4. Mock sessions for revocation testing with non-MFA ApiError
     vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([{ id: "s1", is_current: false } as any]);
     vi.spyOn(api.admin, "revokeUserSession").mockRejectedValue(new ApiError("forbidden"));
     vi.spyOn(api.admin, "revokeAllUserSessions").mockRejectedValue(new ApiError("forbidden"));
 
-    runRender();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // Open create dialog
-    capturedButtonClicks[0]();
-    runRender();
+    const createBtn = await screen.findByTestId("create-user-button");
+    fireEvent.click(createBtn);
+
+    await screen.findByText("createUserTitle");
+
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "test@example.com" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "pass" } });
+
+    const submitBtn = screen.getByRole("button", { name: "create" });
+    fireEvent.click(submitBtn);
+
+    await screen.findByText("creating");
     
-    // Fill create form and submit (will block)
-    capturedInputs[0]({ target: { value: "test@example.com" } });
-    capturedInputs[3]({ target: { value: "pass" } });
-    capturedSubmits[0]({ preventDefault: vi.fn() });
-    
-    // Render while creating === true
-    const html = runRender();
-    expect(html).toContain("creating");
-    
-    // Resolve create
     resolveCreate({});
-    await Promise.resolve();
-    
-    // Trigger status change to hit the ApiError("forbidden") branch in runWithStepUp
-    capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[2](); // toggle status
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    await createPromise;
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
 
-    // Trigger revokeAll from row menu to hit ApiError("forbidden") in handleRevokeAll
-    capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[1](); // revokeAllSessions (index 1)
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const rowEl3 = await screen.findByTestId("row-u3");
+    fireEvent.click(within(rowEl3).getByRole("button"));
+    const deactivateItem = await screen.findByText("deactivate");
+    fireEvent.click(deactivateItem);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
 
-    // Open sessions dialog and trigger revocations to hit ApiError("forbidden") branches in SessionsDialog
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0](); // viewSessions
-    runRender();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    runRender();
+    const rowEl1 = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const revokeAllItem = await screen.findByText("revokeAllSessions");
+    fireEvent.click(revokeAllItem);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
 
-    try { await capturedButtonClicks[1](); } catch (e) {} // Revoke single
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
 
-    try { await capturedButtonClicks[2](); } catch (e) {} // Revoke all
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    await screen.findByRole("button", { name: "revokeSession" });
+
+    const revokeSessBtn = screen.getByRole("button", { name: "revokeSession" });
+    try { await fireEvent.click(revokeSessBtn); } catch (e) {}
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+
+    const revokeAllBtn = screen.getByRole("button", { name: "revokeAllSessions" });
+    try { await fireEvent.click(revokeAllBtn); } catch (e) {}
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles getSettings catch block when cancelled is true", async () => {
@@ -923,12 +787,10 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockReturnValue(new Promise((_, rej) => { rejectSettings = rej; }));
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     
-    runRender();
+    const { unmount } = render(<UsersPage />);
     
-    // Unmount component to set cancelled = true
-    effectCleanups[0]();
+    unmount();
     
-    // Now reject the promise
     rejectSettings(new Error("fetch failed"));
     await Promise.resolve();
     await Promise.resolve();
@@ -939,55 +801,48 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
 
-    // Provide all 4 device info variants
     vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([
-      { id: "s1", is_current: false, device_info: { browser: "Chrome" } } as any, // browserStr true, osStr false
-      { id: "s2", is_current: false, device_info: { os: "Windows" } } as any, // browserStr false, osStr true
-      { id: "s3", is_current: false, device_info: {} } as any, // both false
-      { id: "s4", is_current: false, device_info: { browser: "Firefox", os: "Linux" } } as any, // both true
+      { id: "s1", is_current: false, device_info: { browser: "Chrome" } } as any,
+      { id: "s2", is_current: false, device_info: { os: "Windows" } } as any,
+      { id: "s3", is_current: false, device_info: {} } as any,
+      { id: "s4", is_current: false, device_info: { browser: "Firefox", os: "Linux" } } as any,
     ]);
 
-    runRender();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // Open SessionsDialog for u1
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    capturedMenuItemClicks[0](); // viewSessions
-    runRender();
+    const rowEl1 = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl1).getByRole("button"));
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
 
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    const html = runRender();
-
-    expect(html).toContain("Chrome");
-    expect(html).toContain("Windows");
-    expect(html).toContain("Unknown device");
-    expect(html).toContain("Firefox — Linux");
+    await screen.findByText("Chrome");
+    expect(screen.getByText("Windows")).toBeDefined();
+    expect(screen.getByText("Unknown device")).toBeDefined();
+    expect(screen.getByText("Firefox — Linux")).toBeDefined();
   });
 
   it("evaluates getSettings edge cases and cancellation", async () => {
     vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listUsers").mockResolvedValue({ data: [], total: 0 });
 
-    // Case 1: max_sessions_per_user is undefined to hit `?? ""`
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({} as any);
-    runRender();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const { unmount } = render(<UsersPage />);
+    await Promise.resolve();
+    unmount();
     
-    // Case 2: cancelled is true inside the .then() block
     let resolveSettings: any;
     vi.spyOn(api.admin, "getSettings").mockReturnValue(new Promise((res) => { resolveSettings = res; }));
-    runRender();
-    effectCleanups[effectCleanups.length - 1](); // run cleanup to set cancelled = true
+    const { unmount: unmount2 } = render(<UsersPage />);
+    unmount2();
     resolveSettings({ max_sessions_per_user: "10" });
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
   });
 
   it("handles null user context safely", () => {
     vi.mocked(useMeContext).mockReturnValue(null);
-    const html = runRender();
-    expect(html).toContain("accessDenied");
+    render(<UsersPage />);
+    expect(screen.getByText("accessDenied")).toBeDefined();
   });
 
   it("handles runWithStepUp branches explicitly", async () => {
@@ -995,18 +850,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
 
-    runRender();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    // Cause an ApiError that is not mfa_required
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValueOnce(new ApiError("some_other_error"));
-    capturedIconButtonClicks[2]({ stopPropagation: vi.fn(), currentTarget: {} }); // u3 icon
-    runRender();
+    const rowEl = await screen.findByTestId("row-u3");
+    fireEvent.click(within(rowEl).getByRole("button"));
     
-    // Find deactivate item (last item in the menu) and trigger
-    await capturedMenuItemClicks[capturedMenuItemClicks.length - 1]();
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const deactivateItem = await screen.findByText("deactivate");
+    fireEvent.click(deactivateItem);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("covers remaining session dialog and step-up fallbacks", async () => {
@@ -1034,28 +889,24 @@ describe("UsersPage page component", () => {
     ]);
     vi.spyOn(api.admin, "setUserStatus").mockRejectedValue(new ApiError("mfa_required"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<UsersPage />);
 
-    expect(runRender()).toContain("noActiveSessions");
+    await screen.findByText("noActiveSessions");
 
-    capturedIconButtonClicks[0]({ stopPropagation: vi.fn(), currentTarget: {} });
-    runRender();
-    await capturedMenuItemClicks[capturedMenuItemClicks.length - 1]();
-    expect(mockRunWithStepUp).toHaveBeenCalled();
+    const rowEl = await screen.findByTestId("row-u3");
+    fireEvent.click(within(rowEl).getByRole("button"));
+    const deactivateItem = await screen.findByText("deactivate");
+    fireEvent.click(deactivateItem);
 
-    capturedMenuItemClicks[0]();
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const html = runRender();
-    expect(html).toContain("Chrome 120");
+    await waitFor(() => {
+      expect(mockRunWithStepUp).toHaveBeenCalled();
+    });
 
-    expect(capturedButtonClicks[1]).toBeDefined();
+    fireEvent.click(within(rowEl).getByRole("button"));
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
+
+    await screen.findByText("Chrome 120");
   });
 
   it("shows bulk action toolbar when rows are selected", async () => {
@@ -1063,19 +914,16 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
-    const html = runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u1-u2");
+    fireEvent.click(selectBtn);
 
-    expect(html).toContain("bulkSelected");
-    expect(html).toContain("bulkActivate");
-    expect(html).toContain("bulkDeactivate");
-    expect(html).toContain("bulkExport");
-    expect(html).toContain("bulkClear");
+    await screen.findByText("bulkSelected:2");
+    expect(screen.getByText("bulkActivate")).toBeDefined();
+    expect(screen.getByText("bulkDeactivate")).toBeDefined();
+    expect(screen.getByText("bulkExport")).toBeDefined();
+    expect(screen.getByText("bulkClear")).toBeDefined();
   });
 
   it("handles bulk activate successfully", async () => {
@@ -1084,20 +932,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const bulkSpy = vi.spyOn(api.admin, "bulkSetUserStatus").mockResolvedValue(undefined);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u2"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u2");
+    fireEvent.click(selectBtn);
 
-    // capturedButtonClicks[0] is bulkActivate
-    expect(capturedButtonClicks[0]).toBeDefined();
-    await capturedButtonClicks[0]();
+    const bulkActBtn = await screen.findByRole("button", { name: "bulkActivate" });
+    fireEvent.click(bulkActBtn);
 
-    expect(bulkSpy).toHaveBeenCalledWith(["u2"], true);
-    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkActivated"));
+    await waitFor(() => {
+      expect(bulkSpy).toHaveBeenCalledWith(["u2"], true);
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkActivated:1"));
+    });
   });
 
   it("handles bulk deactivate successfully", async () => {
@@ -1106,18 +952,18 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     const bulkSpy = vi.spyOn(api.admin, "bulkSetUserStatus").mockResolvedValue(undefined);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u2", "u3"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u2-u3");
+    fireEvent.click(selectBtn);
 
-    await capturedButtonClicks[1](); // bulkDeactivate
+    const bulkDeactBtn = await screen.findByRole("button", { name: "bulkDeactivate" });
+    fireEvent.click(bulkDeactBtn);
 
-    expect(bulkSpy).toHaveBeenCalledWith(["u2", "u3"], false);
-    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkDeactivated"));
+    await waitFor(() => {
+      expect(bulkSpy).toHaveBeenCalledWith(["u2", "u3"], false);
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bulkDeactivated:2"));
+    });
   });
 
   it("handles bulk API error (last_admin)", async () => {
@@ -1126,17 +972,17 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "bulkSetUserStatus").mockRejectedValue(new ApiError("last_admin"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u1"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u1");
+    fireEvent.click(selectBtn);
 
-    await capturedButtonClicks[1](); // bulkDeactivate
+    const bulkDeactBtn = await screen.findByRole("button", { name: "bulkDeactivate" });
+    fireEvent.click(bulkDeactBtn);
 
-    expect(toast.error).toHaveBeenCalledWith("errors.last_admin");
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.last_admin");
+    });
   });
 
   it("handles bulk mfa_required silently", async () => {
@@ -1148,18 +994,18 @@ describe("UsersPage page component", () => {
       try { return await action(); } catch { throw new ApiError("mfa_required"); }
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u2"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u2");
+    fireEvent.click(selectBtn);
 
-    await capturedButtonClicks[0](); // bulkActivate
+    const bulkActBtn = await screen.findByRole("button", { name: "bulkActivate" });
+    fireEvent.click(bulkActBtn);
 
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(toast.success).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 
   it("handles bulk clear", async () => {
@@ -1167,17 +1013,19 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u1-u2");
+    fireEvent.click(selectBtn);
 
-    capturedButtonClicks[3](); // bulkClear
+    await screen.findByText("bulkSelected:2");
 
-    expect(stateStore[11]).toEqual({ type: "include", ids: new Set() });
+    const clearBtn = screen.getByRole("button", { name: "bulkClear" });
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText("bulkSelected:2")).toBeNull();
+    });
   });
 
   it("handles bulk export with selected rows", async () => {
@@ -1186,32 +1034,36 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
     const anchorClick = vi.fn();
-    vi.stubGlobal("document", {
-      visibilityState: "visible",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      createElement: vi.fn().mockReturnValue({ href: "", download: "", click: anchorClick }),
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      if (tagName === "a") {
+        return {
+          href: "",
+          download: "",
+          click: anchorClick,
+          style: {},
+        } as any;
+      }
+      return originalCreateElement(tagName);
     });
+
     vi.stubGlobal("URL", {
+      ...global.URL,
       createObjectURL: vi.fn().mockReturnValue("blob:test"),
       revokeObjectURL: vi.fn(),
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    stateStore[11] = { type: "include", ids: new Set(["u1", "u2"]) };
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-u1-u2");
+    fireEvent.click(selectBtn);
 
-    capturedButtonClicks[2](); // bulkExport
+    const exportBtn = await screen.findByRole("button", { name: "bulkExport" });
+    fireEvent.click(exportBtn);
 
-    expect(anchorClick).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(anchorClick).toHaveBeenCalled();
+    });
   });
 
   it("skips export when no rows match selection", async () => {
@@ -1220,44 +1072,52 @@ describe("UsersPage page component", () => {
     vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
 
     const anchorClick = vi.fn();
-    vi.stubGlobal("document", {
-      visibilityState: "visible",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      createElement: vi.fn().mockReturnValue({ href: "", download: "", click: anchorClick }),
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      if (tagName === "a") {
+        return {
+          href: "",
+          download: "",
+          click: anchorClick,
+          style: {},
+        } as any;
+      }
+      return originalCreateElement(tagName);
     });
+
     vi.stubGlobal("URL", {
+      ...global.URL,
       createObjectURL: vi.fn().mockReturnValue("blob:test"),
       revokeObjectURL: vi.fn(),
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<UsersPage />);
 
-    // Select a user ID that's not in loaded rows
-    stateStore[11] = { type: "include", ids: new Set(["nonexistent-id"]) };
-    runRender();
+    const selectBtn = await screen.findByTestId("mock-select-rows-nonexistent");
+    fireEvent.click(selectBtn);
 
-    capturedButtonClicks[2](); // bulkExport
+    const exportBtn = await screen.findByRole("button", { name: "bulkExport" });
+    fireEvent.click(exportBtn);
 
-    // anchor.click is called even for an empty selection (creates empty CSV)
-    expect(anchorClick).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(anchorClick).toHaveBeenCalled();
+    });
   });
 
   it("renders the sessions dialog loading state", async () => {
     vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
-    const user = getMockUsers().data[2];
     vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
-    vi.spyOn(api.admin, "listUsers").mockResolvedValue({ data: [user], total: 1 });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
     vi.spyOn(api.admin, "listUserSessions").mockReturnValue(new Promise(() => {}));
 
-    stateStore[9] = user;
-    stateStore[23] = true; // SessionsDialog.loading (sessions=22, loading=23; shifted +2 by selectionModel+bulkActing states)
+    render(<UsersPage />);
 
-    const html = runRender();
+    const rowEl = await screen.findByTestId("row-u1");
+    fireEvent.click(within(rowEl).getByRole("button"));
 
-    expect(html).toContain("CircularProgress");
+    const viewSessionsItem = await screen.findByText("viewSessions");
+    fireEvent.click(viewSessionsItem);
+
+    await screen.findByRole("progressbar");
   });
 });

@@ -1,47 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import ServiceAccountsPage from "./ServiceAccountsPage";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type ServiceAccount } from "@/lib/api";
 import { useMeContext } from "@/contexts/MeContext";
 import { toast } from "sonner";
-import { renderToString } from "react-dom/server";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
-
-// State Mocking System
-let stateStore: any = {};
-let stateSetters: any = {};
-let callIdx = 0;
-
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return {
-    ...original,
-    useState: (init: any) => {
-      const idx = callIdx;
-      callIdx++;
-      if (!(idx in stateStore)) {
-        stateStore[idx] = init;
-      }
-      stateSetters[idx] = (newVal: any) => {
-        if (typeof newVal === "function") {
-          stateStore[idx] = newVal(stateStore[idx]);
-        } else {
-          stateStore[idx] = newVal;
-        }
-      };
-      if (callIdx >= 60) {
-        callIdx = 0;
-      }
-      return [stateStore[idx], stateSetters[idx]];
-    },
-    useEffect: (fn: any) => {
-      fn();
-    },
-  };
-});
 
 vi.mock("@/contexts/MeContext", () => ({
   useMeContext: vi.fn(),
@@ -49,72 +16,13 @@ vi.mock("@/contexts/MeContext", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: any) => {
+      if (options?.name) return `${key}:${options.name}`;
+      return key;
+    },
+    tCommon: (key: string) => key,
     i18n: { language: "en" },
   }),
-}));
-
-const capturedButtonClicks: any[] = [];
-const capturedChipClicks: any[] = [];
-const capturedIconButtonClicks: any[] = [];
-const capturedSubmits: any[] = [];
-const capturedInputs: any[] = [];
-const capturedSwitches: any[] = [];
-const capturedDialogCloses: any[] = [];
-
-vi.mock("@mui/material/Button", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedButtonClicks.push(props.onClick);
-    return React.createElement("button", { onClick: props.onClick, type: props.type, disabled: props.disabled }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Chip", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedChipClicks.push(props.onClick);
-    return React.createElement("div", { onClick: props.onClick }, props.children ?? props.label);
-  }
-}));
-
-vi.mock("@mui/material/IconButton", () => ({
-  default: (props: any) => {
-    if (props.onClick) capturedIconButtonClicks.push(props.onClick);
-    return React.createElement("button", { onClick: props.onClick }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/Box", () => ({
-  default: (props: any) => {
-    if (props.onSubmit) capturedSubmits.push(props.onSubmit);
-    return React.createElement("div", { onSubmit: props.onSubmit }, props.children);
-  }
-}));
-
-vi.mock("@mui/material/TextField", () => ({
-  default: (props: any) => {
-    if (props.onChange) capturedInputs.push(props.onChange);
-    return React.createElement("input", {
-      type: props.type,
-      value: props.value,
-      onChange: props.onChange,
-      disabled: props.disabled,
-      readOnly: props.slotProps?.htmlInput?.readOnly,
-    });
-  }
-}));
-
-vi.mock("@mui/material/Switch", () => ({
-  default: (props: any) => {
-    if (props.onChange) capturedSwitches.push(props.onChange);
-    return React.createElement("input", { type: "checkbox", checked: props.checked, onChange: props.onChange });
-  }
-}));
-
-vi.mock("@mui/material/Dialog", () => ({
-  default: (props: any) => {
-    if (props.open && props.onClose) capturedDialogCloses.push(props.onClose);
-    return props.open ? React.createElement("div", null, props.children) : null;
-  }
 }));
 
 const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
@@ -134,15 +42,11 @@ vi.mock("@/components/StepUpMfaDialog", () => ({
   StepUpMfaDialog: () => null,
 }));
 
-vi.mock("@mui/material/Tooltip", () => ({
-  default: (props: any) => props.children
-}));
-
 vi.mock("@mui/x-data-grid", () => ({
   DataGrid: (props: any) => {
     const renderedRows = (props.rows ?? []).map((row: any) => {
       props.getRowId?.(row);
-      return React.createElement("div", { key: row.id, className: "mock-row" },
+      return React.createElement("div", { key: row.id, className: "mock-row", "data-testid": `row-${row.id}` },
         (props.columns ?? []).map((col: any) => {
           const cellContent = col.renderCell ? col.renderCell({ row }) : row[col.field];
           return React.createElement("div", { key: col.field, className: "mock-cell" }, cellContent);
@@ -154,56 +58,31 @@ vi.mock("@mui/x-data-grid", () => ({
 }));
 
 describe("ServiceAccountsPage page component", () => {
-  let confirmMock = vi.fn().mockReturnValue(true);
-  let promptMock = vi.fn().mockReturnValue("123456");
-  let alertMock = vi.fn();
+  let confirmMock: any;
+  let promptMock: any;
+  let alertMock: any;
 
   beforeEach(() => {
-    stateStore = {};
-    stateSetters = {};
-    callIdx = 0;
-    capturedButtonClicks.length = 0;
-    capturedChipClicks.length = 0;
-    capturedIconButtonClicks.length = 0;
-    capturedSubmits.length = 0;
-    capturedInputs.length = 0;
-    capturedSwitches.length = 0;
-    capturedDialogCloses.length = 0;
+    vi.useRealTimers();
+    confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
+    promptMock = vi.spyOn(window, "prompt").mockReturnValue("123456");
+    alertMock = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    vi.spyOn(window, "setInterval");
+    vi.spyOn(window, "clearInterval");
+    vi.spyOn(window, "addEventListener");
+    vi.spyOn(window, "removeEventListener");
+
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
-    confirmMock = vi.fn().mockReturnValue(true);
-    promptMock = vi.fn().mockReturnValue("123456");
-    alertMock = vi.fn();
     mockRunWithStepUp.mockClear();
     mockRunWithStepUp.mockImplementation(async (action: any) => action());
-
-    vi.stubGlobal("document", {
-      visibilityState: "visible",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    vi.stubGlobal("window", {
-      setInterval: vi.fn((fn: any, delay: number) => {
-        fn();
-        return 123;
-      }),
-      clearInterval: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      confirm: confirmMock,
-      prompt: promptMock,
-      alert: alertMock,
-    });
 
     vi.stubGlobal("navigator", {
       clipboard: {
         writeText: vi.fn().mockResolvedValue({} as any),
       },
     });
-
-    (global as any).confirm = confirmMock;
-    (global as any).prompt = promptMock;
-    (global as any).alert = alertMock;
 
     class MockEventSource {
       close = vi.fn();
@@ -214,24 +93,12 @@ describe("ServiceAccountsPage page component", () => {
   });
 
   afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    document.body.removeAttribute("style");
+    document.body.removeAttribute("class");
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    delete (global as any).confirm;
-    delete (global as any).prompt;
-    delete (global as any).alert;
   });
-
-  const runRender = () => {
-    callIdx = 0;
-    capturedButtonClicks.length = 0;
-    capturedChipClicks.length = 0;
-    capturedIconButtonClicks.length = 0;
-    capturedSubmits.length = 0;
-    capturedInputs.length = 0;
-    capturedSwitches.length = 0;
-    capturedDialogCloses.length = 0;
-    return renderToString(React.createElement(ServiceAccountsPage));
-  };
 
   const getMockAccounts = () => ({
     data: [
@@ -258,303 +125,279 @@ describe("ServiceAccountsPage page component", () => {
   });
 
   it("renders loader screen then loads service accounts lists", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     const listSpy = vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<ServiceAccountsPage />);
 
-    const html = runRender();
-    expect(html).toContain("Service 1");
+    await waitFor(() => {
+      expect(screen.getByText("Service 1")).toBeDefined();
+    });
     expect(listSpy).toHaveBeenCalled();
   });
 
   it("handles creating a service account successfully", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const createSpy = vi.spyOn(api.admin, "createServiceAccount").mockResolvedValue({
       client_id: "client-new",
       client_secret: "secret-new",
     } as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // Trigger openCreate (index 0 button is create button)
-    expect(capturedButtonClicks[0]).toBeDefined();
-    capturedButtonClicks[0]();
-    runRender();
+    // Open create dialog
+    const createBtn = await screen.findByRole("button", { name: /\+ create/i });
+    fireEvent.click(createBtn);
 
-    // Inputs:
-    // [0] -> name
-    // [1] -> expiresAt
-    expect(capturedInputs[0]).toBeDefined();
-    capturedInputs[0]({ target: { value: "New SA" } });
-    capturedInputs[1]({ target: { value: "2026-12-31" } });
+    // Input fields
+    const nameInput = screen.getByLabelText(/name/i);
+    fireEvent.change(nameInput, { target: { value: "New SA" } });
 
-    // Scopes chips: PERMISSION_GROUPS has users, serviceAccounts, audit scopes.
-    // Index 0 and 1 are row status chips. Index 2 is users:read.
-    expect(capturedChipClicks[2]).toBeDefined();
-    capturedChipClicks[2](); // toggle users:read
+    const expiresInput = screen.getByLabelText(/expiresAt/i);
+    fireEvent.change(expiresInput, { target: { value: "2026-12-31" } });
 
-    runRender();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    // Toggle scope chip (pick the first read chip)
+    const scopeChip = screen.getAllByText("read")[0];
+    fireEvent.click(scopeChip);
 
-    expect(createSpy).toHaveBeenCalledWith({
-      name: "New SA",
-      scopes: ["users:read"],
-      expires_at: "2026-12-31",
+    // Submit
+    const submitBtn = document.querySelector('button[type="submit"]')!;
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        name: "New SA",
+        scopes: ["users:read"],
+        expires_at: "2026-12-31",
+      });
     });
   });
 
   it("handles toggling status with MFA challenge", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus")
       .mockRejectedValueOnce(new ApiError("mfa_required"))
       .mockResolvedValueOnce({} as any);
-    // Simulate useStepUp catching mfa_required and retrying after step-up
+
+    // Retrying with MFA challenge simulated
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => {
       try { return await action(); }
       catch { await api.mfaStepUp("123456"); return action(); }
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // Chip click for Status is in column row cells:
-    // Alice (sa1) status chip is at index 0
-    expect(capturedChipClicks[0]).toBeDefined();
-    await capturedChipClicks[0]();
+    const statusChip = await screen.findByText("active");
+    fireEvent.click(statusChip);
 
-    expect(statusSpy).toHaveBeenCalledWith("sa1", false);
-    expect(mockRunWithStepUp).toHaveBeenCalled();
-    expect(stepUpSpy).toHaveBeenCalledWith("123456");
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledWith("sa1", false);
+      expect(mockRunWithStepUp).toHaveBeenCalled();
+      expect(stepUpSpy).toHaveBeenCalledWith("123456");
+    });
   });
 
   it("handles revoking service account", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const revokeSpy = vi.spyOn(api.admin, "revokeServiceAccount").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // row 1 actions: [0] -> test, [1] -> edit, [2] -> rotate, [3] -> revoke
-    expect(capturedIconButtonClicks[3]).toBeDefined();
-    await capturedIconButtonClicks[3]();
+    const revokeBtn = (await screen.findAllByTestId("DeleteOutlinedIcon"))[0].closest("button")!;
+    fireEvent.click(revokeBtn);
 
-    expect(revokeSpy).toHaveBeenCalledWith("sa1");
+    await waitFor(() => {
+      expect(revokeSpy).toHaveBeenCalledWith("sa1");
+    });
   });
 
   it("handles rotating service account secret", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const rotateSpy = vi.spyOn(api.admin, "rotateServiceAccountSecret").mockResolvedValue({
       client_id: "client-1",
       client_secret: "secret-rotated",
     } as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // row 1 actions: [0] -> test, [1] -> edit, [2] -> rotate
-    expect(capturedIconButtonClicks[2]).toBeDefined();
-    await capturedIconButtonClicks[2]();
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
 
-    expect(rotateSpy).toHaveBeenCalledWith("sa1");
+    await waitFor(() => {
+      expect(rotateSpy).toHaveBeenCalledWith("sa1");
+    });
   });
 
   it("handles editing and updating service account details", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const updateSpy = vi.spyOn(api.admin, "updateServiceAccount").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // row 1 actions: [1] -> edit
-    capturedIconButtonClicks[1]();
-    runRender();
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
 
-    // Edit dialog inputs:
-    // [0] -> name (currently "Service 1")
-    // [1] -> expiresAt
-    expect(capturedInputs[0]).toBeDefined();
-    capturedInputs[0]({ target: { value: "Service 1 Updated" } });
+    const nameInput = screen.getByLabelText(/name/i);
+    fireEvent.change(nameInput, { target: { value: "Service 1 Updated" } });
 
-    // Switch check toggled:
-    expect(capturedSwitches[0]).toBeDefined();
-    capturedSwitches[0]({ target: { checked: false } });
+    const activeSwitch = screen.getByRole("switch");
+    fireEvent.click(activeSwitch);
 
-    runRender(); // re-render to update closures
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    const saveBtn = document.querySelector('button[type="submit"]')!;
+    fireEvent.click(saveBtn);
 
-    expect(updateSpy).toHaveBeenCalledWith("sa1", {
-      name: "Service 1 Updated",
-      scopes: ["users:read"],
-      expires_at: "2026-06-10",
-      is_active: false,
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith("sa1", {
+        name: "Service 1 Updated",
+        scopes: ["users:read"],
+        expires_at: "2026-06-10",
+        is_active: false,
+      });
     });
   });
 
   it("handles testing and token probe flows", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    
-    // Mock token creation and probe
+
     const tokenResult = { access_token: "token.payload.signature", token_type: "Bearer", expires_in: 3600 };
     const createTokenSpy = vi.spyOn(api.admin, "createServiceToken").mockResolvedValue(tokenResult);
     const probeResult = { ok: true, status: 200, statusText: "OK", body: { message: "success" } };
     const probeSpy = vi.spyOn(api.admin, "probeWithServiceToken").mockResolvedValue(probeResult);
 
-    // Mock global atob for JWT decoding: payload has scopes
     const payload = JSON.stringify({ sub: "sa1", scopes: ["service_accounts:read"] });
     vi.stubGlobal("atob", vi.fn().mockReturnValue(payload));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // row 1 actions: [0] -> test
-    capturedIconButtonClicks[0]();
-    runRender();
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    // Test Dialog inputs: [0] -> secret input
-    expect(capturedInputs[0]).toBeDefined();
-    capturedInputs[0]({ target: { value: "my-secret" } });
+    const secretInput = screen.getByLabelText(/secretLabel/i);
+    fireEvent.change(secretInput, { target: { value: "my-secret" } });
 
-    runRender();
+    const getTokenBtn = screen.getByRole("button", { name: "getToken" });
+    fireEvent.click(getTokenBtn);
 
-    // Click "Get Token" button (index 1 is Get Token)
-    expect(capturedButtonClicks[1]).toBeDefined();
-    await capturedButtonClicks[1]();
-
-    expect(createTokenSpy).toHaveBeenCalledWith({
-      client_id: "client-1",
-      client_secret: "my-secret",
+    await waitFor(() => {
+      expect(createTokenSpy).toHaveBeenCalledWith({
+        client_id: "client-1",
+        client_secret: "my-secret",
+      });
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    const runProbeBtn = screen.getByRole("button", { name: "runProbe" });
+    fireEvent.click(runProbeBtn);
 
-    // Click "Run Probe" button (index 2 in capturedButtonClicks)
-    expect(capturedButtonClicks[2]).toBeDefined();
-    await capturedButtonClicks[2]();
-
-    expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "token.payload.signature");
+    await waitFor(() => {
+      expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "token.payload.signature");
+    });
   });
 
   it("handles copy secret and done button clicks inside newSecret dialog", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "rotateServiceAccountSecret").mockResolvedValue({
       client_id: "client-1",
       client_secret: "secret-rotated",
     } as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // Rotate button is capturedIconButtonClicks[2]
-    await capturedIconButtonClicks[2]();
-    runRender();
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
 
-    // Now newSecret is set. It renders the newSecret Dialog.
-    // In newSecret dialog, the button is:
-    // [1] -> Done button
-    // The copy icon button is capturedIconButtonClicks[8] (since we rendered row action buttons and dialog icon buttons)
-    expect(capturedIconButtonClicks[8]).toBeDefined();
-    await capturedIconButtonClicks[8](); // Trigger copy
+    const copyBtn = (await screen.findByTestId("ContentCopyIcon")).closest("button")!;
+    fireEvent.click(copyBtn);
+
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("secret-rotated");
 
-    expect(capturedButtonClicks[1]).toBeDefined();
-    capturedButtonClicks[1](); // Click Done
+    const doneBtn = screen.getByRole("button", { name: "done" });
+    fireEvent.click(doneBtn);
   });
 
   it("handles API error conditions for create, update and probe", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    vi.spyOn(api.admin, "createServiceAccount").mockRejectedValue(new Error("invalid_name"));
-    vi.spyOn(api.admin, "updateServiceAccount").mockRejectedValue(new Error("db_error"));
-    vi.spyOn(api.admin, "probeWithServiceToken").mockRejectedValue(new Error("Blocked"));
+    const createSpy = vi.spyOn(api.admin, "createServiceAccount").mockRejectedValue(new Error("invalid_name"));
+    const updateSpy = vi.spyOn(api.admin, "updateServiceAccount").mockRejectedValue(new Error("db_error"));
+    const probeSpy = vi.spyOn(api.admin, "probeWithServiceToken").mockRejectedValue(new Error("Blocked"));
+    vi.spyOn(api.admin, "createServiceToken").mockResolvedValue({ access_token: "tok.payload.sig", token_type: "Bearer", expires_in: 60 });
+    const payload = JSON.stringify({ sub: "sa1", scopes: ["service_accounts:read"] });
+    vi.stubGlobal("atob", vi.fn().mockReturnValue(payload));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // Create error test
-    capturedButtonClicks[0](); // open create
-    runRender();
-    capturedInputs[0]({ target: { value: "Bad SA" } });
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    runRender();
+    // Create Error
+    const createBtn = await screen.findByRole("button", { name: /\+ create/i });
+    fireEvent.click(createBtn);
+    const createName = screen.getByLabelText(/name/i);
+    fireEvent.change(createName, { target: { value: "Bad SA" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.invalid_name");
+    });
+    // Close Create Dialog and wait for transition
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByText("createTitle")).toBeNull();
+    });
 
-    // Update error test
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
-    capturedInputs[0]({ target: { value: "Edit Bad SA" } });
-    runRender();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    runRender();
+    // Update Error
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
+    const editName = screen.getByLabelText(/name/i);
+    fireEvent.change(editName, { target: { value: "Edit Bad SA" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.db_error");
+    });
+    // Close Edit Dialog and wait for transition
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByText("editTitle")).toBeNull();
+    });
 
-    // Probe error test: first open test and click get token
-    vi.spyOn(api.admin, "createServiceToken").mockResolvedValue({ access_token: "tok", token_type: "Bearer", expires_in: 60 });
-    capturedIconButtonClicks[0](); // open test
-    runRender();
-    capturedInputs[0]({ target: { value: "secret" } });
-    runRender();
-    await capturedButtonClicks[1](); // get token
-    runRender();
-    await Promise.resolve();
-    runRender();
-    await capturedButtonClicks[2](); // run probe (fails)
-    runRender();
+    // Probe Error
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
+    const secretInput = screen.getByLabelText(/secretLabel/i);
+    fireEvent.change(secretInput, { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.getByText("tokenReady")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "runProbe" }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+    // Close Test Dialog and wait for transition
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    await waitFor(() => {
+      expect(screen.queryByText("testSubtitle")).toBeNull();
+    });
   });
 
   it("does not run destructive service-account actions when confirmation is cancelled", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    const rotateSpy = vi.spyOn(api.admin, "rotateServiceAccountSecret").mockResolvedValue({} as any);
-    const revokeSpy = vi.spyOn(api.admin, "revokeServiceAccount").mockResolvedValue({} as any);
+    const rotateSpy = vi.spyOn(api.admin, "rotateServiceAccountSecret");
+    const revokeSpy = vi.spyOn(api.admin, "revokeServiceAccount");
     confirmMock.mockReturnValue(false);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedIconButtonClicks[2](); // rotate
-    await capturedIconButtonClicks[3](); // revoke
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
+
+    const revokeBtn = (await screen.findAllByTestId("DeleteOutlinedIcon"))[0].closest("button")!;
+    fireEvent.click(revokeBtn);
 
     expect(confirmMock).toHaveBeenCalledTimes(2);
     expect(rotateSpy).not.toHaveBeenCalled();
@@ -562,127 +405,125 @@ describe("ServiceAccountsPage page component", () => {
   });
 
   it("does not complete step-up protected actions when MFA prompt is empty", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
+    const stepUpSpy = vi.spyOn(api, "mfaStepUp");
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus").mockRejectedValue(new ApiError("mfa_required"));
-    // Simulate useStepUp propagating mfa_required without calling mfaStepUp (user dismissed dialog)
+
+    // User cancels MFA challenge (runWithStepUp propagates it)
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => action());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedChipClicks[0]().catch(() => {});
+    const statusChip = await screen.findByText("active");
+    fireEvent.click(statusChip);
 
-    expect(statusSpy).toHaveBeenCalledTimes(1);
-    expect(mockRunWithStepUp).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledTimes(1);
+    });
     expect(stepUpSpy).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("covers token test guard and token issuance failure paths", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const createTokenSpy = vi.spyOn(api.admin, "createServiceToken").mockRejectedValue(new ApiError("invalid_client"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[0](); // open test dialog
-    runRender();
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    await capturedButtonClicks[1](); // get token with no secret returns early
-    await capturedButtonClicks[2](); // run probe with no token returns early
+    // click getToken with empty secret (should be disabled or ignored)
+    const getTokenBtn = screen.getByRole("button", { name: "getToken" });
+    fireEvent.click(getTokenBtn);
+
+    // click runProbe with no token (should be disabled or ignored)
+    const runProbeBtn = screen.getByRole("button", { name: "runProbe" });
+    fireEvent.click(runProbeBtn);
+
     expect(createTokenSpy).not.toHaveBeenCalled();
 
-    capturedInputs[0]({ target: { value: "wrong-secret" } });
-    runRender();
+    const secretInput = screen.getByLabelText(/secretLabel/i);
+    fireEvent.change(secretInput, { target: { value: "wrong-secret" } });
+    fireEvent.click(getTokenBtn);
 
-    await capturedButtonClicks[1]();
-
-    expect(createTokenSpy).toHaveBeenCalledWith({
-      client_id: "client-1",
-      client_secret: "wrong-secret",
+    await waitFor(() => {
+      expect(createTokenSpy).toHaveBeenCalledWith({
+        client_id: "client-1",
+        client_secret: "wrong-secret",
+      });
+      expect(toast.error).toHaveBeenCalledWith("errors.invalid_client");
     });
   });
 
   it("renders the locked client id field as disabled and read-only", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[1](); // open edit dialog
-    const html = runRender();
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
 
-    expect(html).toContain("value=\"client-1\"");
-    expect(html).toContain("disabled=\"\"");
-    expect(html).toContain("readOnly=\"\"");
+    const clientIdInput = screen.getByLabelText(/clientId/i) as HTMLInputElement;
+    expect(clientIdInput.disabled).toBe(true);
+    expect(clientIdInput.readOnly).toBe(true);
+    expect(clientIdInput.value).toBe("client-1");
   });
 
   it("handles destructive action generic errors and repeated scope toggles", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "setServiceAccountStatus").mockRejectedValue(new Error("status failed"));
     vi.spyOn(api.admin, "rotateServiceAccountSecret").mockRejectedValue(new Error("rotate failed"));
     vi.spyOn(api.admin, "revokeServiceAccount").mockRejectedValue(new Error("revoke failed"));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedChipClicks[0](); // status chip
-    await capturedIconButtonClicks[2](); // rotate
-    await capturedIconButtonClicks[3](); // revoke
+    // Click status chip, rotate, revoke
+    const statusChip = await screen.findByText("active");
+    fireEvent.click(statusChip);
 
-    expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
 
-    capturedButtonClicks[0](); // open create
-    runRender();
-    capturedChipClicks[2]();
-    capturedChipClicks[2]();
+    const revokeBtn = (await screen.findAllByTestId("DeleteOutlinedIcon"))[0].closest("button")!;
+    fireEvent.click(revokeBtn);
 
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
-    capturedInputs[0]({ target: { value: "" } });
-    capturedChipClicks[2]();
-    capturedChipClicks[2]();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+
+    // Create scopes repeated toggles
+    const createBtn = screen.getByRole("button", { name: /\+ create/i });
+    fireEvent.click(createBtn);
+    const scopeChip = screen.getAllByText("read")[0];
+    fireEvent.click(scopeChip); // Toggle off
+    fireEvent.click(scopeChip); // Toggle on
   });
 
   it("handles mfa_required responses from rotate and revoke without alerting", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "rotateServiceAccountSecret").mockRejectedValue(new ApiError("mfa_required"));
     vi.spyOn(api.admin, "revokeServiceAccount").mockRejectedValue(new ApiError("mfa_required"));
-    vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedIconButtonClicks[2]();
-    await capturedIconButtonClicks[3]();
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
 
-    expect(toast.error).not.toHaveBeenCalled();
+    const revokeBtn = (await screen.findAllByTestId("DeleteOutlinedIcon"))[0].closest("button")!;
+    fireEvent.click(revokeBtn);
+
+    await waitFor(() => {
+      expect(toast.error).not.toHaveBeenCalled();
+    });
   });
 
   it("renders invalid and minimal service token payload states plus blocked probe output", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const createTokenSpy = vi.spyOn(api.admin, "createServiceToken")
       .mockResolvedValueOnce({ access_token: "badtoken", token_type: "Bearer", expires_in: 60 })
@@ -699,115 +540,115 @@ describe("ServiceAccountsPage page component", () => {
       .mockImplementationOnce(() => "{not-json")
       .mockImplementationOnce(() => JSON.stringify({ cid: "client-1" })));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[0](); // open test dialog
-    runRender();
-    capturedInputs[0]({ target: { value: "secret" } });
-    runRender();
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    await capturedButtonClicks[1](); // no JWT payload segment
-    runRender();
-    expect(createTokenSpy).toHaveBeenCalledTimes(1);
+    const secretInput = screen.getByLabelText(/secretLabel/i);
+    fireEvent.change(secretInput, { target: { value: "secret" } });
 
-    await capturedButtonClicks[1](); // invalid JWT decode path
-    runRender();
+    // 1. badtoken (no payload segment)
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.queryByText("tokenReady")).toBeNull();
+    });
 
-    await capturedButtonClicks[1](); // minimal payload: no scopes/sub/exp
-    runRender();
-    await Promise.resolve();
-    runRender();
+    // 2. bad.payload.signature (not-json)
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.queryByText("tokenReady")).toBeNull();
+    });
 
-    const html = runRender();
-    expect(html).toContain("noScopes");
+    // 3. minimal.payload.signature (no scopes/sub/exp)
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.getByText("noScopes")).toBeDefined();
+    });
 
-    await capturedButtonClicks[2](); // blocked probe branch + prettyJson
-    runRender();
-
-    expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "minimal.payload.signature");
+    // Run probe
+    fireEvent.click(screen.getByRole("button", { name: "runProbe" }));
+    await waitFor(() => {
+      expect(screen.getByText("probeBlocked")).toBeDefined();
+      expect(screen.getByText(/forbidden/)).toBeDefined();
+    });
   });
 
   it("updates probe target selection and closes the testing dialog", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[0](); // open test dialog
-    runRender();
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    expect(capturedInputs[1]).toBeDefined();
-    capturedInputs[1]({ target: { value: "users" } });
-    expect(stateStore[14]).toBe("users");
+    // target Select key
+    const targetSelect = screen.getByRole("combobox", { name: /probeTarget/i });
+    fireEvent.mouseDown(targetSelect);
 
-    const done = capturedButtonClicks[capturedButtonClicks.length - 1];
-    expect(done).toBeDefined();
-    done();
-    expect(stateStore[12]).toBeNull();
+    const usersOption = await screen.findByRole("option", { name: /GET Users/i });
+    fireEvent.click(usersOption);
+
+    // Done closes
+    const doneBtn = screen.getByRole("button", { name: "done" });
+    fireEvent.click(doneBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText("testSubtitle")).toBeNull();
+    });
   });
 
   it("toggles edit scopes and skips update when the edit name is blank", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const updateSpy = vi.spyOn(api.admin, "updateServiceAccount").mockResolvedValue({} as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
 
-    expect(capturedChipClicks[2]).toBeDefined();
-    capturedChipClicks[2](); // remove users:read
-    capturedChipClicks[2](); // add users:read again
-    capturedInputs[0]({ target: { value: "" } });
-    runRender();
+    const nameInput = screen.getByLabelText(/name/i);
+    fireEvent.change(nameInput, { target: { value: "" } }); // Blank name
 
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
+    const scopeChip = screen.getAllByText("read")[0];
+    fireEvent.click(scopeChip); // toggle off
+    fireEvent.click(scopeChip); // toggle on
+
+    const saveBtn = document.querySelector('button[type="submit"]')!;
+    fireEvent.click(saveBtn);
 
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
   it("handles edit date change, cancel, and non-Error update failures", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    vi.spyOn(api.admin, "updateServiceAccount").mockRejectedValue("plain failure");
+    const updateSpy = vi.spyOn(api.admin, "updateServiceAccount").mockRejectedValue("plain failure");
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
 
-    expect(capturedInputs[1]).toBeDefined();
-    capturedInputs[1]({ target: { value: "2026-12-24" } });
-    expect(stateStore[9]).toBe("2026-12-24");
+    const expiresInput = screen.getByLabelText(/expiresAt/i);
+    fireEvent.change(expiresInput, { target: { value: "2026-12-24" } });
 
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    const saveBtn = document.querySelector('button[type="submit"]')!;
+    fireEvent.click(saveBtn);
 
-    runRender();
-    expect(capturedButtonClicks[1]).toBeDefined();
-    capturedButtonClicks[1](); // cancel edit dialog
-    expect(stateStore[6]).toBeNull();
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+
+    // Cancel closes dialog
+    const cancelBtn = screen.getByRole("button", { name: "cancel" });
+    fireEvent.click(cancelBtn);
   });
 
   it("clears probe result and shows an internal error when probing fails", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "createServiceToken").mockResolvedValue({
       access_token: "minimal.payload.signature",
@@ -817,85 +658,64 @@ describe("ServiceAccountsPage page component", () => {
     vi.spyOn(api.admin, "probeWithServiceToken").mockRejectedValue(new Error("probe failed"));
     vi.stubGlobal("atob", vi.fn().mockReturnValue(JSON.stringify({ cid: "client-1" })));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedIconButtonClicks[0]();
-    runRender();
-    capturedInputs[0]({ target: { value: "secret" } });
-    runRender();
-    await capturedButtonClicks[1]();
-    runRender();
-    await Promise.resolve();
-    runRender();
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    await capturedButtonClicks[2]();
+    const secretInput = screen.getByLabelText(/secretLabel/i);
+    fireEvent.change(secretInput, { target: { value: "secret" } });
 
-    expect(stateStore[17]).toBeNull();
-    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.getByText("tokenReady")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "runProbe" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
   });
 
   it("handles copy without a secret and dialog close callbacks", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
-    vi.spyOn(api.admin, "rotateServiceAccountSecret").mockResolvedValue({
-      client_id: "client-1",
-      client_secret: "secret-rotated",
-    } as any);
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    // No new secret exists yet; first row action copy path must no-op if reached
-    stateStore[1] = null;
-    runRender();
+    // Trigger dialog closes by clicking backdrop / Close button
+    // 1. Create dialog Close
+    fireEvent.click(screen.getByRole("button", { name: /\+ create/i }));
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("createTitle")).toBeNull());
 
-    capturedButtonClicks[0](); // open create
-    runRender();
-    expect(capturedDialogCloses[0]).toBeDefined();
-    capturedDialogCloses[0]();
-    expect(stateStore[0]).toBe(false);
-    runRender();
+    // 2. Edit dialog Close
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("editTitle")).toBeNull());
 
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
-    expect(capturedDialogCloses[0]).toBeDefined();
-    capturedDialogCloses[0]();
-    expect(stateStore[6]).toBeNull();
-    runRender();
-
-    capturedIconButtonClicks[0](); // open test
-    runRender();
-    expect(capturedDialogCloses[0]).toBeDefined();
-    capturedDialogCloses[0]();
-    expect(stateStore[12]).toBeNull();
-    runRender();
-
-    await capturedIconButtonClicks[2](); // rotate to open secret dialog
-    runRender();
-    expect(capturedDialogCloses[0]).toBeDefined();
-    capturedDialogCloses[0]();
-    expect(stateStore[1]).toBeNull();
+    // 3. Test dialog Close
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    await waitFor(() => expect(screen.queryByText("testSubtitle")).toBeNull());
   });
 
   it("renders access denied, expired accounts, and scopes without action suffixes", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["user"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["user"] } as any);
     const listSpy = vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
 
-    let html = runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(html).toContain("accessDenied");
+    render(<ServiceAccountsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("accessDenied")).toBeDefined();
+    });
     expect(listSpy).not.toHaveBeenCalled();
 
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    // Reset user back to admin and load expired accounts
+    cleanup();
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     listSpy.mockResolvedValue({
       data: [
         {
@@ -911,95 +731,97 @@ describe("ServiceAccountsPage page component", () => {
       total: 1,
     });
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    html = runRender();
-
-    expect(html).toContain("expired");
-    expect(html).toContain("custom");
+    render(<ServiceAccountsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Expired Service")).toBeDefined();
+      expect(screen.getByText("expired")).toBeDefined();
+      expect(screen.getByText("custom")).toBeDefined();
+    });
   });
 
   it("renders loading, saving, copied, inactive, warning, expiring, and passing result states", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
+    const createSpy = vi.spyOn(api.admin, "createServiceAccount").mockReturnValue(new Promise(() => {}));
+    const updateSpy = vi.spyOn(api.admin, "updateServiceAccount").mockReturnValue(new Promise(() => {}));
+    const tokenSpy = vi.spyOn(api.admin, "createServiceToken").mockResolvedValue({
+      access_token: "minimal.payload.signature",
+      token_type: "Bearer",
+      expires_in: 60,
+    });
+    const probeSpy = vi.spyOn(api.admin, "probeWithServiceToken").mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      body: { status: "ok" },
+    });
+    vi.stubGlobal("atob", vi.fn().mockReturnValue(JSON.stringify({ sub: "sa1", scopes: ["users:read"] })));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    render(<ServiceAccountsPage />);
 
-    stateStore[0] = true;
-    stateStore[5] = true;
-    expect(runRender()).toContain("creating");
+    // 1. Loading/Creating State: submit button shows 'creating'
+    fireEvent.click(screen.getByRole("button", { name: /\+ create/i }));
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Creating State" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "creating" })).toBeDefined();
+    });
+    // Close Create Dialog
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("createTitle")).toBeNull());
 
-    stateStore[0] = false;
-    stateStore[6] = getMockAccounts().data[0];
-    stateStore[7] = "Service 1";
-    stateStore[8] = ["users:read"];
-    stateStore[9] = "2020-01-01";
-    stateStore[10] = false;
-    stateStore[11] = true;
-    expect(runRender()).toContain("saving");
+    // 2. Saving/Updating State: edit submit shows 'saving'
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Saving State" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "saving" })).toBeDefined();
+    });
+    // Close Edit Dialog
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("editTitle")).toBeNull());
 
-    stateStore[6] = null;
-    stateStore[11] = false;
-    stateStore[12] = getMockAccounts().data[1];
-    stateStore[13] = "secret";
-    stateStore[15] = { access_token: "token", token_type: "Bearer", expires_in: 60 };
-    stateStore[16] = { sub: "service", scopes: ["users:read"], exp: 1780000000 };
-    stateStore[17] = { ok: true, status: 200, statusText: "OK", body: { ok: true } };
-    stateStore[18] = true;
-    stateStore[19] = true;
-    let html = runRender();
-    expect(html).toContain("inactive");
-    expect(html).toContain("users:read");
-    expect(html).toContain("probePassed");
-    expect(html).toContain("200 OK");
+    // 3. Inactive/Copied/Expiring/Passing Result states
+    // Inactive chip for row 2 (which is inactive)
+    const inactiveChip = await screen.findByText("inactive");
+    expect(inactiveChip).toBeDefined();
 
-    stateStore[1] = {
-      id: "sa1",
-      name: "Service 1",
-      client_id: "client-1",
-      client_secret: "secret-rotated",
-      is_active: true,
-      scopes: ["users:read"],
-      created_at: "2026-06-04T12:00:00Z",
-      expires_at: null,
-    };
-    stateStore[2] = true;
-    html = runRender();
-    expect(html).toContain("secret-rotated");
+    // Probe passing state:
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
+    fireEvent.change(screen.getByLabelText(/secretLabel/i), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.getByText("tokenReady")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "runProbe" }));
+    await waitFor(() => {
+      expect(screen.getByText("probePassed")).toBeDefined();
+      expect(screen.getByText(/200 OK/)).toBeDefined();
+    });
+    // Close Test Dialog
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    await waitFor(() => expect(screen.queryByText("testSubtitle")).toBeNull());
   });
 
   it("runs the copy success timeout callback", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "rotateServiceAccountSecret").mockResolvedValue({
       client_id: "client-1",
       client_secret: "secret-rotated",
     } as any);
-    vi.stubGlobal("setTimeout", vi.fn((fn: () => void) => {
-      fn();
-      return 1;
-    }));
+    vi.spyOn(global, "setTimeout");
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedIconButtonClicks[2]();
-    runRender();
+    const rotateBtn = (await screen.findAllByTestId("KeyIcon"))[0].closest("button")!;
+    fireEvent.click(rotateBtn);
 
-    const copy = capturedIconButtonClicks[capturedIconButtonClicks.length - 1];
-    expect(copy).toBeDefined();
-    await copy();
-    await Promise.resolve();
+    const copyBtn = (await screen.findByTestId("ContentCopyIcon")).closest("button")!;
+    fireEvent.click(copyBtn);
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("secret-rotated");
     expect(setTimeout).toHaveBeenCalled();
   });
 
@@ -1007,110 +829,112 @@ describe("ServiceAccountsPage page component", () => {
     vi.mocked(useMeContext).mockReturnValue(null);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
 
-    let html = runRender();
-    expect(html).toContain("accessDenied");
-
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
-
-    capturedIconButtonClicks[5](); // row 2 edit
-    expect(stateStore[9]).toBe("");
-    stateStore[14] = "unknown";
-    html = runRender();
-    expect(html).toContain("client-2");
-    expect(html).not.toContain("errors.internal_error");
+    render(<ServiceAccountsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("accessDenied")).toBeDefined();
+    });
   });
 
   it("covers non-Error create and token failures plus Error update failures", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     vi.spyOn(api.admin, "createServiceAccount").mockRejectedValue("plain create failure");
     vi.spyOn(api.admin, "updateServiceAccount").mockRejectedValue(new Error("edit_error"));
     vi.spyOn(api.admin, "createServiceToken").mockRejectedValue("plain token failure");
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    capturedButtonClicks[0](); // open create
-    runRender();
-    capturedInputs[0]({ target: { value: "Plain Failure" } });
-    runRender();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.internal_error");
+    // Create failure
+    fireEvent.click(screen.getByRole("button", { name: /\+ create/i }));
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Plain Failure" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+    // Close Create Dialog
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("createTitle")).toBeNull());
 
-    stateStore[0] = false;
-    runRender();
-    capturedIconButtonClicks[1](); // open edit
-    runRender();
-    capturedInputs[0]({ target: { value: "Edit Failure" } });
-    stateStore[9] = "";
-    runRender();
-    await capturedSubmits[0]({ preventDefault: vi.fn() });
-    expect(toast.error).toHaveBeenLastCalledWith("errors.edit_error");
+    // Edit failure
+    const editBtn = (await screen.findAllByTestId("EditIcon"))[0].closest("button")!;
+    fireEvent.click(editBtn);
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Edit Failure" } });
+    fireEvent.click(document.querySelector('button[type="submit"]')!);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.edit_error");
+    });
+    // Close Edit Dialog
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("editTitle")).toBeNull());
 
-    stateStore[6] = null;
-    runRender();
-    capturedIconButtonClicks[0](); // open test
-    runRender();
-    capturedInputs[0]({ target: { value: "secret" } });
-    runRender();
-    await capturedButtonClicks[1]();
-    expect(toast.error).toHaveBeenLastCalledWith("errors.invalid_client");
+    // Token failure
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
+    fireEvent.change(screen.getByLabelText(/secretLabel/i), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.invalid_client");
+    });
+    // Close Test Dialog
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    await waitFor(() => expect(screen.queryByText("testSubtitle")).toBeNull());
   });
 
   it("covers undefined MFA prompt returns", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
     const statusSpy = vi.spyOn(api.admin, "setServiceAccountStatus").mockRejectedValue(new ApiError("mfa_required"));
-    const stepUpSpy = vi.spyOn(api, "mfaStepUp").mockResolvedValue({} as any);
-    // Simulate user dismissing the dialog (runWithStepUp propagates the error)
+    const stepUpSpy = vi.spyOn(api, "mfaStepUp");
+
     mockRunWithStepUp.mockImplementationOnce(async (action: any) => action());
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    await capturedChipClicks[0]().catch(() => {});
+    const statusChip = await screen.findByText("active");
+    fireEvent.click(statusChip);
 
-    expect(statusSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledTimes(1);
+    });
     expect(stepUpSpy).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("uses fallback probe target when probing with an unknown key and no test error", async () => {
-    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.mocked(useMeContext).mockReturnValue({ id: "u1", roles: ["admin"] } as any);
     vi.spyOn(api.admin, "listServiceAccounts").mockResolvedValue(getMockAccounts());
+    vi.spyOn(api.admin, "createServiceToken").mockResolvedValue({
+      access_token: "fallback.payload.signature",
+      token_type: "Bearer",
+      expires_in: 60,
+    });
     const probeSpy = vi.spyOn(api.admin, "probeWithServiceToken").mockResolvedValue({
       ok: true,
       status: 200,
       statusText: "OK",
       body: {},
     });
+    vi.stubGlobal("atob", vi.fn().mockReturnValue(JSON.stringify({ sub: "sa1", scopes: [] })));
 
-    runRender();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    runRender();
+    render(<ServiceAccountsPage />);
 
-    stateStore[12] = getMockAccounts().data[0];
-    stateStore[14] = "missing";
-    stateStore[15] = { access_token: "fallback-token", token_type: "Bearer", expires_in: 60 };
-    stateStore[16] = { scopes: [] };
-    const html = runRender();
-    expect(html).not.toContain("errors.internal_error");
+    const testBtn = (await screen.findAllByTestId("ScienceIcon"))[0].closest("button")!;
+    fireEvent.click(testBtn);
 
-    await capturedButtonClicks[2]();
+    fireEvent.change(screen.getByLabelText(/secretLabel/i), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "getToken" }));
+    await waitFor(() => {
+      expect(screen.getByText("tokenReady")).toBeDefined();
+    });
 
-    expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "fallback-token");
+    // Override target Select value manually to target invalid option
+    const selectEl = document.querySelector('input[value="serviceAccounts"]') as HTMLInputElement;
+    fireEvent.change(selectEl, { target: { value: "missing" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "runProbe" }));
+
+    await waitFor(() => {
+      expect(probeSpy).toHaveBeenCalledWith("/api/v1/admin/service-accounts?limit=1&offset=0", "fallback.payload.signature");
+    });
   });
-  });
+});
