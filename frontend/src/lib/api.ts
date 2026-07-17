@@ -8,6 +8,7 @@ export interface WebAuthnCredential {
   sign_count: number;
   created_at: string;
   last_used_at: string | null;
+  aaguid?: string;
 }
 
 export interface UserMfaInfo {
@@ -112,6 +113,8 @@ export interface Session {
   created_at: string;
   last_used_at: string | null;
   is_current: boolean;
+  location?: string;
+  country_code?: string;
 }
 
 export interface AuditEntry {
@@ -484,6 +487,12 @@ export const api = {
 
   webauthnDeleteCredential: (id: string) =>
     request<void>(`/api/v1/webauthn/credentials/${id}`, { method: "DELETE" }),
+
+  webauthnRenameCredential: (id: string, name: string) =>
+    request<{ ok: boolean }>(`/api/v1/webauthn/credentials/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
 
   admin: {
     listUsers: (p: PageParams) =>

@@ -114,6 +114,6 @@ describe("SecurityDashboardPage", () => {
 
     expect(screen.getByText("blockedCountriesTitle")).toBeDefined();
     expect(screen.getByText("avgRisk")).toBeDefined();
-    expect(screen.getByText("CN")).toBeDefined();
+    expect(screen.getByText(/CN/)).toBeDefined();
   });
 });

@@ -360,6 +360,41 @@ function RankingCard({
   );
 }
 
+const countryNameToFlag: Record<string, string> = {
+  "united states": "🇺🇸",
+  "turkey": "🇹🇷",
+  "türkiye": "🇹🇷",
+  "united kingdom": "🇬🇧",
+  "germany": "🇩🇪",
+  "france": "🇫🇷",
+  "japan": "🇯🇵",
+  "australia": "🇦🇺",
+  "canada": "🇨🇦",
+  "netherlands": "🇳🇱",
+  "switzerland": "🇨🇭",
+  "sweden": "🇸🇪",
+  "singapore": "🇸🇬",
+  "local": "💻",
+  "localhost": "💻",
+};
+
+function getCountryFlag(country?: string): string {
+  if (!country) return "";
+  const clean = country.trim();
+  if (clean.length === 2) {
+    const codePoints = clean
+      .toUpperCase()
+      .split("")
+      .map((char) => 127397 + char.charCodeAt(0));
+    try {
+      return String.fromCodePoint(...codePoints);
+    } catch {
+      // fallback
+    }
+  }
+  return countryNameToFlag[clean.toLowerCase()] || "";
+}
+
 export default function SecurityDashboardPage() {
   const { t } = useTranslation("securityDashboard");
   const me = useMeContext();
@@ -398,9 +433,13 @@ export default function SecurityDashboardPage() {
   const anomalyLabel = (name: string) => t(`anomalyTypes.${name}`, {
     defaultValue: humanizeSecurityLabel(name),
   });
-  const countryLabel = (name: string) => name.toLowerCase() === "unknown"
-    ? t("locations.unknown")
-    : name;
+  const countryLabel = (name: string) => {
+    const label = name.toLowerCase() === "unknown"
+      ? t("locations.unknown")
+      : name;
+    const flag = getCountryFlag(name);
+    return flag ? `${flag} ${label}` : label;
+  };
 
   if (!me?.roles.includes("admin")) {
     return <Box sx={{ p: 4 }}><Alert severity="error">{t("accessDenied")}</Alert></Box>;

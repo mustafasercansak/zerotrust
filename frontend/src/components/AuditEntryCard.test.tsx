@@ -106,4 +106,31 @@ describe("AuditEntryCard", () => {
     runRender({ onClick: undefined });
     expect(capturedPaperClick).toBeNull();
   });
+
+  it("renders location and flag emoji when location is present in metadata", () => {
+    const html = runRender({
+      entry: {
+        ...baseEntry,
+        metadata: {
+          location: { country: "Turkey", city: "Istanbul" },
+        },
+      },
+    });
+    expect(html).toContain("Istanbul, Turkey");
+    expect(html).toContain("🇹🇷");
+  });
+
+  it("renders compact location in compact mode when location is present in metadata", () => {
+    const html = runRender({
+      compact: true,
+      entry: {
+        ...baseEntry,
+        metadata: {
+          location: { country: "United States", city: "New York" },
+        },
+      },
+    });
+    expect(html).toContain("New York, United States");
+    expect(html).toContain("🇺🇸");
+  });
 });

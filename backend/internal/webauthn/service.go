@@ -12,6 +12,8 @@ import (
 	"errors"
 	"time"
 
+	"strings"
+
 	"github.com/go-webauthn/webauthn/protocol"
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
@@ -43,6 +45,7 @@ type store interface {
 	Count(ctx context.Context, userID string) (int, error)
 	UpdateOnLogin(ctx context.Context, credentialID string, data []byte, signCount int64) error
 	Delete(ctx context.Context, id, userID string) error
+	Rename(ctx context.Context, id, userID, name string) error
 	CredentialExists(ctx context.Context, credentialID string) (bool, error)
 }
 
@@ -124,6 +127,18 @@ func (s *Service) ListCredentials(ctx context.Context, userID string) ([]Credent
 // DeleteCredential removes one of the user's passkeys by row id.
 func (s *Service) DeleteCredential(ctx context.Context, id, userID string) error {
 	return s.repo.Delete(ctx, id, userID)
+}
+
+// RenameCredential updates the user-friendly name of one of the user's passkeys.
+func (s *Service) RenameCredential(ctx context.Context, id, userID, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name_cannot_be_empty")
+	}
+	if len([]rune(name)) > 100 {
+		name = string([]rune(name)[:100])
+	}
+	return s.repo.Rename(ctx, id, userID, name)
 }
 
 // BeginRegistration starts a passkey registration ceremony and returns the

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 
+	"strings"
+
 	"github.com/alicebob/miniredis/v2"
 	vwa "github.com/descope/virtualwebauthn"
 	"github.com/google/uuid"
@@ -79,6 +81,27 @@ func (m *memStore) Delete(_ context.Context, id, userID string) error {
 func (m *memStore) CredentialExists(_ context.Context, credentialID string) (bool, error) {
 	_, ok := m.data[credentialID]
 	return ok, nil
+}
+
+func (m *memStore) Rename(_ context.Context, id, userID, name string) error {
+	ids := m.user[userID]
+	found := false
+	for _, cid := range ids {
+		if cid == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	meta, ok := m.meta[id]
+	if !ok {
+		return ErrNotFound
+	}
+	meta.Name = name
+	m.meta[id] = meta
+	return nil
 }
 
 func newTestService(t *testing.T) (*Service, *memStore) {
@@ -534,6 +557,44 @@ func TestHardwareAttestationEnforcement(t *testing.T) {
 	err = svc.FinishRegistration(ctx, userID, "user@example.com", "User", "Hardware Key", []byte(attResponseHardware))
 	if err != nil {
 		t.Fatalf("expected hardware attestation to succeed, got %v", err)
+	}
+}
+
+func TestRenameCredential(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	// Seed credential.
+	store.Insert(ctx, userID, "c1", []byte(`{}`), 0, "Old Key")
+
+	// Empty name rejected.
+	if err := svc.RenameCredential(ctx, "c1", userID, "   "); err == nil || err.Error() != "name_cannot_be_empty" {
+		t.Fatalf("expected error for empty name, got %v", err)
+	}
+
+	// Long name truncated.
+	longName := strings.Repeat("a", 150)
+	if err := svc.RenameCredential(ctx, "c1", userID, longName); err != nil {
+		t.Fatalf("RenameCredential: %v", err)
+	}
+	metas, _ := svc.ListCredentials(ctx, userID)
+	if len(metas[0].Name) != 100 {
+		t.Fatalf("expected name to be truncated to 100, got %d", len(metas[0].Name))
+	}
+
+	// Successful rename.
+	if err := svc.RenameCredential(ctx, "c1", userID, "New Key Name"); err != nil {
+		t.Fatalf("RenameCredential: %v", err)
+	}
+	metas, _ = svc.ListCredentials(ctx, userID)
+	if metas[0].Name != "New Key Name" {
+		t.Fatalf("expected renamed name to be 'New Key Name', got %q", metas[0].Name)
+	}
+
+	// Not found.
+	if err := svc.RenameCredential(ctx, "missing", userID, "Name"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing credential, got %v", err)
 	}
 }
 

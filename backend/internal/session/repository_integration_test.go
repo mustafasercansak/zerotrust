@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zerotrust/backend/internal/testdb"
 	"github.com/zerotrust/backend/pkg/database"
+	"github.com/zerotrust/backend/pkg/geoip"
 )
 
 func setupSessionIntegrationRepo(t *testing.T) (*Repository, string, *pgxpool.Pool, context.Context) {
@@ -55,9 +56,19 @@ func hashTok(raw string) string {
 	return hex.EncodeToString(h[:])
 }
 
+type mockGeoIP struct{}
+func (m *mockGeoIP) Lookup(ip string) (*geoip.Location, error) {
+	if ip == "1.2.3.4" {
+		return &geoip.Location{Country: "United States", CountryCode: "US", City: "Mountain View"}, nil
+	}
+	return nil, fmt.Errorf("unknown")
+}
+
 func TestSessionRepository_CreateAndListForUser(t *testing.T) {
 	repo, userID, pool, ctx := setupSessionIntegrationRepo(t)
 	defer pool.Close()
+
+	repo.SetGeoIP(&mockGeoIP{})
 
 	expiry := time.Now().Add(time.Hour)
 	h1, h2 := hashTok("tok-1"), hashTok("tok-2")
@@ -78,6 +89,23 @@ func TestSessionRepository_CreateAndListForUser(t *testing.T) {
 	}
 	if !sessions[0].IsCurrent {
 		t.Fatal("first result should be current session")
+	}
+
+	// Verify geocoding
+	var foundGeo bool
+	for _, s := range sessions {
+		if s.IPAddress == "1.2.3.4" {
+			foundGeo = true
+			if s.Location != "Mountain View, United States" {
+				t.Errorf("got location %q, want %q", s.Location, "Mountain View, United States")
+			}
+			if s.CountryCode != "US" {
+				t.Errorf("got country_code %q, want %q", s.CountryCode, "US")
+			}
+		}
+	}
+	if !foundGeo {
+		t.Fatal("expected to find geocoded session with IP 1.2.3.4")
 	}
 }
 

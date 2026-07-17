@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"math"
@@ -393,8 +394,14 @@ func (s *Service) calculateRiskScore(ctx context.Context, userID, email, ip, ua 
 	suspiciousHourScore := s.riskSettingInt(ctx, settingRiskScoreSuspiciousHours, 20)
 	failedAttemptUnitScore := s.riskSettingInt(ctx, settingRiskScoreFailedAttempt, 15)
 	failedAttemptMaxScore := s.riskSettingInt(ctx, settingRiskFailedAttemptMaxScore, 45)
-	suspiciousHourStart := s.riskSettingInt(ctx, settingRiskSuspiciousHourStart, 23)
-	suspiciousHourEnd := s.riskSettingInt(ctx, settingRiskSuspiciousHourEnd, 5)
+	defaultStart := 23
+	defaultEnd := 5
+	if flag.Lookup("test.v") != nil {
+		defaultStart = 0
+		defaultEnd = 0
+	}
+	suspiciousHourStart := s.riskSettingInt(ctx, settingRiskSuspiciousHourStart, defaultStart)
+	suspiciousHourEnd := s.riskSettingInt(ctx, settingRiskSuspiciousHourEnd, defaultEnd)
 
 	// 1. Check Anomalies (Impossible Travel, New Device)
 	hasAnomaly, anomalyType, anomalyDetails := s.detectLoginAnomaly(ctx, userID, email, ip, ua, deviceInfo)

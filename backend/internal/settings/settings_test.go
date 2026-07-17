@@ -172,7 +172,7 @@ func TestSettingsHandler(t *testing.T) {
 	defer pool.Close()
 
 	repo := NewRepository(pool)
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 
 	// Clean up settings table before and after tests
 	pool.Exec(ctx, "DELETE FROM system_settings")

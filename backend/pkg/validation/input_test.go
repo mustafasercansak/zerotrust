@@ -1,9 +1,35 @@
 package validation_test
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
+
 	"github.com/zerotrust/backend/pkg/validation"
 )
+
+func TestMain(m *testing.M) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.URL.Path[1:]
+		if prefix == "5348D" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("06A13507EF5B0A0EBD080FF9305DB18445E:5\n"))
+		} else {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(""))
+		}
+	}))
+	defer server.Close()
+
+	oldURL := validation.PwnedAPIURL
+	validation.PwnedAPIURL = server.URL + "/"
+
+	code := m.Run()
+
+	validation.PwnedAPIURL = oldURL
+	os.Exit(code)
+}
 
 func TestEmail(t *testing.T) {
 	if err := validation.Email("test@example.com"); err != nil {
@@ -33,6 +59,9 @@ func TestPassword(t *testing.T) {
 	if err := validation.Password("ValidPass1!"); err != nil {
 		t.Error("valid password failed")
 	}
+	if err := validation.Password("PwnedPass1!"); err != validation.ErrPasswordCompromised {
+		t.Error("compromised password passed")
+	}
 }
 
 func TestPasswordWithComplexity(t *testing.T) {
@@ -42,6 +71,9 @@ func TestPasswordWithComplexity(t *testing.T) {
 	}
 	if err := validation.PasswordWithComplexity("123456", "low"); err != nil {
 		t.Errorf("low complexity expected ok")
+	}
+	if err := validation.PasswordWithComplexity("PwnedPass1!", "low"); err != validation.ErrPasswordCompromised {
+		t.Errorf("low complexity expected compromised check")
 	}
 
 	// medium
@@ -60,6 +92,9 @@ func TestPasswordWithComplexity(t *testing.T) {
 	if err := validation.PasswordWithComplexity("abcd!@#$", "medium"); err != nil {
 		t.Errorf("medium complexity expected ok with punctuation")
 	}
+	if err := validation.PasswordWithComplexity("PwnedPass1!", "medium"); err != validation.ErrPasswordCompromised {
+		t.Errorf("medium complexity expected compromised check")
+	}
 
 	// strong / default
 	if err := validation.PasswordWithComplexity("abcd1234", "strong"); err != validation.ErrPasswordNoUpper {
@@ -67,5 +102,8 @@ func TestPasswordWithComplexity(t *testing.T) {
 	}
 	if err := validation.PasswordWithComplexity("abcd1234", ""); err != validation.ErrPasswordNoUpper {
 		t.Errorf("default complexity expected no upper")
+	}
+	if err := validation.PasswordWithComplexity("PwnedPass1!", "strong"); err != validation.ErrPasswordCompromised {
+		t.Errorf("strong complexity expected compromised check")
 	}
 }

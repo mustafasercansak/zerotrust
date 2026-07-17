@@ -266,7 +266,7 @@ func run(ctx context.Context, cfg config) error {
 	settingsRepo := settings.NewRepository(db)
 	settingsCache := settings.NewCache(settingsRepo)
 	auditRepo.SetSettingsReader(settingsCache)
-	settingsHandler := settings.NewHandler(settingsRepo)
+	settingsHandler := settings.NewHandler(settingsRepo, settingsCache)
 
 	var mfaChecker auth.MFAChecker
 	if mfaSvc != nil {
@@ -275,6 +275,7 @@ func run(ctx context.Context, cfg config) error {
 	stepUpMFA := authmw.RequireRecentMFA(mfaChecker, rdb, stepUpMFAWindow)
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
+	sessionRepo.SetGeoIP(geoipSvc)
 	authSvc.ConfigureSecurityAnomalies(geoipSvc, resilientMailer)
 	auditRepo.SetIPLocator(func(ip string) (string, string) {
 		loc, err := geoipSvc.Lookup(ip)
@@ -815,6 +816,7 @@ func run(ctx context.Context, cfg config) error {
 			r.Post("/webauthn/register/begin", webauthnHandler.RegisterBegin)
 			r.Post("/webauthn/register/finish", webauthnHandler.RegisterFinish)
 			r.Get("/webauthn/credentials", webauthnHandler.List)
+			r.Patch("/webauthn/credentials/{id}", webauthnHandler.Rename)
 			r.Delete("/webauthn/credentials/{id}", webauthnHandler.Delete)
 
 			// User management

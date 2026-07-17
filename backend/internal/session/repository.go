@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zerotrust/backend/pkg/geoip"
 )
 
 var ErrNotFound = errors.New("session_not_found")
@@ -17,13 +19,22 @@ var ErrNotFound = errors.New("session_not_found")
 const activeSessionWindowSQL = "5 minutes"
 const tokenReuseGraceSQL = "5 seconds"
 
+type geoIPService interface {
+	Lookup(ip string) (*geoip.Location, error)
+}
+
 type Repository struct {
-	db  *pgxpool.Pool
-	hub *EventHub
+	db    *pgxpool.Pool
+	hub   *EventHub
+	geoip geoIPService
 }
 
 func NewRepository(db *pgxpool.Pool, hub *EventHub) *Repository {
 	return &Repository{db: db, hub: hub}
+}
+
+func (r *Repository) SetGeoIP(g geoIPService) {
+	r.geoip = g
 }
 
 // Create inserts a new session. ip is the client address (host:port or bare host).
@@ -233,13 +244,15 @@ func (r *Repository) EvictExcessSessions(ctx context.Context, userID string, kee
 
 // SessionInfo is the read model for session listing (no token hash exposed).
 type SessionInfo struct {
-	ID         string            `json:"id"`
-	IPAddress  string            `json:"ip_address"`
-	UserAgent  string            `json:"user_agent"`
-	DeviceInfo map[string]string `json:"device_info"`
-	CreatedAt  time.Time         `json:"created_at"`
-	LastUsedAt *time.Time        `json:"last_used_at"`
-	IsCurrent  bool              `json:"is_current"`
+	ID          string            `json:"id"`
+	IPAddress   string            `json:"ip_address"`
+	UserAgent   string            `json:"user_agent"`
+	DeviceInfo  map[string]string `json:"device_info"`
+	CreatedAt   time.Time         `json:"created_at"`
+	LastUsedAt  *time.Time        `json:"last_used_at"`
+	IsCurrent   bool              `json:"is_current"`
+	Location    string            `json:"location,omitempty"`
+	CountryCode string            `json:"country_code,omitempty"`
 }
 
 // ListForUser returns all active sessions for a user.
@@ -279,6 +292,16 @@ func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string
 			s.DeviceInfo = map[string]string{}
 		}
 		s.LastUsedAt = lastUsed
+		if r.geoip != nil && s.IPAddress != "" {
+			if loc, err := r.geoip.Lookup(s.IPAddress); err == nil && loc != nil {
+				s.CountryCode = loc.CountryCode
+				if loc.City != "" && loc.Country != "" {
+					s.Location = fmt.Sprintf("%s, %s", loc.City, loc.Country)
+				} else if loc.Country != "" {
+					s.Location = loc.Country
+				}
+			}
+		}
 		sessions = append(sessions, s)
 	}
 	return sessions, rows.Err()

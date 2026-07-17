@@ -105,3 +105,10 @@ func (c *Cache) GetBool(ctx context.Context, key string, defaultVal bool) bool {
 	}
 	return defaultVal
 }
+
+// Invalidate removes a cached value to force a fresh query on next read.
+func (c *Cache) Invalidate(key string) {
+	c.mu.Lock()
+	delete(c.vals, key)
+	c.mu.Unlock()
+}

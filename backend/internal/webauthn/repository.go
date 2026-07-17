@@ -2,9 +2,11 @@ package webauthn
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -18,6 +20,8 @@ type CredentialMeta struct {
 	SignCount  int64      `json:"sign_count"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
+	// AAGUID identifies the brand and model of the authenticating hardware/device.
+	AAGUID     string     `json:"aaguid,omitempty"`
 }
 
 type Repository struct {
@@ -60,10 +64,25 @@ func (r *Repository) ListData(ctx context.Context, userID string) ([][]byte, err
 	return out, rows.Err()
 }
 
+// aaguidToString converts a 16-byte AAGUID slice to its canonical UUID string representation.
+func aaguidToString(aaguid []byte) string {
+	if len(aaguid) != 16 {
+		return ""
+	}
+	u, err := uuid.FromBytes(aaguid)
+	if err != nil {
+		return ""
+	}
+	if u == uuid.Nil {
+		return ""
+	}
+	return u.String()
+}
+
 // ListMeta returns the display metadata for a user's credentials.
 func (r *Repository) ListMeta(ctx context.Context, userID string) ([]CredentialMeta, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id::text, name, sign_count, created_at, last_used_at
+		SELECT id::text, name, sign_count, created_at, last_used_at, data
 		FROM user_webauthn_credentials
 		WHERE user_id = $1
 		ORDER BY created_at
@@ -76,8 +95,17 @@ func (r *Repository) ListMeta(ctx context.Context, userID string) ([]CredentialM
 	out := make([]CredentialMeta, 0)
 	for rows.Next() {
 		var m CredentialMeta
-		if err := rows.Scan(&m.ID, &m.Name, &m.SignCount, &m.CreatedAt, &m.LastUsedAt); err != nil {
+		var data []byte
+		if err := rows.Scan(&m.ID, &m.Name, &m.SignCount, &m.CreatedAt, &m.LastUsedAt, &data); err != nil {
 			return nil, err
+		}
+		var rc struct {
+			Authenticator struct {
+				AAGUID []byte `json:"aaguid"`
+			} `json:"authenticator"`
+		}
+		if err := json.Unmarshal(data, &rc); err == nil && len(rc.Authenticator.AAGUID) == 16 {
+			m.AAGUID = aaguidToString(rc.Authenticator.AAGUID)
 		}
 		out = append(out, m)
 	}
@@ -136,6 +164,22 @@ func (r *Repository) Delete(ctx context.Context, id, userID string) error {
 	tag, err := r.db.Exec(ctx, `
 		DELETE FROM user_webauthn_credentials WHERE id = $1::uuid AND user_id = $2::uuid
 	`, id, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Rename updates the friendly name of one of a user's credentials by its row id.
+// The user_id scope prevents editing another user's credential. Returns ErrNotFound
+// if no matching row exists.
+func (r *Repository) Rename(ctx context.Context, id, userID, name string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE user_webauthn_credentials SET name = $3 WHERE id = $1::uuid AND user_id = $2::uuid
+	`, id, userID, name)
 	if err != nil {
 		return err
 	}

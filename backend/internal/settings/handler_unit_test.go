@@ -103,7 +103,7 @@ func TestWriteError(t *testing.T) {
 func TestHandlerList(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		store := &mockSettingsStore{allResult: map[string]string{"max_sessions_per_user": "5"}}
-		h := NewHandler(store)
+		h := NewHandler(store, nil)
 
 		req := httptest.NewRequest("GET", "/api/v1/admin/settings", nil)
 		rr := httptest.NewRecorder()
@@ -124,7 +124,7 @@ func TestHandlerList(t *testing.T) {
 
 	t.Run("repo error", func(t *testing.T) {
 		store := &mockSettingsStore{allErr: errors.New("boom")}
-		h := NewHandler(store)
+		h := NewHandler(store, nil)
 
 		req := httptest.NewRequest("GET", "/api/v1/admin/settings", nil)
 		rr := httptest.NewRecorder()
@@ -139,7 +139,7 @@ func TestHandlerList(t *testing.T) {
 func TestHandlerUpdate(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		store := &mockSettingsStore{}
-		h := NewHandler(store)
+		h := NewHandler(store, nil)
 
 		body := `{"password_complexity":"strong","global_mfa_required":"true"}`
 		req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString(body))
@@ -159,7 +159,7 @@ func TestHandlerUpdate(t *testing.T) {
 	})
 
 	t.Run("invalid json", func(t *testing.T) {
-		h := NewHandler(&mockSettingsStore{})
+		h := NewHandler(&mockSettingsStore{}, nil)
 		req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString("{bad"))
 		rr := httptest.NewRecorder()
 		h.Update(rr, req)
@@ -169,7 +169,7 @@ func TestHandlerUpdate(t *testing.T) {
 	})
 
 	t.Run("unknown setting", func(t *testing.T) {
-		h := NewHandler(&mockSettingsStore{})
+		h := NewHandler(&mockSettingsStore{}, nil)
 		req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString(`{"unknown":"1"}`))
 		rr := httptest.NewRecorder()
 		h.Update(rr, req)
@@ -179,7 +179,7 @@ func TestHandlerUpdate(t *testing.T) {
 	})
 
 	t.Run("invalid value", func(t *testing.T) {
-		h := NewHandler(&mockSettingsStore{})
+		h := NewHandler(&mockSettingsStore{}, nil)
 		req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString(`{"max_sessions_per_user":"0"}`))
 		rr := httptest.NewRecorder()
 		h.Update(rr, req)
@@ -189,7 +189,7 @@ func TestHandlerUpdate(t *testing.T) {
 	})
 
 	t.Run("repo set error", func(t *testing.T) {
-		h := NewHandler(&mockSettingsStore{setErr: errors.New("boom")})
+		h := NewHandler(&mockSettingsStore{setErr: errors.New("boom")}, nil)
 		req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString(`{"password_complexity":"low"}`))
 		rr := httptest.NewRecorder()
 		h.Update(rr, req)
@@ -197,4 +197,38 @@ func TestHandlerUpdate(t *testing.T) {
 			t.Fatalf("status=%d want=%d", rr.Code, http.StatusInternalServerError)
 		}
 	})
+}
+
+type mockCacheInvalidator struct {
+	invalidatedKeys []string
+}
+
+func (m *mockCacheInvalidator) Invalidate(key string) {
+	m.invalidatedKeys = append(m.invalidatedKeys, key)
+}
+
+func TestHandlerUpdate_CacheInvalidation(t *testing.T) {
+	store := &mockSettingsStore{}
+	invalidator := &mockCacheInvalidator{}
+	h := NewHandler(store, invalidator)
+
+	body := `{"password_complexity":"strong","global_mfa_required":"true"}`
+	req := httptest.NewRequest("PATCH", "/api/v1/admin/settings", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+	}
+
+	sort.Strings(invalidator.invalidatedKeys)
+	want := []string{"global_mfa_required", "password_complexity"}
+	if len(invalidator.invalidatedKeys) != len(want) {
+		t.Fatalf("invalidated keys=%v want=%v", invalidator.invalidatedKeys, want)
+	}
+	for i := range want {
+		if invalidator.invalidatedKeys[i] != want[i] {
+			t.Fatalf("invalidated key=%q want=%q", invalidator.invalidatedKeys[i], want[i])
+		}
+	}
 }

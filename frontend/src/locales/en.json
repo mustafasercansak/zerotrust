@@ -81,6 +81,7 @@
       "password_no_lowercase": "Password must contain at least one lowercase letter.",
       "password_no_digit": "Password must contain at least one digit.",
       "password_no_special": "Password must contain at least one special character (e.g. !@#$%).",
+      "password_compromised": "This password was found in a public data breach and is unsafe to use. Please choose a different password.",
       "forbidden": "You do not have permission to perform this action.",
       "registration_disabled": "Registration is currently disabled.",
       "passwords_mismatch": "Passwords do not match.",
@@ -160,8 +161,9 @@
         "password_no_uppercase": "Password must contain at least one uppercase letter.",
         "password_no_lowercase": "Password must contain at least one lowercase letter.",
         "password_no_digit": "Password must contain at least one digit.",
-        "password_no_special": "Password must contain at least one special character.",
+         "password_no_special": "Password must contain at least one special character.",
         "password_no_letter": "Password must contain at least one letter.",
+        "password_compromised": "This password was found in a public data breach and is unsafe to use. Please choose a different password.",
         "internal_error": "Server error. Please try again."
       }
     }
@@ -230,6 +232,7 @@
       "password_no_lowercase": "Password must contain at least one lowercase letter.",
       "password_no_digit": "Password must contain at least one digit.",
       "password_no_special": "Password must contain at least one special character.",
+      "password_compromised": "This password was found in a public data breach and is unsafe to use. Please choose a different password.",
       "invalid_profile": "First and last name must be 80 characters or fewer.",
       "mfa_required": "This action requires a recent MFA verification.",
       "internal_error": "Server error. Please try again."
@@ -539,6 +542,9 @@
       "lastUsed": "Last used {{date}}",
       "neverUsed": "Never used",
       "remove": "Remove",
+      "rename": "Rename",
+      "renamePrompt": "Enter a new name for this passkey:",
+      "renameSuccess": "Passkey renamed successfully.",
       "loadError": "Failed to load passkeys",
       "removeError": "Failed to remove passkey",
       "duplicateError": "That authenticator is already registered.",

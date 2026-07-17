@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import ResetPasswordPage from "./ResetPasswordPage";
 import { api, ApiError } from "@/lib/api";
@@ -101,6 +101,10 @@ describe("ResetPasswordPage component", () => {
     mockToken = "token123";
     vi.clearAllMocks();
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("handles input changes successfully", () => {

@@ -23,8 +23,11 @@ type fakeService struct {
 	finishBody []byte
 	listMeta   []CredentialMeta
 	listErr    error
-	deleteErr  error
-	deletedID  string
+	deleteErr   error
+	deletedID   string
+	renameErr   error
+	renamedID   string
+	renamedName string
 }
 
 func (f *fakeService) BeginRegistration(_ context.Context, _, _, _ string) (json.RawMessage, error) {
@@ -41,6 +44,11 @@ func (f *fakeService) ListCredentials(_ context.Context, _ string) ([]Credential
 func (f *fakeService) DeleteCredential(_ context.Context, id, _ string) error {
 	f.deletedID = id
 	return f.deleteErr
+}
+func (f *fakeService) RenameCredential(_ context.Context, id, _, name string) error {
+	f.renamedID = id
+	f.renamedName = name
+	return f.renameErr
 }
 
 func authedReq(method, body string) *http.Request {
@@ -294,5 +302,62 @@ func TestRegisterFinish_NoAlertWithoutNotifier(t *testing.T) {
 	h.RegisterFinish(w, authedReq(http.MethodPost, `{"credential":{"id":"abc"}}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestRename_RequiresAuth(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.Rename(w, httptest.NewRequest(http.MethodPatch, "/", bytes.NewBufferString(`{"name":"New"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestRename_InvalidRequest(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.Rename(w, authedReq(http.MethodPatch, `bad`))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestRename_NameCannotBeEmpty(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	w := httptest.NewRecorder()
+	h.Rename(w, authedReq(http.MethodPatch, `{"name":"  "}`))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestRename_NotFound(t *testing.T) {
+	h := NewHandler(&fakeService{renameErr: ErrNotFound})
+	r := authedReq(http.MethodPatch, `{"name":"New Key"}`)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "missing")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	h.Rename(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestRename_Success(t *testing.T) {
+	f := &fakeService{}
+	h := NewHandler(f)
+	r := authedReq(http.MethodPatch, `{"name":"New Key"}`)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "c1")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	h.Rename(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if f.renamedID != "c1" || f.renamedName != "New Key" {
+		t.Fatalf("expected rename of c1 to 'New Key', got id=%q, name=%q", f.renamedID, f.renamedName)
 	}
 }

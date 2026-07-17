@@ -54,7 +54,7 @@ func TestRepositoryWebAuthnLifecycle(t *testing.T) {
 	}
 
 	// Insert a credential.
-	if err := repo.Insert(ctx, userID, "cred-1", []byte(`{"id":"AQ"}`), 0, "YubiKey"); err != nil {
+	if err := repo.Insert(ctx, userID, "cred-1", []byte(`{"id":"AQ","authenticator":{"aaguid":"rZoBGXQnR9aEHPJkQASduA=="}}`), 0, "YubiKey"); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 	if n, _ := repo.Count(ctx, userID); n != 1 {
@@ -76,7 +76,7 @@ func TestRepositoryWebAuthnLifecycle(t *testing.T) {
 		t.Fatalf("ListData blob = %s, parsed id=%q err=%v", blobs[0], got.ID, err)
 	}
 	metas, err := repo.ListMeta(ctx, userID)
-	if err != nil || len(metas) != 1 || metas[0].Name != "YubiKey" || metas[0].LastUsedAt != nil {
+	if err != nil || len(metas) != 1 || metas[0].Name != "YubiKey" || metas[0].LastUsedAt != nil || metas[0].AAGUID != "ad9a0119-7427-47d6-841c-722440049db8" {
 		t.Fatalf("ListMeta = %+v, err=%v", metas, err)
 	}
 	credRowID := metas[0].ID
@@ -88,6 +88,18 @@ func TestRepositoryWebAuthnLifecycle(t *testing.T) {
 	metas, _ = repo.ListMeta(ctx, userID)
 	if metas[0].SignCount != 5 || metas[0].LastUsedAt == nil {
 		t.Fatalf("after login meta = %+v", metas[0])
+	}
+
+	// Rename.
+	if err := repo.Rename(ctx, credRowID, "00000000-0000-0000-0000-000000000000", "New Name"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rename by wrong owner = %v, want ErrNotFound", err)
+	}
+	if err := repo.Rename(ctx, credRowID, userID, "New Name"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	metas, _ = repo.ListMeta(ctx, userID)
+	if metas[0].Name != "New Name" {
+		t.Fatalf("expected renamed name 'New Name', got %q", metas[0].Name)
 	}
 
 	// Delete is scoped to the owner.

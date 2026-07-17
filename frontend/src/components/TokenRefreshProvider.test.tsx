@@ -97,6 +97,7 @@ describe("TokenRefreshProvider component", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("does not register refresh or SSE if pathname is an auth page", () => {

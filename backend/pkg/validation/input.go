@@ -15,6 +15,7 @@ var (
 	ErrPasswordNoSpecial = errors.New("password_no_special")
 	ErrPasswordTooShort6 = errors.New("password_too_short_6")
 	ErrPasswordNoLetter  = errors.New("password_no_letter")
+	ErrPasswordCompromised = errors.New("password_compromised")
 )
 
 var emailRe = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -55,6 +56,9 @@ func Password(password string) error {
 	if !hasSpecial {
 		return ErrPasswordNoSpecial
 	}
+	if pwned, err := IsPasswordPwned(password); err == nil && pwned {
+		return ErrPasswordCompromised
+	}
 	return nil
 }
 
@@ -63,6 +67,9 @@ func PasswordWithComplexity(password string, complexity string) error {
 	case "low":
 		if len(password) < 6 {
 			return ErrPasswordTooShort6
+		}
+		if pwned, err := IsPasswordPwned(password); err == nil && pwned {
+			return ErrPasswordCompromised
 		}
 		return nil
 	case "medium":
@@ -82,6 +89,9 @@ func PasswordWithComplexity(password string, complexity string) error {
 		}
 		if !hasDigit {
 			return ErrPasswordNoDigit
+		}
+		if pwned, err := IsPasswordPwned(password); err == nil && pwned {
+			return ErrPasswordCompromised
 		}
 		return nil
 	case "strong":

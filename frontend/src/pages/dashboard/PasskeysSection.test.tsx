@@ -287,4 +287,117 @@ describe("PasskeysSection", () => {
       expect(toast.error).toHaveBeenCalledWith("passkeys.removeError");
     });
   });
+
+  // ── handleRename ─────────────────────────────────────────────────────────────
+
+  it("handleRename: does nothing when user cancels prompt", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    listSpy.mockResolvedValue({
+      credentials: [
+        { id: "cred-abc", name: "iPhone", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+    const renameSpy = vi.spyOn(api, "webauthnRenameCredential").mockResolvedValue({ ok: true });
+
+    render(<PasskeysSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText("iPhone")).toBeDefined();
+    });
+
+    const renameBtn = screen.getByRole("button", { name: "passkeys.rename" });
+    fireEvent.click(renameBtn);
+
+    expect(promptSpy).toHaveBeenCalledWith("passkeys.renamePrompt", "iPhone");
+    expect(renameSpy).not.toHaveBeenCalled();
+  });
+
+  it("handleRename: shows error toast on empty name input", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    listSpy.mockResolvedValue({
+      credentials: [
+        { id: "cred-abc", name: "iPhone", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("   ");
+
+    render(<PasskeysSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText("iPhone")).toBeDefined();
+    });
+
+    const renameBtn = screen.getByRole("button", { name: "passkeys.rename" });
+    fireEvent.click(renameBtn);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("passkeys.renameError");
+    });
+  });
+
+  it("handleRename: calls renameCredential and refreshes list on success", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    listSpy.mockResolvedValue({
+      credentials: [
+        { id: "cred-abc", name: "iPhone", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("New iPhone");
+    const renameSpy = vi.spyOn(api, "webauthnRenameCredential").mockResolvedValue({ ok: true });
+
+    render(<PasskeysSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText("iPhone")).toBeDefined();
+    });
+
+    const renameBtn = screen.getByRole("button", { name: "passkeys.rename" });
+    fireEvent.click(renameBtn);
+
+    await waitFor(() => {
+      expect(renameSpy).toHaveBeenCalledWith("cred-abc", "New iPhone");
+      expect(toast.success).toHaveBeenCalledWith("passkeys.renameSuccess");
+      expect(listSpy).toHaveBeenCalled();
+    });
+  });
+
+  it("handleRename: shows error toast on rename failure", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    listSpy.mockResolvedValue({
+      credentials: [
+        { id: "cred-abc", name: "iPhone", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("New iPhone");
+    vi.spyOn(api, "webauthnRenameCredential").mockRejectedValue(new Error("rename failed"));
+
+    render(<PasskeysSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText("iPhone")).toBeDefined();
+    });
+
+    const renameBtn = screen.getByRole("button", { name: "passkeys.rename" });
+    fireEvent.click(renameBtn);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("passkeys.renameError");
+    });
+  });
+
+  it("renders the friendly brand name badge when aaguid is known", async () => {
+    vi.mocked(isWebAuthnSupported).mockReturnValue(true);
+    listSpy.mockResolvedValue({
+      credentials: [
+        { id: "c1", name: "My Work Key", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null, aaguid: "ad9a0119-7427-47d6-841c-722440049db8" },
+      ],
+    });
+
+    render(<PasskeysSection />);
+    await waitFor(() => {
+      expect(screen.getByText("My Work Key")).toBeDefined();
+      expect(screen.getByText("YubiKey 5 Series")).toBeDefined();
+    });
+  });
 });

@@ -17,6 +17,7 @@ type service interface {
 	FinishRegistration(ctx context.Context, userID, name, displayName, credName string, responseBody []byte) error
 	ListCredentials(ctx context.Context, userID string) ([]CredentialMeta, error)
 	DeleteCredential(ctx context.Context, id, userID string) error
+	RenameCredential(ctx context.Context, id, userID, name string) error
 }
 
 type notifier interface {
@@ -136,6 +137,39 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 				"A passkey was removed from your account.")
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found")
+	default:
+		writeError(w, http.StatusInternalServerError, "internal_error")
+	}
+}
+
+// PATCH /api/v1/webauthn/credentials/{id} — rename one of the user's passkeys.
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
+	claims := authmw.ClaimsFrom(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name_cannot_be_empty")
+		return
+	}
+
+	err := h.svc.RenameCredential(r.Context(), id, claims.UserID, name)
+	switch {
+	case err == nil:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	case errors.Is(err, ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found")
 	default:

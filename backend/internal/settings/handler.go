@@ -176,8 +176,13 @@ var allowedKeys = map[string]func(string) bool{
 	},
 }
 
+type CacheInvalidator interface {
+	Invalidate(key string)
+}
+
 type Handler struct {
-	repo SettingsStore
+	repo  SettingsStore
+	cache CacheInvalidator
 }
 
 type SettingsStore interface {
@@ -185,8 +190,8 @@ type SettingsStore interface {
 	Set(ctx context.Context, key, value string) error
 }
 
-func NewHandler(repo SettingsStore) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo SettingsStore, cache CacheInvalidator) *Handler {
+	return &Handler{repo: repo, cache: cache}
 }
 
 // GET /api/v1/admin/settings
@@ -224,6 +229,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		if err := h.repo.Set(r.Context(), k, v); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error")
 			return
+		}
+		if h.cache != nil {
+			h.cache.Invalidate(k)
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)

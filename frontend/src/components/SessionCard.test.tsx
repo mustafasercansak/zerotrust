@@ -101,4 +101,17 @@ describe("SessionCard", () => {
     const html = runRender({ session: { ...baseSession, ip_address: "" } });
     expect(html).toContain("—");
   });
+
+  it("renders location and flag emoji when location is present", () => {
+    const html = runRender({
+      session: {
+        ...baseSession,
+        location: "Mountain View, United States",
+        country_code: "US",
+      },
+    });
+    expect(html).toContain("Mountain View, United States");
+    // US flag emoji is 🇺🇸
+    expect(html).toContain("🇺🇸");
+  });
 });

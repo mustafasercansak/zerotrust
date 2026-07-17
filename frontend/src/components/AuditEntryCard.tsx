@@ -24,6 +24,29 @@ interface AuditEntryCardProps {
   onClick?: (entry: AuditEntry) => void;
 }
 
+const countryNameToFlag: Record<string, string> = {
+  "united states": "🇺🇸",
+  "turkey": "🇹🇷",
+  "türkiye": "🇹🇷",
+  "united kingdom": "🇬🇧",
+  "germany": "🇩🇪",
+  "france": "🇫🇷",
+  "japan": "🇯🇵",
+  "australia": "🇦🇺",
+  "canada": "🇨🇦",
+  "netherlands": "🇳🇱",
+  "switzerland": "🇨🇭",
+  "sweden": "🇸🇪",
+  "singapore": "🇸🇬",
+  "local": "💻",
+  "localhost": "💻",
+};
+
+function getCountryFlag(country?: string): string {
+  if (!country) return "";
+  return countryNameToFlag[country.toLowerCase()] || "📍";
+}
+
 export function AuditEntryCard({
   entry,
   locale,
@@ -40,6 +63,13 @@ export function AuditEntryCard({
     : isFailure
     ? "error.main"
     : "divider";
+
+  const location = entry.metadata?.location as { country?: string; city?: string } | undefined;
+  const locationText = location
+    ? location.city && location.country
+      ? `${location.city}, ${location.country}`
+      : location.country || ""
+    : "";
 
   return (
     <Paper
@@ -87,19 +117,57 @@ export function AuditEntryCard({
           </Typography>
 
           {!compact && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              noWrap
-              sx={{ display: "block" }}
-            >
-              {entry.ip_address || "—"}
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mt: 0.25 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+              >
+                {entry.ip_address || "—"}
+              </Typography>
+              {locationText && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 0.5,
+                    fontSize: "0.675rem",
+                    bgcolor: "rgba(99, 102, 241, 0.08)",
+                    border: "1px solid rgba(99, 102, 241, 0.15)",
+                    px: 0.6,
+                    py: 0.05,
+                    borderRadius: 0.5,
+                    color: "#818cf8",
+                    fontWeight: 600,
+                  }}
+                >
+                  {getCountryFlag(location?.country)} {locationText}
+                </Typography>
+              )}
+            </Box>
           )}
 
-          <Typography variant="caption" color="text.disabled">
-            {formatDateTime(entry.created_at, locale)}
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+            <Typography variant="caption" color="text.disabled">
+              {formatDateTime(entry.created_at, locale)}
+            </Typography>
+            {compact && locationText && (
+              <Typography
+                variant="caption"
+                sx={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 0.25,
+                  fontSize: "0.625rem",
+                  color: "text.secondary",
+                }}
+              >
+                · {getCountryFlag(location?.country)} {locationText}
+              </Typography>
+            )}
+          </Box>
         </Box>
 
         {outcome && (

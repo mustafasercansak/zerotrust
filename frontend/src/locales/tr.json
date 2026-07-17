@@ -81,6 +81,7 @@
       "password_no_lowercase": "Şifre en az bir küçük harf içermelidir.",
       "password_no_digit": "Şifre en az bir rakam içermelidir.",
       "password_no_special": "Şifre en az bir özel karakter içermelidir (örn. !@#$%).",
+      "password_compromised": "Bu şifre daha önce gerçekleşen bir veri sızıntısında ifşa olmuştur ve güvenli değildir. Lütfen başka bir şifre seçin.",
       "forbidden": "Bu işlem için yetkiniz yok.",
       "registration_disabled": "Kayıt şu anda devre dışıdır.",
       "passwords_mismatch": "Şifreler eşleşmiyor.",
@@ -160,8 +161,9 @@
         "password_no_uppercase": "Şifre en az bir büyük harf içermelidir.",
         "password_no_lowercase": "Şifre en az bir küçük harf içermelidir.",
         "password_no_digit": "Şifre en az bir rakam içermelidir.",
-        "password_no_special": "Şifre en az bir özel karakter içermelidir.",
+         "password_no_special": "Şifre en az bir özel karakter içermelidir.",
         "password_no_letter": "Şifre en az bir harf içermelidir.",
+        "password_compromised": "Bu şifre daha önce gerçekleşen bir veri sızıntısında ifşa olmuştur ve güvenli değildir. Lütfen başka bir şifre seçin.",
         "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
       }
     }
@@ -230,6 +232,7 @@
       "password_no_lowercase": "Şifre en az bir küçük harf içermelidir.",
       "password_no_digit": "Şifre en az bir rakam içermelidir.",
       "password_no_special": "Şifre en az bir özel karakter içermelidir.",
+      "password_compromised": "Bu şifre daha önce gerçekleşen bir veri sızıntısında ifşa olmuştur ve güvenli değildir. Lütfen başka bir şifre seçin.",
       "invalid_profile": "Ad ve soyad en fazla 80 karakter olmalıdır.",
       "mfa_required": "Bu işlem için yakın zamanda MFA doğrulaması gerekir.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."
@@ -539,6 +542,9 @@
       "lastUsed": "Son kullanım {{date}}",
       "neverUsed": "Hiç kullanılmadı",
       "remove": "Kaldır",
+      "rename": "Yeniden Adlandır",
+      "renamePrompt": "Bu geçiş anahtarı için yeni bir ad girin:",
+      "renameSuccess": "Geçiş anahtarı başarıyla yeniden adlandırıldı.",
       "loadError": "Geçiş anahtarları yüklenemedi",
       "removeError": "Geçiş anahtarı kaldırılamadı",
       "duplicateError": "Bu kimlik doğrulayıcı zaten kayıtlı.",

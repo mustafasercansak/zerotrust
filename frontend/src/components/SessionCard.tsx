@@ -23,6 +23,19 @@ interface SessionCardProps {
   locale: string;
 }
 
+function getFlagEmoji(countryCode?: string): string {
+  if (!countryCode || countryCode.length !== 2) return "";
+  const codePoints = countryCode
+    .toUpperCase()
+    .split("")
+    .map((char) => 127397 + char.charCodeAt(0));
+  try {
+    return String.fromCodePoint(...codePoints);
+  } catch {
+    return "";
+  }
+}
+
 export function SessionCard({ session: s, onRevoke, locale }: SessionCardProps) {
   const { t } = useTranslation("admin");
 
@@ -74,13 +87,35 @@ export function SessionCard({ session: s, onRevoke, locale }: SessionCardProps) 
             )}
           </Box>
 
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ fontFamily: "monospace" }}
-          >
-            {s.ip_address || "—"}
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontFamily: "monospace" }}
+            >
+              {s.ip_address || "—"}
+            </Typography>
+            {s.location && (
+              <Typography
+                variant="caption"
+                sx={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  bgcolor: "rgba(99, 102, 241, 0.1)",
+                  color: "#818cf8",
+                  px: 0.8,
+                  py: 0.1,
+                  borderRadius: 0.5,
+                  fontWeight: 600,
+                  fontSize: "0.675rem",
+                  border: "1px solid rgba(99, 102, 241, 0.2)"
+                }}
+              >
+                {s.country_code ? `${getFlagEmoji(s.country_code)} ` : ""}{s.location}
+              </Typography>
+            )}
+          </Box>
 
           <Typography
             variant="caption"
