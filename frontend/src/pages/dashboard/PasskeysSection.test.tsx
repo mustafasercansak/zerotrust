@@ -390,7 +390,7 @@ describe("PasskeysSection", () => {
     vi.mocked(isWebAuthnSupported).mockReturnValue(true);
     listSpy.mockResolvedValue({
       credentials: [
-        { id: "c1", name: "My Work Key", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null, aaguid: "ad9a0119-7427-47d6-841c-722440049db8" },
+        { id: "c1", name: "My Work Key", sign_count: 0, created_at: "2026-01-01T00:00:00Z", last_used_at: null, aaguid: "ad9a0119-7427-47d6-841c-f26440049db8" },
       ],
     });
 

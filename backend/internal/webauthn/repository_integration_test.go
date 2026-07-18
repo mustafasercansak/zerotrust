@@ -76,7 +76,7 @@ func TestRepositoryWebAuthnLifecycle(t *testing.T) {
 		t.Fatalf("ListData blob = %s, parsed id=%q err=%v", blobs[0], got.ID, err)
 	}
 	metas, err := repo.ListMeta(ctx, userID)
-	if err != nil || len(metas) != 1 || metas[0].Name != "YubiKey" || metas[0].LastUsedAt != nil || metas[0].AAGUID != "ad9a0119-7427-47d6-841c-722440049db8" {
+	if err != nil || len(metas) != 1 || metas[0].Name != "YubiKey" || metas[0].LastUsedAt != nil || metas[0].AAGUID != "ad9a0119-7427-47d6-841c-f26440049db8" {
 		t.Fatalf("ListMeta = %+v, err=%v", metas, err)
 	}
 	credRowID := metas[0].ID

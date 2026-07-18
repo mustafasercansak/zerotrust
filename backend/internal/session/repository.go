@@ -261,7 +261,7 @@ type SessionInfo struct {
 func (r *Repository) ListForUser(ctx context.Context, userID, currentHash string) ([]SessionInfo, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id::text,
-		       COALESCE(ip_address::text, ''),
+		       COALESCE(host(ip_address), ''),
 		       user_agent,
 		       COALESCE(device_info, '{}'::jsonb),
 		       created_at,
@@ -423,7 +423,7 @@ func parseAddr(addr string) *netip.Addr {
 // GetActiveSessions fetches active sessions returning a map slice to avoid package cycles.
 func (r *Repository) GetActiveSessions(ctx context.Context, userID string) ([]map[string]any, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT COALESCE(ip_address::text, ''),
+		SELECT COALESCE(host(ip_address), ''),
 		       user_agent,
 		       COALESCE(device_info, '{}'::jsonb),
 		       created_at,

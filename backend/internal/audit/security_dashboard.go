@@ -186,7 +186,7 @@ func (r *Repository) SecurityDashboard(ctx context.Context, rangeValue string) (
 	}
 
 	if result.FailedLoginIPs, err = r.securityCounts(ctx, `
-		SELECT ip_address::text, COUNT(*)
+		SELECT host(ip_address), COUNT(*)
 		FROM audit_logs
 		WHERE created_at >= $1 AND action = 'auth.login_failed' AND ip_address IS NOT NULL
 		GROUP BY 1

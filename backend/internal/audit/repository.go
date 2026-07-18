@@ -276,7 +276,7 @@ func (r *Repository) List(ctx context.Context, p ListParams) (ListResult, error)
 		       u.email,
 		       a.action,
 		       a.resource,
-		       a.ip_address::text,
+		       host(a.ip_address),
 		       a.user_agent,
 		       COALESCE(a.metadata, '{}'::jsonb),
 		       to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')

@@ -18,7 +18,7 @@ import Edit from "@mui/icons-material/Edit";
 function getAuthenticatorName(aaguid?: string): string | null {
   if (!aaguid) return null;
   const common: Record<string, string> = {
-    "ad9a0119-7427-47d6-841c-722440049db8": "YubiKey 5 Series",
+    "ad9a0119-7427-47d6-841c-f26440049db8": "YubiKey 5 Series",
     "2fc0579f-818a-4990-843e-055d288d6896": "YubiKey 5C Series",
     "f8a011f3-8c53-41c5-b46b-bd34fd7c1400": "YubiKey 5 Series",
     "39a11974-2747-d684-1c72-2440049db8a7": "YubiKey 5 Series",
