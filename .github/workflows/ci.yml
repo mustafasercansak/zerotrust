@@ -67,7 +67,7 @@ jobs:
           printf '{"schemaVersion":1,"label":"backend coverage","message":"%s","color":"brightgreen"}' "$COV" > badges/backend-coverage.json
 
       - name: Upload badge data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: badges-backend
           path: backend/badges/
@@ -110,7 +110,7 @@ jobs:
           printf '{"schemaVersion":1,"label":"frontend coverage","message":"%s%%","color":"brightgreen"}' "$COV" > badges/frontend-coverage.json
 
       - name: Upload badge data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: badges-frontend
           path: frontend/badges/
@@ -175,12 +175,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: badges-backend
           path: docs/badges
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: badges-frontend
           path: docs/badges
