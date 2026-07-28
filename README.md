@@ -1,5 +1,9 @@
 # ZeroTrust
 
+[![CI](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml/badge.svg)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mustafasercansak/zerotrust?filename=backend/go.mod)](backend/go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A security-focused Zero Trust authentication and authorization platform built with Go, React, Vite, PostgreSQL, Redis, and Docker.
 
 > **Live Showcase:** [English](https://mustafasercansak.github.io/zerotrust/) · [Türkçe](https://mustafasercansak.github.io/zerotrust/?lang=tr)
