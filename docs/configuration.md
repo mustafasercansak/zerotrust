@@ -73,7 +73,7 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out secrets/jwt_pr
 | `TLS_CERT_FILE` | _(empty)_ | If `TLS_ENABLED=true` | Path to the PEM certificate chain. |
 | `TLS_KEY_FILE` | _(empty)_ | If `TLS_ENABLED=true` | Path to the PEM private key. |
 
-When TLS is enabled, the server offers the hybrid post-quantum key exchange **X25519MLKEM768** (RFC 9370) first, falling back to classical X25519/P-256 for clients without ML-KEM support. This protects recorded traffic against future "harvest now, decrypt later" attacks. In the default compose setup TLS is terminated by nginx and these variables are unused.
+When TLS is enabled, the server offers the hybrid post-quantum key exchange **X25519MLKEM768** (draft-ietf-tls-ecdhe-mlkem) first, falling back to classical X25519/P-256 for clients without ML-KEM support. This protects recorded traffic against future "harvest now, decrypt later" attacks. In the default compose setup TLS is terminated by nginx and these variables are unused.
 
 ---
 

@@ -70,7 +70,7 @@ A security-focused Zero Trust authentication and authorization platform built wi
 | Feature | Detail |
 |---|---|
 | Crypto-Agile JWT | EdDSA (default), ES256, or RS256 access tokens (1 min TTL), selectable via `JWT_SIGNING_ALG`; alg pinned per key to prevent algorithm confusion |
-| Hybrid Post-Quantum TLS | X25519MLKEM768 key exchange (RFC 9370, Go 1.24+) when the Go server terminates TLS directly, with classical fallback — harvest-now-decrypt-later mitigation |
+| Hybrid Post-Quantum TLS | X25519MLKEM768 key exchange (draft-ietf-tls-ecdhe-mlkem, Go 1.24+) when the Go server terminates TLS directly, with classical fallback — harvest-now-decrypt-later mitigation |
 | DPoP (RFC 9449) | Proof-of-Possession binding access tokens to asymmetric client keys |
 | httpOnly Cookies | Access + refresh tokens never exposed to JS |
 | CSRF Protection | Double-submit cookie pattern (`X-CSRF-Token`) |

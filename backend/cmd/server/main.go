@@ -953,7 +953,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	// When TLS is terminated by the Go server itself (TLS_ENABLED=true), offer
-	// the hybrid post-quantum key exchange X25519MLKEM768 (RFC 9370) first.
+	// the hybrid post-quantum key exchange X25519MLKEM768 (draft-ietf-tls-ecdhe-mlkem) first.
 	if cfg.TLSEnabled {
 		srv.TLSConfig = serverTLSConfig()
 	}
@@ -1006,7 +1006,7 @@ func run(ctx context.Context, cfg config) error {
 
 // serverTLSConfig returns the TLS configuration used when the Go server
 // terminates TLS itself. The hybrid post-quantum key exchange X25519MLKEM768
-// (RFC 9370) is offered first; Go 1.24+ supports it natively, and clients
+// (draft-ietf-tls-ecdhe-mlkem) is offered first; Go 1.24+ supports it natively, and clients
 // without ML-KEM support fall back to classical X25519/P-256.
 func serverTLSConfig() *tls.Config {
 	return &tls.Config{

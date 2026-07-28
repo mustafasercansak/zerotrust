@@ -104,7 +104,7 @@ Browser                         Backend (middleware stack)
 
 **Crypto-agility:** the signing layer is algorithm-agnostic. `JWT_SIGNING_ALG` selects EdDSA (default), ES256, or RS256; each key in the keystore carries its own algorithm, so rotation between different algorithms is supported, and token validation pins the `alg` header to the key identified by `kid` (algorithm-confusion protection). Post-quantum signature schemes (e.g. ML-DSA) can be added the same way once JOSE registrations are finalized.
 
-**Hybrid post-quantum TLS:** when the Go server terminates TLS directly (`TLS_ENABLED=true`), it prefers the X25519MLKEM768 hybrid key exchange (RFC 9370, native in Go 1.24+) with automatic fallback to classical curves — mitigating "harvest now, decrypt later" collection of recorded traffic.
+**Hybrid post-quantum TLS:** when the Go server terminates TLS directly (`TLS_ENABLED=true`), it prefers the X25519MLKEM768 hybrid key exchange (draft-ietf-tls-ecdhe-mlkem, native in Go 1.24+) with automatic fallback to classical curves — mitigating "harvest now, decrypt later" collection of recorded traffic.
 
 **Why 1-minute access token TTL?** Short TTL limits the damage window if a token is captured. The refresh-token rotation model (one use per token) means stolen refresh tokens are detected on reuse.
 

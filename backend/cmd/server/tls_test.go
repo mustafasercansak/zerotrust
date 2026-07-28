@@ -72,7 +72,7 @@ func dialAndGetCurve(t *testing.T, clientConfig *tls.Config) tls.CurveID {
 }
 
 // TestHybridTLSNegotiatesMLKEM verifies that the server's TLS configuration
-// negotiates the hybrid post-quantum key exchange X25519MLKEM768 (RFC 9370)
+// negotiates the hybrid post-quantum key exchange X25519MLKEM768 (draft-ietf-tls-ecdhe-mlkem)
 // with a default Go client.
 func TestHybridTLSNegotiatesMLKEM(t *testing.T) {
 	curve := dialAndGetCurve(t, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // test-only, no verification needed
