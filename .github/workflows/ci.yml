@@ -52,11 +52,26 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -count=1 -p 1 ./...
+        run: go test -count=1 -p 1 -json -coverprofile=coverage.out ./... | tee test-results.json
         env:
           TEST_DATABASE_URL: postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_test?sslmode=disable
           TEST_REDIS_ADDR: localhost:6379
           TEST_REDIS_PASSWORD: ""
+
+      - name: Generate badge data
+        run: |
+          TOTAL=$(jq -s '[.[] | select(.Action == "pass" and has("Test"))] | length' test-results.json)
+          COV=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}')
+          mkdir -p badges
+          printf '{"schemaVersion":1,"label":"backend tests","message":"%s passing","color":"brightgreen"}' "$TOTAL" > badges/backend-tests.json
+          printf '{"schemaVersion":1,"label":"backend coverage","message":"%s","color":"brightgreen"}' "$COV" > badges/backend-coverage.json
+
+      - name: Upload badge data
+        uses: actions/upload-artifact@v4
+        with:
+          name: badges-backend
+          path: backend/badges/
+          retention-days: 1
 
   frontend:
     name: Frontend
@@ -84,7 +99,22 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm run test
+        run: npm run test:cover 2>&1 | tee test-output.txt
+
+      - name: Generate badge data
+        run: |
+          TOTAL=$(grep -oP 'Tests\s+\K\d+(?= passed)' test-output.txt | tail -n 1)
+          COV=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
+          mkdir -p badges
+          printf '{"schemaVersion":1,"label":"frontend tests","message":"%s passing","color":"brightgreen"}' "$TOTAL" > badges/frontend-tests.json
+          printf '{"schemaVersion":1,"label":"frontend coverage","message":"%s%%","color":"brightgreen"}' "$COV" > badges/frontend-coverage.json
+
+      - name: Upload badge data
+        uses: actions/upload-artifact@v4
+        with:
+          name: badges-frontend
+          path: frontend/badges/
+          retention-days: 1
 
       - name: Build
         run: npm run build
@@ -132,3 +162,40 @@ jobs:
             exit 1
           fi
           echo "npm audit clean (only accepted GHSA-qwww-vcr4-c8h2 present)"
+
+  badges:
+    name: Update badge data
+    needs: [backend, frontend]
+    # Only refresh badge data on green pushes to the default branch.
+    if: github.event_name == 'push' && needs.backend.result == 'success' && needs.frontend.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: badges-backend
+          path: docs/badges
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: badges-frontend
+          path: docs/badges
+
+      - name: Commit badge data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/badges/
+          if git diff --cached --quiet; then
+            echo "Badge data unchanged"
+            exit 0
+          fi
+          # [skip ci] prevents this commit from re-triggering this workflow;
+          # pages.yml still picks it up via its docs/** path filter.
+          git commit -m "chore: update test and coverage badge data [skip ci]"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push

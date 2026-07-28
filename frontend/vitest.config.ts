@@ -11,7 +11,8 @@ export default defineConfig({
     environment: 'jsdom',
     exclude: ['node_modules', 'e2e/**'],
     coverage: {
-      include: ['src/**/*.ts', 'src/**/*.tsx']
+      include: ['src/**/*.ts', 'src/**/*.tsx'],
+      reporter: ['text', 'json-summary', 'json', 'html']
     }
   }
 })
