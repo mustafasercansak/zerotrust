@@ -118,4 +118,17 @@ jobs:
 
       - name: Run npm audit (high+)
         working-directory: frontend
-        run: npm audit --audit-level=high
+        # GHSA-qwww-vcr4-c8h2 (react-router RSC-mode CSRF) is accepted: it only
+        # affects React Server Components / server actions, which this Vite SPA
+        # does not use. Any other high/critical advisory fails the job.
+        # Re-evaluate when a patched react-router release ships.
+        run: |
+          npm audit --audit-level=high --json > audit.json || true
+          OTHER=$(jq '[.vulnerabilities | to_entries[] | select(.key != "react-router" and .key != "react-router-dom") | select(.value.severity == "high" or .value.severity == "critical")] | length' audit.json)
+          RR=$(jq '[.vulnerabilities["react-router"].via[]? | select(type == "object") | select(.url | endswith("GHSA-qwww-vcr4-c8h2") | not)] | length' audit.json)
+          if [ "$OTHER" != "0" ] || [ "$RR" != "0" ]; then
+            echo "Unexpected high/critical vulnerabilities found:"
+            npm audit --audit-level=high || true
+            exit 1
+          fi
+          echo "npm audit clean (only accepted GHSA-qwww-vcr4-c8h2 present)"
