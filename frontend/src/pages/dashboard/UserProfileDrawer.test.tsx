@@ -44,6 +44,7 @@ describe("UserProfileDrawer component", () => {
   const onRevoke = vi.fn().mockResolvedValue(undefined);
   const onRevokeAll = vi.fn().mockResolvedValue(undefined);
   const onStatusChange = vi.fn().mockResolvedValue(undefined);
+  const onUnlock = vi.fn().mockResolvedValue(undefined);
 
   let listUserSessionsSpy: any;
   let listAuditLogSpy: any;
@@ -70,6 +71,7 @@ describe("UserProfileDrawer component", () => {
     onRevoke,
     onRevokeAll,
     onStatusChange,
+    onUnlock,
     isSelf: false,
     ...extra,
   });
@@ -80,6 +82,7 @@ describe("UserProfileDrawer component", () => {
     onRevoke.mockClear();
     onRevokeAll.mockClear();
     onStatusChange.mockClear();
+    onUnlock.mockClear();
     vi.mocked(toast.error).mockClear();
 
     listUserSessionsSpy = vi.spyOn(api.admin, "listUserSessions").mockResolvedValue([]);
@@ -398,5 +401,13 @@ describe("UserProfileDrawer component", () => {
     fireEvent.click(screen.getByText("drawerMfa"));
 
     expect(listUserMfaSpy).toHaveBeenCalledOnce();
+  });
+
+  it("shows unlock button and calls onUnlock when clicked", async () => {
+    render(<UserProfileDrawer {...defaultProps()} />);
+    const unlockBtn = screen.getByRole("button", { name: "unlock" });
+    expect(unlockBtn).toBeDefined();
+    fireEvent.click(unlockBtn);
+    expect(onUnlock).toHaveBeenCalledWith("u1");
   });
 });

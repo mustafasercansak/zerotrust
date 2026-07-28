@@ -202,6 +202,9 @@
     "activate": "Hesabı Aktif Et",
     "deactivate": "Hesabı Devre Dışı Bırak",
     "deactivateConfirm": "Bu kullanıcı devre dışı bırakılacak ve tüm oturumları kapatılacak. Emin misiniz?",
+    "unlock": "Hesap Kilidini Aç",
+    "unlockSuccess": "Kullanıcı hesabının kilidi başarıyla açıldı.",
+    "unlockConfirm": "Bu işlem başarısız giriş denemelerini sıfırlayacak ve kullanıcı hesabının kilidini hemen açacaktır. Emin misiniz?",
     "revokeAllSessions": "Tüm Oturumları Kapat",
     "revokeAllConfirm": "Bu kullanıcının tüm oturumları kapatılacak. Emin misiniz?",
     "mfaPrompt": "Hassas işlemi sürdürmek için 6 haneli MFA kodunuzu girin.",
@@ -375,6 +378,7 @@
     },
     "step_up_for": {
       "user_status_update": "Kullanıcı durumu değiştirme",
+      "user_unlock": "Kullanıcı hesabı kilidini açma",
       "user_session_revoke": "Kullanıcı oturumu sonlandırma",
       "user_sessions_revoke_all": "Tüm kullanıcı oturumlarını sonlandırma",
       "service_account_status_update": "Servis hesabı durumu değiştirme",
@@ -526,6 +530,16 @@
     "verifyButton": "Onayla ve Etkinleştir",
     "disablePrompt": "2FA'yı devre dışı bırakmak için mevcut doğrulama kodunuzu girin.",
     "disableButton": "2FA'yı Devre Dışı Bırak",
+    "recovery": {
+      "title": "MFA Kurtarma Kodları",
+      "desc": "Yedek kurtarma kodları, kimlik doğrulayıcınızı kaybetmeniz durumunda hesabınıza erişmenizi sağlar. Mevcut kodlarınız kaybolursa veya tehlikeye girerse yeni bir set oluşturabilirsiniz.",
+      "regenerate": "Yeni Kod Üret",
+      "warning": "Yeni kurtarma kodları oluşturmak, önceki kurtarma kodlarınızın tamamını anında geçersiz kılacaktır. Yeni kodu indirdiğinizden veya bir yere not ettiğinizden emin olun.",
+      "successTitle": "Yeni Kurtarma Kodları Oluşturuldu",
+      "successDesc": "Lütfen bu yeni kodları kopyalayıp güvenli bir yerde saklayın. Eski kodlarınız artık geçersizdir.",
+      "copyCodes": "Kodları Kopyala",
+      "copied": "Kodlar panoya kopyalandı!"
+    },
     "errors": {
       "invalid_code": "Geçersiz kod. Lütfen tekrar deneyin.",
       "internal_error": "Sunucu hatası. Lütfen tekrar deneyin."

@@ -1073,6 +1073,12 @@ func (s *Service) clearFailedAttempts(ctx context.Context, email string) {
 	s.rdb.Del(ctx, failKey(email), lockoutKey(email))
 }
 
+// UnlockUser clears lockout and failure counters for the given user email.
+func (s *Service) UnlockUser(ctx context.Context, email string) error {
+	s.clearFailedAttempts(ctx, email)
+	return nil
+}
+
 func (s *Service) revokeJTI(ctx context.Context, jti string, ttl time.Duration) {
 	if s.rdb == nil {
 		return

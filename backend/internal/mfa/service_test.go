@@ -379,3 +379,35 @@ func TestValidBase32(t *testing.T) {
 		t.Fatal("expected invalid base32 secret to fail")
 	}
 }
+
+func TestRegenerateRecoveryCodes(t *testing.T) {
+	t.Run("fails when mfa not enabled", func(t *testing.T) {
+		stub := &stubStore{enabled: false}
+		svc := &Service{repo: stub, encKey: testKey()}
+
+		_, err := svc.RegenerateRecoveryCodes(context.Background(), "user1")
+		if err == nil {
+			t.Fatal("expected error when MFA is disabled, got nil")
+		}
+		if err.Error() != "mfa_disabled" {
+			t.Errorf("got error %q, want %q", err.Error(), "mfa_disabled")
+		}
+	})
+
+	t.Run("succeeds when mfa enabled", func(t *testing.T) {
+		stub := &stubStore{enabled: true, recoveryCodes: []string{"old-code-hash"}}
+		svc := &Service{repo: stub, encKey: testKey()}
+
+		rawCodes, err := svc.RegenerateRecoveryCodes(context.Background(), "user1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rawCodes) != 8 {
+			t.Errorf("expected 8 recovery codes, got %d", len(rawCodes))
+		}
+		if len(stub.recoveryCodes) != 8 {
+			t.Errorf("expected 8 stored recovery codes, got %d", len(stub.recoveryCodes))
+		}
+	})
+}
+

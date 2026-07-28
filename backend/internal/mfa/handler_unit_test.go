@@ -18,14 +18,16 @@ import (
 )
 
 type mockMFAService struct {
-	setupOTP    string
-	setupSecret string
-	setupCodes  []string
-	setupErr    error
-	verifyErr   error
-	disableErr  error
-	enabled     bool
-	validateOK  bool
+	setupOTP        string
+	setupSecret     string
+	setupCodes      []string
+	setupErr        error
+	verifyErr       error
+	disableErr      error
+	enabled         bool
+	validateOK      bool
+	regenerateCodes []string
+	regenerateErr   error
 }
 
 func (m *mockMFAService) Setup(context.Context, string, string, string) (string, string, []string, error) {
@@ -49,6 +51,13 @@ func (m *mockMFAService) IsEnabled(context.Context, string) bool {
 
 func (m *mockMFAService) Validate(context.Context, string, string) bool {
 	return m.validateOK
+}
+
+func (m *mockMFAService) RegenerateRecoveryCodes(context.Context, string) ([]string, error) {
+	if m.regenerateErr != nil {
+		return nil, m.regenerateErr
+	}
+	return m.regenerateCodes, nil
 }
 
 func withMFAClaims(req *http.Request) *http.Request {
@@ -393,3 +402,45 @@ func TestMFAHandlerStepUp_ExtendedPaths(t *testing.T) {
 		}
 	})
 }
+
+func TestMFAHandlerRegenerateRecoveryCodes(t *testing.T) {
+	t.Run("unauthorized", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{}, nil, 0)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/mfa/recovery-codes", nil)
+		rr := httptest.NewRecorder()
+		h.RegenerateRecoveryCodes(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("mfa disabled", func(t *testing.T) {
+		h := NewHandler(&mockMFAService{regenerateErr: errors.New("mfa_disabled")}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/recovery-codes", nil))
+		rr := httptest.NewRecorder()
+		h.RegenerateRecoveryCodes(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+		}
+		var resp map[string]string
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil || resp["error"] != "mfa_disabled" {
+			t.Fatalf("unexpected error response: %s", rr.Body.String())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		codes := []string{"c1", "c2", "c3"}
+		h := NewHandler(&mockMFAService{regenerateCodes: codes}, nil, 0)
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/recovery-codes", nil))
+		rr := httptest.NewRecorder()
+		h.RegenerateRecoveryCodes(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+		}
+		var resp map[string][]string
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil || len(resp["recovery_codes"]) != 3 {
+			t.Fatalf("unexpected response: %s", rr.Body.String())
+		}
+	})
+}
+

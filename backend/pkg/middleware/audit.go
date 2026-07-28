@@ -258,6 +258,11 @@ func auditEventFor(method, path string) auditEvent {
 		event.critical = true
 		return event
 	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/users/") && strings.HasSuffix(path, "/unlock") {
+		event.action = "admin.user.unlock"
+		event.critical = true
+		return event
+	}
 	if method == http.MethodDelete && path == "/api/v1/sessions" {
 		event.action = "session.revoke_others"
 		event.critical = true

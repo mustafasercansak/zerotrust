@@ -244,11 +244,12 @@ interface UserProfileDrawerProps {
   onRevoke: (userId: string, sessionId: string) => Promise<void>;
   onRevokeAll: (userId: string) => Promise<void>;
   onStatusChange: (userId: string, active: boolean) => Promise<void>;
+  onUnlock: (userId: string) => Promise<void>;
   isSelf: boolean;
 }
 
 export function UserProfileDrawer({
-  user, onClose, onRevoke, onRevokeAll, onStatusChange, isSelf,
+  user, onClose, onRevoke, onRevokeAll, onStatusChange, onUnlock, isSelf,
 }: UserProfileDrawerProps) {
   const { t } = useTranslation("admin");
   const { i18n } = useTranslation();
@@ -405,6 +406,15 @@ export function UserProfileDrawer({
                   onClick={() => onStatusChange(user.id, !user.is_active)}
                 >
                   {user.is_active ? t("deactivate") : t("activate")}
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  onClick={() => onUnlock(user.id)}
+                  data-testid="unlock-user-button"
+                >
+                  {t("unlock")}
                 </Button>
                 {effectiveSessionCount > 0 && (
                   <Button size="small" variant="outlined" color="warning" onClick={async () => {
@@ -621,6 +631,20 @@ export default function UsersPage() {
     if (!window.confirm(t("revokeAllConfirm"))) return;
     try {
       await runWithStepUp(() => api.admin.revokeAllUserSessions(row.id), "user_sessions_revoke_all");
+      setRefresh((n) => n + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      toast.error(t("errors.internal_error"));
+    }
+  }
+
+  async function handleUnlock(userId: string) {
+    if (!window.confirm(t("unlockConfirm"))) return;
+    try {
+      await runWithStepUp(() => api.admin.unlockUser(userId), "user_unlock");
+      toast.success(t("unlockSuccess"));
       setRefresh((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -915,6 +939,9 @@ export default function UsersPage() {
             await handleStatusChange(userId, active);
             setRefresh((n) => n + 1);
             setDrawerUser((prev) => prev ? { ...prev, is_active: active } : null);
+          }}
+          onUnlock={async (userId) => {
+            await handleUnlock(userId);
           }}
           onRevoke={async (userId, sessionId) => {
             try {

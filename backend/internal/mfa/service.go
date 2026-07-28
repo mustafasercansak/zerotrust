@@ -134,6 +134,24 @@ func (s *Service) Disable(ctx context.Context, userID, code string) error {
 	return s.repo.Delete(ctx, userID)
 }
 
+// RegenerateRecoveryCodes invalidates current recovery codes and generates a set of 8 new ones.
+func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID string) ([]string, error) {
+	if !s.repo.IsEnabled(ctx, userID) {
+		return nil, errors.New("mfa_disabled")
+	}
+
+	rawCodes, hashedCodes, err := generateRecoveryCodes()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.UpdateRecoveryCodes(ctx, userID, hashedCodes); err != nil {
+		return nil, err
+	}
+
+	return rawCodes, nil
+}
+
 // IsEnabled satisfies auth.MFAChecker.
 func (s *Service) IsEnabled(ctx context.Context, userID string) bool {
 	return s.repo.IsEnabled(ctx, userID)

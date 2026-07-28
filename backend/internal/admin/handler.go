@@ -46,6 +46,10 @@ type WebAuthnRepo interface {
 	CountByUsers(ctx context.Context, userIDs []string) (map[string]int, error)
 }
 
+type LockoutManager interface {
+	UnlockUser(ctx context.Context, email string) error
+}
+
 type SecurityPostureProvider interface {
 	SecurityPosture(ctx context.Context) (user.SecurityPostureStats, error)
 }
@@ -56,6 +60,7 @@ type Handler struct {
 	webauthn WebAuthnRepo
 	mfa      MfaRepo
 	posture  SecurityPostureProvider
+	lockout  LockoutManager
 }
 
 func NewHandler(userSvc UserManager, sessions SessionManager, webauthn WebAuthnRepo, mfa MfaRepo) *Handler {
@@ -69,6 +74,10 @@ func NewHandler(userSvc UserManager, sessions SessionManager, webauthn WebAuthnR
 
 func (h *Handler) SetPostureProvider(p SecurityPostureProvider) {
 	h.posture = p
+}
+
+func (h *Handler) SetLockoutManager(l LockoutManager) {
+	h.lockout = l
 }
 
 type userResponse struct {
@@ -454,6 +463,31 @@ func (h *Handler) SecurityPosture(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+// POST /api/v1/admin/users/{id}/unlock
+func (h *Handler) UnlockUser(w http.ResponseWriter, r *http.Request) {
+	if h.lockout == nil {
+		writeError(w, http.StatusServiceUnavailable, "lockout_manager_unavailable")
+		return
+	}
+	userID := chi.URLParam(r, "id")
+	u, err := h.userSvc.FindByID(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+		}
+		return
+	}
+
+	if err := h.lockout.UnlockUser(r.Context(), u.Email); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

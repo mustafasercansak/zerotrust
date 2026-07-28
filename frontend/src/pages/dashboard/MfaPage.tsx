@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import PasskeysSection from "./PasskeysSection";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { DashboardPage } from "@/components/DashboardPage";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
@@ -15,17 +15,44 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import { useStepUp } from "@/hooks/useStepUp";
+import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
 
 type Status = "loading" | "disabled" | "pending" | "enabled" | "unsupported";
 
 export default function MfaPage() {
   const { t } = useTranslation("mfa");
+  const { t: tCommon } = useTranslation("common");
+
+  const { runWithStepUp, stepUpOpen, stepUpError, stepUpSubmitting, handleStepUpSubmit, handleStepUpClose } = useStepUp();
+  const [newRecoveryCodes, setNewRecoveryCodes] = useState<string[] | null>(null);
+  const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   const [status, setStatus] = useState<Status>("loading");
   const [setupData, setSetupData] = useState<{ otp_auth_url: string; secret: string; recovery_codes: string[] } | null>(null);
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [codesSaved, setCodesSaved] = useState(false);
+
+  async function handleRegenerateRecoveryCodes() {
+    setSubmitting(true);
+    try {
+      const resp = await runWithStepUp(() => api.mfaRegenerateRecoveryCodes(), "mfa_recovery_codes_regenerate");
+      setNewRecoveryCodes(resp.recovery_codes);
+      setShowRecoveryDialog(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "mfa_required") {
+        return;
+      }
+      toast.error(t("errors.internal_error"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     api.mfaStatus()
@@ -102,25 +129,42 @@ export default function MfaPage() {
       )}
 
       {status === "enabled" && (
-        <Paper variant="outlined" sx={{ display: "grid", gap: 2.5, px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider" }}>
-          <Box sx={{ alignItems: { xs: "stretch", md: "center" }, display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) auto" } }}>
-            <Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }} data-testid="mfa-section-title">{t("sectionTitle")}</Typography>
-                <Chip size="small" color="success" label={t("statusEnabled")} data-testid="mfa-status-chip" />
+        <>
+          <Paper variant="outlined" sx={{ display: "grid", gap: 2.5, px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider" }}>
+            <Box sx={{ alignItems: { xs: "stretch", md: "center" }, display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) auto" } }}>
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }} data-testid="mfa-section-title">{t("sectionTitle")}</Typography>
+                  <Chip size="small" color="success" label={t("statusEnabled")} data-testid="mfa-status-chip" />
+                </Box>
+                <Typography variant="body2" color="text.secondary">{t("enabledDesc")}</Typography>
               </Box>
-              <Typography variant="body2" color="text.secondary">{t("enabledDesc")}</Typography>
             </Box>
-          </Box>
-          <Divider />
-          <Box component="form" onSubmit={handleDisable} sx={{ alignItems: { xs: "stretch", sm: "center" }, display: "flex", flexWrap: "wrap", gap: 1.5 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 280px" }}>{t("disablePrompt")}</Typography>
-            {codeField}
-            <Button type="submit" color="error" variant="contained" disabled={submitting || code.length !== 6} data-testid="mfa-disable-button">
-              {t("disableButton")}
-            </Button>
-          </Box>
-        </Paper>
+            <Divider />
+            <Box component="form" onSubmit={handleDisable} sx={{ alignItems: { xs: "stretch", sm: "center" }, display: "flex", flexWrap: "wrap", gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 280px" }}>{t("disablePrompt")}</Typography>
+              {codeField}
+              <Button type="submit" color="error" variant="contained" disabled={submitting || code.length !== 6} data-testid="mfa-disable-button">
+                {t("disableButton")}
+              </Button>
+            </Box>
+          </Paper>
+
+          <Paper variant="outlined" sx={{ display: "grid", gap: 2.5, px: 3, py: 2.75, width: "100%", bgcolor: "#0b1120", borderColor: "divider", mt: 3 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("recovery.title")}</Typography>
+              <Typography variant="body2" color="text.secondary">{t("recovery.desc")}</Typography>
+              <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 0.5 }}>
+                ⚠️ {t("recovery.warning")}
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                <Button variant="outlined" color="primary" onClick={handleRegenerateRecoveryCodes} disabled={submitting} data-testid="mfa-regenerate-recovery-codes-button">
+                  {t("recovery.regenerate")}
+                </Button>
+              </Box>
+            </Box>
+          </Paper>
+        </>
       )}
 
       {status === "disabled" && (
@@ -324,6 +368,60 @@ export default function MfaPage() {
           <PasskeysSection />
         </Box>
       )}
+
+      <Dialog open={showRecoveryDialog} onClose={() => setShowRecoveryDialog(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>{t("recovery.successTitle")}</DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {t("recovery.successDesc")}
+          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+            {newRecoveryCodes?.map((code, idx) => (
+              <Box
+                key={idx}
+                sx={{
+                  p: 1.5,
+                  border: 1,
+                  borderColor: "rgba(99, 102, 241, 0.35)",
+                  borderRadius: 2.5,
+                  bgcolor: "#030712",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Typography variant="body2" sx={{ fontFamily: "monospace", fontWeight: 700 }}>
+                  {code}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button
+            onClick={() => {
+              if (newRecoveryCodes) {
+                navigator.clipboard.writeText(newRecoveryCodes.join("\n"));
+                toast.success(t("recovery.copied"));
+              }
+            }}
+            variant="outlined"
+          >
+            {t("recovery.copyCodes")}
+          </Button>
+          <Button onClick={() => setShowRecoveryDialog(false)} variant="contained">
+            {tCommon("cancel")}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <StepUpMfaDialog
+        open={stepUpOpen}
+        error={stepUpError}
+        loading={stepUpSubmitting}
+        onSubmit={handleStepUpSubmit}
+        onClose={handleStepUpClose}
+      />
     </DashboardPage>
   );
 }

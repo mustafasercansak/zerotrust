@@ -26,6 +26,7 @@ type mfaService interface {
 	Disable(ctx context.Context, userID, code string) error
 	IsEnabled(ctx context.Context, userID string) bool
 	Validate(ctx context.Context, userID, code string) bool
+	RegenerateRecoveryCodes(ctx context.Context, userID string) ([]string, error)
 }
 
 type notifier interface {
@@ -254,6 +255,35 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
+
+// POST /api/v1/mfa/recovery-codes — invalidate old recovery codes and generate new ones
+func (h *Handler) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	claims := authmw.ClaimsFrom(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	rawCodes, err := h.svc.RegenerateRecoveryCodes(r.Context(), claims.UserID)
+	if err != nil {
+		if err.Error() == "mfa_disabled" {
+			writeError(w, http.StatusBadRequest, "mfa_disabled")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	if h.notif != nil {
+		_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
+			"mfa_recovery_codes_regenerated", clientIP(r), "Unknown",
+			"MFA recovery codes were regenerated on your account. Previous recovery codes are now invalid.")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"recovery_codes": rawCodes})
+}
+
 
 func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")

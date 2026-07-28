@@ -46,7 +46,18 @@ vi.mock("@mui/x-data-grid", () => ({
   DataGrid: (props: any) => {
     const renderedRows = (props.rows ?? []).map((row: any) => {
       props.getRowId?.(row);
-      return React.createElement("div", { key: row.id, className: "mock-row", "data-testid": `row-${row.id}` },
+      return React.createElement("div", {
+        key: row.id,
+        className: "mock-row",
+        "data-testid": `row-${row.id}`,
+        onClick: (e: any) => {
+          // Ignore clicks on portal-rendered content (MUI Menus render outside
+          // the row in the DOM but bubble through the React tree) and buttons.
+          if (!e.currentTarget.contains(e.target)) return;
+          if (e.target.closest("button")) return;
+          props.onRowClick?.({ row });
+        }
+      },
         (props.columns ?? []).map((col: any) => {
           const cellContent = col.renderCell ? col.renderCell({ row }) : row[col.field];
           return React.createElement("div", { key: col.field, className: "mock-cell" }, cellContent);
@@ -1119,5 +1130,49 @@ describe("UsersPage page component", () => {
     fireEvent.click(viewSessionsItem);
 
     await screen.findByRole("progressbar");
+  });
+
+  it("handles user unlock successfully and handles errors/cancellation", async () => {
+    vi.mocked(useMeContext).mockReturnValue({ user_id: "u1", roles: ["admin"] } as any);
+    vi.spyOn(api.admin, "getSettings").mockResolvedValue({ max_sessions_per_user: "5" });
+    vi.spyOn(api.admin, "listUsers").mockResolvedValue(getMockUsers());
+    const unlockSpy = vi.spyOn(api.admin, "unlockUser").mockResolvedValue(undefined);
+
+    render(<UsersPage />);
+
+    // Click on row to open drawer
+    const rowEl = await screen.findByTestId("row-u2");
+    fireEvent.click(rowEl);
+
+    // Click unlock button inside drawer
+    const unlockBtn = await screen.findByTestId("unlock-user-button");
+
+    // Case 1: Cancel confirmation
+    confirmMock.mockReturnValueOnce(false);
+    fireEvent.click(unlockBtn);
+    expect(unlockSpy).not.toHaveBeenCalled();
+
+    // Case 2: Success path
+    confirmMock.mockReturnValueOnce(true);
+    fireEvent.click(unlockBtn);
+    await waitFor(() => {
+      expect(unlockSpy).toHaveBeenCalledWith("u2");
+      expect(toast.success).toHaveBeenCalledWith("unlockSuccess");
+    });
+
+    // Case 3: Rejection path
+    unlockSpy.mockRejectedValueOnce(new Error("unlock failed"));
+    confirmMock.mockReturnValueOnce(true);
+    fireEvent.click(unlockBtn);
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("errors.internal_error");
+    });
+
+    // Close drawer to clean up state for subsequent tests!
+    const closeBtn = screen.getByTestId("CloseIcon");
+    fireEvent.click(closeBtn);
+    await waitFor(() => {
+      expect(screen.queryByTestId("unlock-user-button")).toBeNull();
+    });
   });
 });

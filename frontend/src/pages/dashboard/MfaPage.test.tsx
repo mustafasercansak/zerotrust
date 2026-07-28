@@ -23,9 +23,28 @@ vi.mock("./PasskeysSection", () => ({
   default: () => React.createElement("div", { "data-testid": "passkeys-section" }, "PasskeysSection"),
 }));
 
+const mockRunWithStepUp = vi.fn().mockImplementation(async (action: any) => action());
+
+vi.mock("@/hooks/useStepUp", () => ({
+  useStepUp: () => ({
+    runWithStepUp: mockRunWithStepUp,
+    stepUpOpen: false,
+    stepUpError: "",
+    stepUpSubmitting: false,
+    handleStepUpSubmit: vi.fn(),
+    handleStepUpClose: vi.fn(),
+  }),
+}));
+
+vi.mock("@/components/StepUpMfaDialog", () => ({
+  StepUpMfaDialog: () => null,
+}));
+
 describe("MfaPage page component", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockRunWithStepUp.mockClear();
+    mockRunWithStepUp.mockImplementation(async (action: any) => action());
   });
 
   afterEach(() => {
@@ -242,5 +261,42 @@ describe("MfaPage page component", () => {
     fireEvent.click(submitBtn);
 
     expect(screen.getByRole("button", { name: "..." })).toBeDefined();
+  });
+
+  it("handles MFA recovery codes regeneration", async () => {
+    vi.spyOn(api, "mfaStatus").mockResolvedValue({ enabled: true, supported: true });
+    const regenerateSpy = vi.spyOn(api, "mfaRegenerateRecoveryCodes").mockResolvedValue({
+      recovery_codes: ["new-code-1", "new-code-2", "new-code-3", "new-code-4", "new-code-5", "new-code-6", "new-code-7", "new-code-8"],
+    });
+
+    render(<MfaPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("statusEnabled")).toBeDefined();
+    });
+
+    // Check that recovery section is rendered
+    expect(screen.getByText("recovery.title")).toBeDefined();
+
+    // Click regenerate button
+    const regenBtn = screen.getByTestId("mfa-regenerate-recovery-codes-button");
+    fireEvent.click(regenBtn);
+
+    await waitFor(() => {
+      expect(regenerateSpy).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("recovery.successTitle")).toBeDefined();
+      expect(screen.getByText("new-code-1")).toBeDefined();
+    });
+
+    // Click cancel/close in dialog
+    const closeBtn = screen.getByRole("button", { name: "cancel" });
+    fireEvent.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText("recovery.successTitle")).toBeNull();
+    });
   });
 });

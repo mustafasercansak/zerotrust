@@ -472,6 +472,11 @@ export const api = {
       body: JSON.stringify({ code, ...(reason ? { reason } : {}) }),
     }),
 
+  mfaRegenerateRecoveryCodes: () =>
+    request<{ recovery_codes: string[] }>("/api/v1/mfa/recovery-codes", {
+      method: "POST",
+    }),
+
   // WebAuthn passkey management (authenticated user).
   webauthnList: () =>
     request<{ credentials: WebAuthnCredential[] }>("/api/v1/webauthn/credentials"),
@@ -514,6 +519,11 @@ export const api = {
       request<void>(`/api/v1/admin/users/${userId}/status`, {
         method: "PATCH",
         body: JSON.stringify({ is_active: isActive }),
+      }),
+
+    unlockUser: (userId: string) =>
+      request<void>(`/api/v1/admin/users/${userId}/unlock`, {
+        method: "POST",
       }),
 
     bulkSetUserStatus: (userIds: string[], isActive: boolean) =>

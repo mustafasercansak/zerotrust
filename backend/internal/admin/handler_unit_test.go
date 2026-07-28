@@ -724,3 +724,57 @@ func TestBulkSetStatus(t *testing.T) {
 		}
 	})
 }
+
+type mockLockoutManager struct {
+	unlockEmail string
+	unlockErr   error
+}
+
+func (m *mockLockoutManager) UnlockUser(ctx context.Context, email string) error {
+	m.unlockEmail = email
+	return m.unlockErr
+}
+
+func TestUnlockUser(t *testing.T) {
+	t.Run("lockout manager unavailable", func(t *testing.T) {
+		h := NewHandler(&mockUserManager{}, nil, nil, nil)
+		req, _ := http.NewRequest("POST", "/api/v1/admin/users/u1/unlock", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UnlockUser(rr, req)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusServiceUnavailable)
+		}
+	})
+
+	t.Run("user not found", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDErr: user.ErrNotFound}
+		h := NewHandler(mgr, nil, nil, nil)
+		h.SetLockoutManager(&mockLockoutManager{})
+		req, _ := http.NewRequest("POST", "/api/v1/admin/users/u1/unlock", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UnlockUser(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("unlock success", func(t *testing.T) {
+		mgr := &mockUserManager{findByIDUser: &user.User{ID: "u1", Email: "test@example.com"}}
+		h := NewHandler(mgr, nil, nil, nil)
+		lm := &mockLockoutManager{}
+		h.SetLockoutManager(lm)
+		req, _ := http.NewRequest("POST", "/api/v1/admin/users/u1/unlock", nil)
+		req = withURLParam(req, "id", "u1")
+		rr := httptest.NewRecorder()
+		h.UnlockUser(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=%d", rr.Code, http.StatusNoContent)
+		}
+		if lm.unlockEmail != "test@example.com" {
+			t.Fatalf("expected email test@example.com, got %s", lm.unlockEmail)
+		}
+	})
+}
+

@@ -315,6 +315,7 @@ func run(ctx context.Context, cfg config) error {
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepo)
 	adminHandler.SetPostureProvider(userRepo)
+	adminHandler.SetLockoutManager(authSvc)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
@@ -805,6 +806,7 @@ func run(ctx context.Context, cfg config) error {
 				r.Post("/mfa/verify", mfaHandler.Verify)
 				r.Post("/mfa/disable", mfaHandler.Disable)
 				r.Post("/mfa/step-up", mfaHandler.StepUp)
+				r.With(stepUpMFA).Post("/mfa/recovery-codes", mfaHandler.RegenerateRecoveryCodes)
 			} else {
 				r.Get("/mfa/status", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
@@ -825,6 +827,7 @@ func run(ctx context.Context, cfg config) error {
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Post("/admin/users/bulk-status", adminHandler.BulkSetStatus)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
+			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Post("/admin/users/{id}/unlock", adminHandler.UnlockUser)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/sessions", adminHandler.ListUserSessions)
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users/{id}/mfa", adminHandler.GetUserMfa)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Delete("/admin/users/{id}/sessions", adminHandler.RevokeAllUserSessions)

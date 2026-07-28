@@ -202,6 +202,9 @@
     "activate": "Activate Account",
     "deactivate": "Deactivate Account",
     "deactivateConfirm": "This user will be deactivated and all their sessions will be revoked. Are you sure?",
+    "unlock": "Unlock Account",
+    "unlockSuccess": "User account unlocked successfully.",
+    "unlockConfirm": "This will clear failed login attempts and unlock the user account immediately. Are you sure?",
     "revokeAllSessions": "Revoke All Sessions",
     "revokeAllConfirm": "All sessions for this user will be revoked. Are you sure?",
     "mfaPrompt": "Enter your 6-digit MFA code to continue this sensitive action.",
@@ -375,6 +378,7 @@
     },
     "step_up_for": {
       "user_status_update": "User status change",
+      "user_unlock": "Unlock user account",
       "user_session_revoke": "Revoke user session",
       "user_sessions_revoke_all": "Revoke all user sessions",
       "service_account_status_update": "Service account status change",
@@ -526,6 +530,16 @@
     "verifyButton": "Confirm & Enable",
     "disablePrompt": "Enter your current authentication code to disable 2FA.",
     "disableButton": "Disable 2FA",
+    "recovery": {
+      "title": "MFA Recovery Codes",
+      "desc": "Backup recovery codes let you access your account if you lose your authenticator. You can generate a new set if your current ones are lost or compromised.",
+      "regenerate": "Regenerate Codes",
+      "warning": "Generating new recovery codes will immediately invalidate all of your previous recovery codes. Make sure to download or write down the new set.",
+      "successTitle": "New Recovery Codes Generated",
+      "successDesc": "Please copy and save these new codes in a secure place. Your old codes are now invalid.",
+      "copyCodes": "Copy Codes",
+      "copied": "Codes copied to clipboard!"
+    },
     "errors": {
       "invalid_code": "Invalid code. Please try again.",
       "internal_error": "Server error. Please try again."
