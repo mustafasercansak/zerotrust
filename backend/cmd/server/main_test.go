@@ -261,8 +261,7 @@ func TestLoadConfig_ConnectionPoolTuning(t *testing.T) {
 func TestLoadConfig_InvalidNumericAndDurationEnv(t *testing.T) {
 	t.Setenv("MFA_ENABLED", "false")
 
-	t.Run("invalid database max conns", func(t *testing.T) {
-		t.Setenv("DATABASE_MAX_CONNS", "not-int")
+	t.Run("invalid database max conns", func(t *testing.T) {		t.Setenv("DATABASE_MAX_CONNS", "not-int")
 		if _, err := loadConfig(); err == nil {
 			t.Fatal("expected invalid DATABASE_MAX_CONNS error")
 		}
@@ -294,9 +293,70 @@ func TestLoadConfig_InvalidNumericAndDurationEnv(t *testing.T) {
 	})
 }
 
+func TestLoadConfig_JWTSigningAlg(t *testing.T) {
+	t.Setenv("MFA_ENABLED", "false")
+
+	t.Run("default is EdDSA", func(t *testing.T) {
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("loadConfig returned error: %v", err)
+		}
+		if cfg.JWTSigningAlg != "EdDSA" {
+			t.Fatalf("JWTSigningAlg=%q want=EdDSA", cfg.JWTSigningAlg)
+		}
+	})
+
+	t.Run("supported algorithms accepted", func(t *testing.T) {
+		for _, alg := range []string{"EdDSA", "ES256", "RS256"} {
+			t.Setenv("JWT_SIGNING_ALG", alg)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig(%s) returned error: %v", alg, err)
+			}
+			if cfg.JWTSigningAlg != alg {
+				t.Fatalf("JWTSigningAlg=%q want=%q", cfg.JWTSigningAlg, alg)
+			}
+		}
+		t.Setenv("JWT_SIGNING_ALG", "")
+	})
+
+	t.Run("unsupported algorithm rejected", func(t *testing.T) {
+		t.Setenv("JWT_SIGNING_ALG", "HS256")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("expected unsupported JWT_SIGNING_ALG error")
+		}
+		t.Setenv("JWT_SIGNING_ALG", "")
+	})
+}
+
+func TestLoadConfig_TLSRequiresCertAndKey(t *testing.T) {
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("TLS_ENABLED", "true")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected error when TLS_ENABLED=true without TLS_CERT_FILE/TLS_KEY_FILE")
+	}
+
+	t.Setenv("TLS_CERT_FILE", "/tmp/cert.pem")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected error when TLS_KEY_FILE is missing")
+	}
+
+	t.Setenv("TLS_KEY_FILE", "/tmp/key.pem")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.TLSCertFile != "/tmp/cert.pem" || cfg.TLSKeyFile != "/tmp/key.pem" {
+		t.Fatalf("unexpected TLS files: %q %q", cfg.TLSCertFile, cfg.TLSKeyFile)
+	}
+}
+
 func TestLoadConfig_ParsesBooleanFlagsAndOrigins(t *testing.T) {
 	t.Setenv("MFA_ENABLED", "false")
 	t.Setenv("TLS_ENABLED", "true")
+	t.Setenv("TLS_CERT_FILE", "/tmp/cert.pem")
+	t.Setenv("TLS_KEY_FILE", "/tmp/key.pem")
 	t.Setenv("COOKIES_SECURE", "true")
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://a.example.com,https://b.example.com")

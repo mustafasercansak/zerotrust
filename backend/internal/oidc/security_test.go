@@ -29,7 +29,7 @@ func TestUserInfo_ScopeFiltering(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestToken_PragmaHeader(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	u := &user.User{ID: "u-pragma", Email: "pragma@example.com", Locale: "en", IsActive: true}
 	userSvc := user.NewService(&mockUserReader{user: u})
 
@@ -201,7 +201,7 @@ func TestToken_PragmaHeader(t *testing.T) {
 // handler returns valid, properly escaped JSON even when err.Error() contains
 // special characters such as quotes or backslashes.
 func TestConsent_ServerErrorJSON(t *testing.T) {
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 
 	// Use a clientStore stub that returns an error with special characters to
 	// confirm the JSON is properly escaped.
@@ -239,7 +239,7 @@ func TestConsent_ServerErrorJSON(t *testing.T) {
 // Without this, a caller could supply an arbitrary redirect_uri and turn the
 // denial response into an open redirect.
 func TestConsent_DenialOpenRedirect(t *testing.T) {
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	tokenPair, _ := auth.GenerateTokenPair(ks, "user-1", "u@example.com", "en", nil, nil, time.Hour)
 	cookie := &http.Cookie{Name: "access_token", Value: tokenPair.AccessToken}
 
@@ -313,7 +313,7 @@ func TestUserInfo_ScopeInAccessToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	u := &user.User{ID: "u-rt-scope", Email: "rt@example.com", Locale: "en", FirstName: "Bob", Roles: []string{"user"}, IsActive: true}
 	userSvc := user.NewService(&mockUserReader{user: u})
 

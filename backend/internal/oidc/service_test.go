@@ -178,7 +178,7 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore load: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 
 	// Verify ID token claims
 	token, err := jwt.Parse(resp.IDToken, func(t *jwt.Token) (any, error) {
-		pub, _ := ks.PublicKey(ks.PrimaryKID())
+		pub, _, _ := ks.PublicKey(ks.PrimaryKID())
 		return pub, nil
 	})
 	if err != nil {
@@ -249,6 +249,78 @@ func TestExchangeCodeWithPKCE(t *testing.T) {
 	// ExchangeCode must issue a refresh token when the store is configured
 	if resp.RefreshToken == "" {
 		t.Errorf("expected refresh_token to be non-empty")
+	}
+}
+
+// TestExchangeCodeWithES256KeyStore verifies the full authorization-code
+// exchange round-trips with a non-default (ES256) signing algorithm: the ID
+// token must carry alg=ES256 and validate against the ECDSA public key.
+func TestExchangeCodeWithES256KeyStore(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgES256)
+	if err != nil {
+		t.Fatalf("keystore load: %v", err)
+	}
+
+	userSvc := user.NewService(&mockUserReader{
+		user: &user.User{
+			ID:        "u123",
+			Email:     "user@example.com",
+			FirstName: "Alice",
+			LastName:  "Smith",
+			Locale:    "en",
+			IsActive:  true,
+		},
+	})
+
+	codeStore := NewAuthCodeStore(rdb)
+	svc := NewService(nil, codeStore, userSvc, ks, "https://issuer.example.com", nil)
+
+	session := &AuthCodeSession{
+		Code:                "code-es256",
+		UserID:              "u123",
+		ClientID:            "client-pkce",
+		RedirectURI:         "http://localhost/callback",
+		Scopes:              []string{"openid", "profile", "email"},
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
+		AuthTime:            time.Now(),
+	}
+	if err := codeStore.Save(context.Background(), session); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	resp, err := svc.ExchangeCode(context.Background(), "code-es256", "client-pkce", "", "http://localhost/callback", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	if err != nil {
+		t.Fatalf("exchange failed: %v", err)
+	}
+	if resp.IDToken == "" {
+		t.Fatal("expected ID token to be present")
+	}
+
+	token, err := jwt.Parse(resp.IDToken, func(tok *jwt.Token) (any, error) {
+		pub, alg, _ := ks.PublicKey(ks.PrimaryKID())
+		if tok.Method.Alg() != alg {
+			t.Fatalf("id token alg=%q want=%q", tok.Method.Alg(), alg)
+		}
+		return pub, nil
+	})
+	if err != nil {
+		t.Fatalf("id token parse failed: %v", err)
+	}
+	if token.Method.Alg() != auth.AlgES256 {
+		t.Errorf("id token alg = %q, want ES256", token.Method.Alg())
+	}
+	if claims := token.Claims.(jwt.MapClaims); claims["sub"] != "u123" {
+		t.Errorf("subject claim = %v, want u123", claims["sub"])
 	}
 }
 
@@ -303,7 +375,7 @@ func TestExchangeRefreshToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -388,7 +460,7 @@ func TestRevokeRefreshToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	refreshStore := NewRefreshTokenStore(rdb)
 	svc := NewService(nil, nil, user.NewService(&mockUserReader{}), ks, "https://issuer.example.com", refreshStore)
 	ctx := context.Background()
@@ -432,7 +504,7 @@ func TestExchangeCode_InactiveUser(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	inactive := &user.User{ID: "u-inactive", Email: "inactive@example.com", Locale: "en", IsActive: false}
 	codeStore := NewAuthCodeStore(rdb)
 	svc := NewService(nil, codeStore, user.NewService(&mockUserReader{user: inactive}), ks, "https://issuer.example.com", nil)
@@ -461,7 +533,7 @@ func TestExchangeRefreshToken_InactiveUser(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	inactive := &user.User{ID: "u-inactive-rt", Email: "rt@example.com", Locale: "en", IsActive: false}
 	refreshStore := NewRefreshTokenStore(rdb)
 	svc := NewService(nil, nil, user.NewService(&mockUserReader{user: inactive}), ks, "https://issuer.example.com", refreshStore)
@@ -485,7 +557,7 @@ func TestExchangeCode_NoRefreshWithoutOfflineAccess(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	u := &user.User{ID: "u1", Email: "u@example.com", Locale: "en", IsActive: true}
 	codeStore := NewAuthCodeStore(rdb)
 	refreshStore := NewRefreshTokenStore(rdb)

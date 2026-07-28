@@ -69,7 +69,7 @@ func newWebAuthnTestService(t *testing.T, verifier WebAuthnVerifier) (*Service, 
 	t.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestWebAuthnPasswordlessFinish_InactiveUser(t *testing.T) {
 	}
 	t.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}

@@ -89,7 +89,7 @@ zerotrust_audit_write_failures_total 0
 
 ### `GET /.well-known/jwks.json`
 
-JWKS document for verifying access tokens. `Cache-Control: public, max-age=3600`.
+JWKS document for verifying access tokens. `Cache-Control: public, max-age=3600`. Key type (`kty`) and `alg` reflect the configured signing algorithm (`JWT_SIGNING_ALG`): `OKP`/Ed25519 for EdDSA, `EC`/P-256 for ES256, `RSA` for RS256.
 
 ### `GET /.well-known/openid-configuration`
 

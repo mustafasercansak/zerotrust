@@ -47,7 +47,7 @@ func TestAuthenticate(t *testing.T) {
 	defer mr.Close()
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	authSvc := auth.NewService(userSvc, sessionRepo, nil, rdb, ks, nil, nil)
 
 	handler := middleware.Authenticate(ks, authSvc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +154,7 @@ func TestCAE(t *testing.T) {
 	defer mr.Close()
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 
 	mockSetts := &mockSettings{}
 	authSvc := auth.NewService(userSvc, sessionRepo, nil, rdb, ks, nil, mockSetts)

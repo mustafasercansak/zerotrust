@@ -1,6 +1,17 @@
 package auth_test
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,7 +21,7 @@ import (
 
 func newTestKeyStore(t *testing.T) *auth.KeyStore {
 	t.Helper()
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("key store: %v", err)
 	}
@@ -142,4 +153,140 @@ func TestValidateAccessTokenFailures(t *testing.T) {
 	if err != auth.ErrInvalidToken {
 		t.Errorf("expected ErrInvalidToken, got %v", err)
 	}
+}
+
+func TestTokenRoundTripAllAlgorithms(t *testing.T) {
+	for _, alg := range []string{auth.AlgEdDSA, auth.AlgES256, auth.AlgRS256} {
+		t.Run(alg, func(t *testing.T) {
+			ks, err := auth.LoadOrGenerateKeyStore("", "", alg)
+			if err != nil {
+				t.Fatalf("key store: %v", err)
+			}
+
+			pair, err := auth.GenerateTokenPair(ks, "user-1", "test@example.com", "en",
+				[]string{"admin"}, []string{"users:read"}, auth.AccessTTL)
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+
+			claims, err := auth.ValidateAccessToken(ks, pair.AccessToken)
+			if err != nil {
+				t.Fatalf("validate: %v", err)
+			}
+			if claims.UserID != "user-1" {
+				t.Errorf("UserID = %q, want %q", claims.UserID, "user-1")
+			}
+
+			// The JWT header must advertise the configured algorithm.
+			parsed, _, err := jwt.NewParser().ParseUnverified(pair.AccessToken, &auth.Claims{})
+			if err != nil {
+				t.Fatalf("parse unverified: %v", err)
+			}
+			if parsed.Method.Alg() != alg {
+				t.Errorf("token alg = %q, want %q", parsed.Method.Alg(), alg)
+			}
+		})
+	}
+}
+
+func TestAlgorithmConfusionRejected(t *testing.T) {
+	// Keystore with an ES256 (ECDSA P-256) primary key.
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgES256)
+	if err != nil {
+		t.Fatalf("key store: %v", err)
+	}
+
+	// Craft a token whose header claims EdDSA but whose kid points at the
+	// ES256 key. Validation must reject it before any signature check.
+	edKey, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	if err != nil {
+		t.Fatalf("ed key store: %v", err)
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, &auth.Claims{})
+	token.Header["kid"] = ks.PrimaryKID()
+	tokenStr, err := token.SignedString(edKey.PrimaryKey())
+	if err != nil {
+		t.Fatalf("sign crafted token: %v", err)
+	}
+
+	if _, err := auth.ValidateAccessToken(ks, tokenStr); err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken for alg-confused token, got %v", err)
+	}
+}
+
+func TestMixedAlgorithmRotation(t *testing.T) {
+	// Primary ES256 with an EdDSA secondary: tokens signed by either key must
+	// validate, each pinned to its own algorithm.
+	tmp := t.TempDir()
+
+	writeKey := func(name string, key any) string {
+		t.Helper()
+		der, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatalf("marshal key: %v", err)
+		}
+		path := filepath.Join(tmp, name)
+		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+		if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
+			t.Fatalf("write key: %v", err)
+		}
+		return path
+	}
+
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ec key: %v", err)
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed key: %v", err)
+	}
+
+	ks, err := auth.LoadOrGenerateKeyStore(writeKey("primary.pem", ecKey), writeKey("secondary.pem", edKey), auth.AlgES256)
+	if err != nil {
+		t.Fatalf("load keystore: %v", err)
+	}
+	if ks.PrimaryAlg() != auth.AlgES256 {
+		t.Fatalf("PrimaryAlg=%q want=ES256", ks.PrimaryAlg())
+	}
+
+	// Token signed by the ES256 primary validates.
+	pair, err := auth.GenerateTokenPair(ks, "u", "e@e.com", "en", nil, nil, auth.AccessTTL)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := auth.ValidateAccessToken(ks, pair.AccessToken); err != nil {
+		t.Fatalf("validate primary token: %v", err)
+	}
+
+	// Token signed by the EdDSA secondary (as during rotation) validates too.
+	secondary := jwt.NewWithClaims(jwt.SigningMethodEdDSA, &auth.Claims{
+		UserID: "u",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+		},
+	})
+	secondary.Header["kid"] = keyIDOf(t, ks, edKey)
+	secondaryStr, err := secondary.SignedString(edKey)
+	if err != nil {
+		t.Fatalf("sign secondary token: %v", err)
+	}
+	if _, err := auth.ValidateAccessToken(ks, secondaryStr); err != nil {
+		t.Fatalf("validate secondary token: %v", err)
+	}
+}
+
+// keyIDOf finds the kid under which ks stored the given key's public part.
+func keyIDOf(t *testing.T, ks *auth.KeyStore, key crypto.Signer) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		t.Fatalf("marshal public key: %v", err)
+	}
+	h := sha256.Sum256(der)
+	kid := hex.EncodeToString(h[:8])
+	if _, _, ok := ks.PublicKey(kid); !ok {
+		t.Fatalf("kid %q not found in keystore", kid)
+	}
+	return kid
 }

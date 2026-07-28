@@ -222,7 +222,7 @@ func TestHandler_OAuthFlow_Integration(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore load: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestHandler_Revoke_Integration(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestHandler_AuditLogging_Consent(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	clientRepo := NewClientRepository(pool)
 	codeStore := NewAuthCodeStore(rdb)
 	oidcSvc := NewService(clientRepo, codeStore, userSvc, ks, "http://localhost", nil)
@@ -562,7 +562,7 @@ func TestHandler_AuditLogging_RotateSecret(t *testing.T) {
 		t.Fatalf("insert client: %v", err)
 	}
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	adminID := "admin-user-uuid"
 	adminToken, _ := auth.GenerateTokenPair(ks, adminID, "admin@example.com", "en", []string{"admin"}, nil, time.Hour)
 
@@ -621,7 +621,7 @@ func TestHandler_AuditLogging_Introspect(t *testing.T) {
 		t.Fatalf("register user: %v", err)
 	}
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	authSvc := auth.NewService(userSvc, &mockSessionRepo{}, &testServiceAccountStore{}, rdb, ks, nil, nil)
 	clientRepo := NewClientRepository(pool)
 	al := &mockAuditLogger{}
@@ -671,7 +671,7 @@ func TestHandler_Revoke_RefreshToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	refreshStore := NewRefreshTokenStore(rdb)
 	svc := NewService(nil, nil, nil, ks, "http://localhost", refreshStore)
 
@@ -805,7 +805,7 @@ func TestHandler_Consent_RequiresStepUpWhenMFAEnabled(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	h := &Handler{
 		ks:     ks,
 		mfaSvc: &mockMFAChecker{enabled: true},
@@ -920,7 +920,7 @@ func TestHandler_Introspect_Integration(t *testing.T) {
 		t.Fatalf("register user: %v", err)
 	}
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	authSvc := auth.NewService(userSvc, &mockSessionRepo{}, &testServiceAccountStore{}, rdb, ks, nil, nil)
 	clientRepo := NewClientRepository(pool)
 	h := &Handler{ks: ks, authSvc: authSvc, clientRepo: clientRepo}
@@ -1008,7 +1008,7 @@ func TestHandler_RefreshToken_Integration(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, _ := auth.LoadOrGenerateKeyStore("", "")
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	clientRepo := NewClientRepository(pool)
 	codeStore := NewAuthCodeStore(rdb)
 	refreshStore := NewRefreshTokenStore(rdb)
@@ -1108,7 +1108,7 @@ func TestHandler_RefreshToken_Integration(t *testing.T) {
 // TestHandler_Authorize_Prompt covers the prompt=none and prompt=login values
 // (OIDC Core §3.1.2.1).
 func TestHandler_Authorize_Prompt(t *testing.T) {
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -1179,7 +1179,7 @@ func TestHandler_Authorize_Prompt(t *testing.T) {
 // TestHandler_Authorize_MaxAge verifies that a valid session is rejected when
 // its age exceeds the max_age parameter (OIDC Core §3.1.2.1).
 func TestHandler_Authorize_MaxAge(t *testing.T) {
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -1234,7 +1234,7 @@ func TestHandler_EndSession(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}

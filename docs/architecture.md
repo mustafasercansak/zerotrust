@@ -94,13 +94,17 @@ Browser                         Backend (middleware stack)
 
 | Token | Type | TTL | Storage | Purpose |
 |---|---|---|---|---|
-| Access token | Ed25519-signed JWT (EdDSA) | 1 minute | httpOnly cookie | Authenticate API calls |
+| Access token | Signed JWT (`JWT_SIGNING_ALG`: EdDSA, ES256, or RS256) | 1 minute | httpOnly cookie | Authenticate API calls |
 | Refresh token | Opaque 256-bit random | Configurable (session policy) | SHA-256 hash in PostgreSQL | Obtain new access tokens |
 | CSRF token | Random 256-bit | Same as session | httpOnly + non-httpOnly cookies | Double-submit CSRF defense |
 | OIDC auth code | Opaque 256-bit | 5 minutes | Redis | OAuth2 authorization code flow |
 | OIDC refresh | Opaque | Configurable | Redis | OIDC session continuity |
 
 **Why Ed25519?** EdDSA on Curve25519 offers short keys (32 bytes public), fast verification (~50 µs on modern hardware), and is not vulnerable to the fault-attack class that affects ECDSA with bad randomness.
+
+**Crypto-agility:** the signing layer is algorithm-agnostic. `JWT_SIGNING_ALG` selects EdDSA (default), ES256, or RS256; each key in the keystore carries its own algorithm, so rotation between different algorithms is supported, and token validation pins the `alg` header to the key identified by `kid` (algorithm-confusion protection). Post-quantum signature schemes (e.g. ML-DSA) can be added the same way once JOSE registrations are finalized.
+
+**Hybrid post-quantum TLS:** when the Go server terminates TLS directly (`TLS_ENABLED=true`), it prefers the X25519MLKEM768 hybrid key exchange (RFC 9370, native in Go 1.24+) with automatic fallback to classical curves — mitigating "harvest now, decrypt later" collection of recorded traffic.
 
 **Why 1-minute access token TTL?** Short TTL limits the damage window if a token is captured. The refresh-token rotation model (one use per token) means stolen refresh tokens are detected on reuse.
 

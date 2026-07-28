@@ -157,7 +157,7 @@ func (s *testServiceAccountStore) CheckSecret(hash, secret string) bool {
 
 func newRefreshPolicyService(t *testing.T, u *user.User, store SessionStore, settings map[string]int) *Service {
 	t.Helper()
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore init failed: %v", err)
 	}

@@ -38,7 +38,7 @@ func (w *nonFlushingResponseWriter) WriteHeader(statusCode int) {
 
 func newEventTestKeyStore(t *testing.T) *auth.KeyStore {
 	t.Helper()
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("key store: %v", err)
 	}

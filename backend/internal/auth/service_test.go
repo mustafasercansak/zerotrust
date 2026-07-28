@@ -101,7 +101,7 @@ func TestLogoutRevokesRefreshSessionAndBlocklistsAccessToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLogoutIgnoresInvalidAccessToken(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestMFAChallenge(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore: %v", err)
 	}

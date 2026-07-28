@@ -436,6 +436,10 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 
 // Discovery returns the OpenID Connect discovery document
 func (h *Handler) Discovery(w http.ResponseWriter, r *http.Request) {
+	signingAlg := "EdDSA"
+	if h.ks != nil {
+		signingAlg = h.ks.PrimaryAlg()
+	}
 	resp := map[string]any{
 		"issuer":                                h.issuer,
 		"authorization_endpoint":                h.issuer + "/oauth2/authorize",
@@ -448,7 +452,7 @@ func (h *Handler) Discovery(w http.ResponseWriter, r *http.Request) {
 		"subject_types_supported":               []string{"public"},
 		"revocation_endpoint":                   h.issuer + "/oauth2/revoke",
 		"introspection_endpoint":                h.issuer + "/oauth2/introspect",
-		"id_token_signing_alg_values_supported": []string{"EdDSA"},
+		"id_token_signing_alg_values_supported": []string{signingAlg},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"end_session_endpoint":                   h.issuer + "/oauth2/end_session",
 		"prompt_values_supported":               []string{"none", "login", "consent"},
@@ -826,13 +830,13 @@ func (h *Handler) parseIDTokenHint(hint string) (jwt.MapClaims, error) {
 		return nil, errors.New("no keystore or empty hint")
 	}
 	keyfunc := func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
 		kid, _ := t.Header["kid"].(string)
-		pub, exists := h.ks.PublicKey(kid)
+		pub, alg, exists := h.ks.PublicKey(kid)
 		if !exists {
 			return nil, errors.New("unknown kid")
+		}
+		if t.Method.Alg() != alg {
+			return nil, errors.New("unexpected signing method")
 		}
 		return pub, nil
 	}

@@ -22,7 +22,7 @@ func TestGenerateOpaqueToken_ReturnsHex32Bytes(t *testing.T) {
 }
 
 func TestGenerateServiceToken_WithDPoPConfirmationClaim(t *testing.T) {
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("LoadOrGenerateKeyStore: %v", err)
 	}

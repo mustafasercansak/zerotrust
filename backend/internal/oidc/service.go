@@ -193,9 +193,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 			}
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, idClaims)
-		token.Header["kid"] = s.ks.PrimaryKID()
-		idTokenStr, err = token.SignedString(s.ks.PrimaryKey())
+		idTokenStr, err = s.ks.Sign(idClaims)
 		if err != nil {
 			return nil, err
 		}
@@ -316,9 +314,7 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 }
 
 func (s *Service) signClaims(claims auth.Claims) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	token.Header["kid"] = s.ks.PrimaryKID()
-	return token.SignedString(s.ks.PrimaryKey())
+	return s.ks.Sign(claims)
 }
 
 func verifyPKCE(challenge, method, verifier string) error {

@@ -68,17 +68,33 @@ REDIS_PASSWORD=$(openssl rand -hex 24)
 log "Redis password generated (48 hex characters)"
 
 # ─────────────────────────────────────────────
-head "4. JWT Ed25519 Key Pair"
+head "4. JWT Signing Key Pair"
+# Algorithm selectable via JWT_SIGNING_ALG env or first argument.
+# EdDSA (default, Ed25519) · ES256 (ECDSA P-256) · RS256 (RSA 3072)
+JWT_SIGNING_ALG="${1:-${JWT_SIGNING_ALG:-EdDSA}}"
 JWT_KEY_FILE="$SECRETS_DIR/jwt_primary.pem"
-openssl genpkey -algorithm ed25519 -out "$JWT_KEY_FILE"
+JWT_PUB_FILE="$SECRETS_DIR/jwt_public.pem"
+case "$JWT_SIGNING_ALG" in
+  EdDSA)
+    openssl genpkey -algorithm ed25519 -out "$JWT_KEY_FILE"
+    ;;
+  ES256)
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$JWT_KEY_FILE"
+    ;;
+  RS256)
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$JWT_KEY_FILE"
+    ;;
+  *)
+    die "Unsupported JWT_SIGNING_ALG '$JWT_SIGNING_ALG' (supported: EdDSA, ES256, RS256)"
+    ;;
+esac
 chmod 600 "$JWT_KEY_FILE"
-log "Ed25519 private key: secrets/jwt_primary.pem"
+log "$JWT_SIGNING_ALG private key: secrets/jwt_primary.pem"
 
 # Extract public key as well (can be used by services for verification)
-JWT_PUB_FILE="$SECRETS_DIR/jwt_public.pem"
 openssl pkey -in "$JWT_KEY_FILE" -pubout -out "$JWT_PUB_FILE" 2>/dev/null
 chmod 644 "$JWT_PUB_FILE"
-log "Ed25519 public key:  secrets/jwt_public.pem"
+log "$JWT_SIGNING_ALG public key:  secrets/jwt_public.pem"
 
 # ─────────────────────────────────────────────
 head "5. Writing infra/.env"
@@ -99,6 +115,7 @@ REDIS_PASSWORD=${REDIS_PASSWORD}
 
 # ── JWT ─────────────────────────────────────
 JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_primary.pem
+JWT_SIGNING_ALG=${JWT_SIGNING_ALG}
 
 # ── MFA ─────────────────────────────────────
 MFA_ENABLED=true

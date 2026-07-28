@@ -97,7 +97,7 @@ func TestLogin_ImpossibleTravel(t *testing.T) {
 	}
 
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
 
 	g := geoip.NewService("")
@@ -142,7 +142,7 @@ func TestLogin_NewDevice(t *testing.T) {
 	}
 
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
 
 	g := geoip.NewService("")
@@ -164,7 +164,7 @@ func TestLogin_SendsNewLoginAlert_WhenNoAnomaly(t *testing.T) {
 	u := &user.User{ID: "user-1", Email: "user1@example.com", IsActive: true, NotifySecurityEmails: true}
 	reader := &dummyUserReader{u: u}
 	store := &testAnomalySessionStore{}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
 
 	// Use an empty geoip (no anomaly detection) and a mailer
@@ -200,7 +200,7 @@ func TestLogin_NoNewLoginAlert_WhenAnomalyDetected(t *testing.T) {
 		},
 	}
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
 
 	g := geoip.NewService("")
@@ -267,7 +267,7 @@ func TestLogin_RiskBasedAuthBlock(t *testing.T) {
 	}
 
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	setts := &testAnomalySettings{enabled: "true", mfa: 40, block: 80}
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, setts)
 
@@ -318,7 +318,7 @@ func TestLogin_RiskBasedAuthAdaptiveMFA(t *testing.T) {
 	}
 
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	setts := &testAnomalySettings{enabled: "true", mfa: 20, block: 90}
 	mfaChecker := &testAnomalyMFAChecker{enabled: false} // User does not have MFA enabled
 	svc := NewService(reader, store, &testServiceAccountStore{}, rdb, ks, mfaChecker, setts)
@@ -355,7 +355,7 @@ func TestLogin_RiskScoreIncludesRecentFailedAttemptsBeforeClearing(t *testing.T)
 	u := &user.User{ID: "user-1", Email: email, IsActive: true}
 	reader := &dummyUserReader{u: u}
 	store := &testAnomalySessionStore{}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	setts := &testAnomalySettings{enabled: "true", mfa: 20, block: 100}
 	mfaChecker := &testAnomalyMFAChecker{enabled: true}
 	svc := NewService(reader, store, &testServiceAccountStore{}, rdb, ks, mfaChecker, setts)
@@ -430,7 +430,7 @@ func TestDetectLoginAnomaly_KnownDeviceFingerprintNotFlaggedAsNew(t *testing.T) 
 	}
 
 	store := &testAnomalySessionStore{sessions: sessions}
-	ks, _ := LoadOrGenerateKeyStore("", "")
+	ks, _ := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	svc := NewService(reader, store, &testServiceAccountStore{}, nil, ks, nil, nil)
 	svc.ConfigureSecurityAnomalies(geoip.NewService(""), nil)
 

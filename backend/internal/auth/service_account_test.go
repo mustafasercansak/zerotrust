@@ -51,7 +51,7 @@ func (s *clientCredentialsStore) CheckSecret(hash, secret string) bool {
 
 func newClientCredentialsService(t *testing.T, store ServiceAccountStore) *Service {
 	t.Helper()
-	ks, err := LoadOrGenerateKeyStore("", "")
+	ks, err := LoadOrGenerateKeyStore("", "", AlgEdDSA)
 	if err != nil {
 		t.Fatalf("key store: %v", err)
 	}

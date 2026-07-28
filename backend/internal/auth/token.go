@@ -130,15 +130,17 @@ func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, 
 
 func ValidateAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
-			return nil, ErrInvalidToken
-		}
 		kid, ok := t.Header["kid"].(string)
 		if !ok || kid == "" {
 			return nil, ErrInvalidToken
 		}
-		pub, exists := ks.PublicKey(kid)
+		pub, alg, exists := ks.PublicKey(kid)
 		if !exists {
+			return nil, ErrInvalidToken
+		}
+		// Reject tokens whose alg header does not match the algorithm of the
+		// key identified by kid (algorithm-confusion protection).
+		if t.Method.Alg() != alg {
 			return nil, ErrInvalidToken
 		}
 		return pub, nil
@@ -157,9 +159,7 @@ func ValidateAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
 }
 
 func signClaims(ks *KeyStore, claims Claims) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	token.Header["kid"] = ks.PrimaryKID()
-	return token.SignedString(ks.PrimaryKey())
+	return ks.Sign(claims)
 }
 
 func generateOpaqueToken() (string, error) {

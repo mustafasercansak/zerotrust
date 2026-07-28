@@ -47,13 +47,33 @@ Variables marked **required** will cause the server to refuse to start if absent
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `JWT_PRIVATE_KEY_FILE` | _(empty)_ | In production | Path to an Ed25519 private key in PEM format. When empty, the server generates an ephemeral key at startup (suitable for development, but tokens are invalidated on restart). |
-| `JWT_SECONDARY_KEY_FILE` | _(empty)_ | No | Path to a second Ed25519 private key used for verification only during key rotation. Set this to the old primary key path, then remove it after all tokens signed with it have expired (1 minute). |
+| `JWT_SIGNING_ALG` | `EdDSA` | No | JWT signing algorithm: `EdDSA` (Ed25519), `ES256` (ECDSA P-256), or `RS256` (RSA ≥ 2048). The algorithm is used when generating an ephemeral development key; keys loaded from files self-describe their algorithm, so primary and secondary keys may use different algorithms during rotation. |
+| `JWT_PRIVATE_KEY_FILE` | _(empty)_ | In production | Path to a PKCS#8 PEM private key matching `JWT_SIGNING_ALG`. When empty, the server generates an ephemeral key at startup (suitable for development, but tokens are invalidated on restart). |
+| `JWT_SECONDARY_KEY_FILE` | _(empty)_ | No | Path to a second private key used for verification only during key rotation. Set this to the old primary key path, then remove it after all tokens signed with it have expired (1 minute). |
+
+The signing layer is crypto-agile by design: algorithm selection is configuration, not code. Post-quantum signature schemes (e.g. ML-DSA) can be added the same way once JOSE algorithm registrations are finalized.
 
 **Generating a key:**
 ```bash
+# EdDSA (default)
 openssl genpkey -algorithm ed25519 -out secrets/jwt_primary.pem
+# ES256
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out secrets/jwt_primary.pem
+# RS256
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out secrets/jwt_primary.pem
 ```
+
+---
+
+## TLS (direct, without nginx)
+
+| Variable | Default | Required | Description |
+|---|---|---|---|
+| `TLS_ENABLED` | `false` | No | Set to `true` to have the Go server terminate TLS itself instead of plain HTTP (used when not running behind nginx). |
+| `TLS_CERT_FILE` | _(empty)_ | If `TLS_ENABLED=true` | Path to the PEM certificate chain. |
+| `TLS_KEY_FILE` | _(empty)_ | If `TLS_ENABLED=true` | Path to the PEM private key. |
+
+When TLS is enabled, the server offers the hybrid post-quantum key exchange **X25519MLKEM768** (RFC 9370) first, falling back to classical X25519/P-256 for clients without ML-KEM support. This protects recorded traffic against future "harvest now, decrypt later" attacks. In the default compose setup TLS is terminated by nginx and these variables are unused.
 
 ---
 
@@ -156,7 +176,7 @@ Before going to production, verify:
 
 - [ ] `DATABASE_URL` points to a production database with a strong password
 - [ ] `REDIS_PASSWORD` is a strong random secret
-- [ ] `JWT_PRIVATE_KEY_FILE` is set to a persisted Ed25519 key (not ephemeral)
+- [ ] `JWT_PRIVATE_KEY_FILE` is set to a persisted signing key (not ephemeral)
 - [ ] `MFA_ENCRYPTION_KEY` is a 64-char hex string stored in a secret manager
 - [ ] `COOKIES_SECURE=true` (requires HTTPS)
 - [ ] `CORS_ALLOWED_ORIGINS` lists only your actual frontend origin(s)

@@ -159,7 +159,7 @@ func createIntegrationUser(t *testing.T, db *pgxpool.Pool, email string) *user.U
 
 func newIntegrationAuthService(t *testing.T, u *user.User, sessions auth.SessionStore) *auth.Service {
 	t.Helper()
-	ks, err := auth.LoadOrGenerateKeyStore("", "")
+	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
 	if err != nil {
 		t.Fatalf("keystore init failed: %v", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -123,7 +124,7 @@ func run(ctx context.Context, cfg config) error {
 		"idle_conns", rdb.PoolStats().IdleConns,
 	)
 
-	ks, err := auth.LoadOrGenerateKeyStore(cfg.JWTPrivateKeyFile, cfg.JWTSecondaryKeyFile)
+	ks, err := auth.LoadOrGenerateKeyStore(cfg.JWTPrivateKeyFile, cfg.JWTSecondaryKeyFile, cfg.JWTSigningAlg)
 	if err != nil {
 		return fmt.Errorf("JWT key load failed: %w", err)
 	}
@@ -951,8 +952,21 @@ func run(ctx context.Context, cfg config) error {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// When TLS is terminated by the Go server itself (TLS_ENABLED=true), offer
+	// the hybrid post-quantum key exchange X25519MLKEM768 (RFC 9370) first.
+	if cfg.TLSEnabled {
+		srv.TLSConfig = serverTLSConfig()
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
+		if cfg.TLSEnabled {
+			slog.Info("server starting with hybrid post-quantum TLS", "addr", cfg.ServerAddr, "key_exchange", "X25519MLKEM768")
+			if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+				serverErr <- err
+			}
+			return
+		}
 		slog.Info("server starting", "addr", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
@@ -990,6 +1004,21 @@ func run(ctx context.Context, cfg config) error {
 	return nil
 }
 
+// serverTLSConfig returns the TLS configuration used when the Go server
+// terminates TLS itself. The hybrid post-quantum key exchange X25519MLKEM768
+// (RFC 9370) is offered first; Go 1.24+ supports it natively, and clients
+// without ML-KEM support fall back to classical X25519/P-256.
+func serverTLSConfig() *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{
+			tls.X25519MLKEM768,
+			tls.X25519,
+			tls.CurveP256,
+		},
+	}
+}
+
 func writeMetrics(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintf(w, "# HELP zerotrust_audit_write_failures_total Total audit log write failures.\n")
@@ -1009,7 +1038,10 @@ type config struct {
 	MigrationsPath           string
 	JWTPrivateKeyFile        string
 	JWTSecondaryKeyFile      string
+	JWTSigningAlg            string
 	TLSEnabled               bool
+	TLSCertFile              string
+	TLSKeyFile               string
 	CookiesSecure            bool
 	RegistrationEnabled      bool
 	MFAEnabled               bool
@@ -1033,6 +1065,15 @@ type config struct {
 
 func loadConfig() (config, error) {
 	tlsEnabled := getEnv("TLS_ENABLED", "false") == "true"
+	tlsCertFile := getEnv("TLS_CERT_FILE", "")
+	tlsKeyFile := getEnv("TLS_KEY_FILE", "")
+	if tlsEnabled && (tlsCertFile == "" || tlsKeyFile == "") {
+		return config{}, fmt.Errorf("TLS_ENABLED=true requires TLS_CERT_FILE and TLS_KEY_FILE")
+	}
+	jwtAlg := getEnv("JWT_SIGNING_ALG", "EdDSA")
+	if !auth.IsSupportedAlg(jwtAlg) {
+		return config{}, fmt.Errorf("unsupported JWT_SIGNING_ALG %q (supported: EdDSA, ES256, RS256)", jwtAlg)
+	}
 	cookiesSecure := getEnv("COOKIES_SECURE", "false") == "true"
 	registrationEnabled := getEnv("REGISTRATION_ENABLED", "false") == "true"
 	mfaEnabled, err := boolEnv("MFA_ENABLED", false)
@@ -1093,7 +1134,10 @@ func loadConfig() (config, error) {
 		MigrationsPath:           getEnv("MIGRATIONS_PATH", "migrations"),
 		JWTPrivateKeyFile:        getEnv("JWT_PRIVATE_KEY_FILE", ""),
 		JWTSecondaryKeyFile:      getEnv("JWT_SECONDARY_KEY_FILE", ""),
+		JWTSigningAlg:            jwtAlg,
 		TLSEnabled:               tlsEnabled,
+		TLSCertFile:              tlsCertFile,
+		TLSKeyFile:               tlsKeyFile,
 		CookiesSecure:            cookiesSecure,
 		RegistrationEnabled:      registrationEnabled,
 		MFAEnabled:               mfaEnabled,
