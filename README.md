@@ -144,7 +144,7 @@ Planned/ongoing hardening:
 ### Requirements
 
 - Docker and Docker Compose
-- Go 1.25+ (matches `backend/go.mod`; used by the secret generation script)
+- Go 1.26+ (matches `backend/go.mod`; used by the secret generation script)
 - OpenSSL
 
 ### 1. Generate Secrets

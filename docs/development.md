@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker and Docker Compose (for the database, Redis, and full-stack environment)
-- Go 1.25+ (matches backend/go.mod; for running backend tests without Docker)
+- Go 1.26+ (matches backend/go.mod; for running backend tests without Docker)
 - Node.js 20+ (for frontend development)
 
 ---

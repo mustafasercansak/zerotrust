@@ -10,7 +10,7 @@ ZeroTrust is a security-focused Zero Trust authentication and authorization plat
 
 | Layer | Technology |
 |---|---|
-| Backend | Go 1.25 (module `github.com/zerotrust/backend`), chi router, pgx, go-redis, golang-jwt v5, go-webauthn, pquerna/otp, golang-migrate |
+| Backend | Go 1.26 (module `github.com/zerotrust/backend`), chi router, pgx, go-redis, golang-jwt v5, go-webauthn, pquerna/otp, golang-migrate |
 | Frontend | React 19 + TypeScript, Vite, MUI v9, react-router v7, i18next (Turkish default / English), Vitest + Testing Library, Playwright |
 | Data | PostgreSQL 16 (persistent state, migrations), Redis 7 (rate limits, JTI blocklist, lockouts, WebAuthn ceremony state, auth codes) |
 | Infra | Docker Compose (`infra/`), nginx for production TLS termination, GitHub Actions CI |

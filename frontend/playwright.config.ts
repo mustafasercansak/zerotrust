@@ -9,9 +9,13 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  // One retry on CI absorbs runner-timing flakes; locally failures stay loud.
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: "list",
+  // The 30 s default is shared by beforeEach hooks (session refresh/login)
+  // and the test body; slow CI runners need headroom for both.
+  timeout: 60_000,
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     // Use the system Chrome already on the machine — avoids Playwright

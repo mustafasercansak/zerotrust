@@ -42,7 +42,8 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: backend/go.mod
+          go-version: "stable"
+          check-latest: true
           cache-dependency-path: backend/go.sum
 
       - name: Build
@@ -144,7 +145,8 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: backend/go.mod
+          go-version: "stable"
+          check-latest: true
           cache-dependency-path: backend/go.sum
 
       - uses: actions/setup-node@v5
@@ -248,7 +250,8 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: backend/go.mod
+          go-version: "stable"
+          check-latest: true
           cache-dependency-path: backend/go.sum
 
       - name: Run govulncheck
