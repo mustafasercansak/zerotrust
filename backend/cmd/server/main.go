@@ -342,7 +342,14 @@ func run(ctx context.Context, cfg config) error {
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
 	sessionHandler.SetRevocationChecker(authSvc)
-	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepo)
+	// mfaRepo is a nil *mfa.Repository when MFA is disabled; converting that
+	// typed nil to the MfaRepo interface would defeat the handler's nil checks
+	// and panic on use (e.g. ListUsers). Pass an explicit nil interface instead.
+	var mfaRepoForAdmin admin.MfaRepo
+	if mfaRepo != nil {
+		mfaRepoForAdmin = mfaRepo
+	}
+	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepoForAdmin)
 	adminHandler.SetPostureProvider(userRepo)
 	adminHandler.SetLockoutManager(authSvc)
 	saHandler := serviceaccount.NewHandler(saSvc, saHub, authSvc)

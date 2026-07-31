@@ -138,6 +138,9 @@ func (r *Repository) IsEnabled(ctx context.Context, userID string) bool {
 // IsEnabledForUser is like IsEnabled but surfaces unexpected DB errors.
 // ErrNotFound (no MFA row) is treated as disabled, not an error.
 func (r *Repository) IsEnabledForUser(ctx context.Context, userID string) (bool, error) {
+	if r == nil {
+		return false, nil
+	}
 	rec, err := r.find(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -149,9 +152,10 @@ func (r *Repository) IsEnabledForUser(ctx context.Context, userID string) (bool,
 }
 
 // EnabledForUsers returns a set of user IDs (from the given slice) that have TOTP enabled.
+// A nil receiver (MFA disabled at startup) yields an empty set instead of panicking.
 func (r *Repository) EnabledForUsers(ctx context.Context, userIDs []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(userIDs))
-	if len(userIDs) == 0 {
+	if r == nil || len(userIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.db.Query(ctx, `

@@ -153,3 +153,20 @@ func TestMFAInvalidKey(t *testing.T) {
 		t.Fatal("Expected error with short key")
 	}
 }
+
+// Regression: the admin handler receives a typed-nil *Repository when MFA is
+// disabled; method calls on it must not panic (found via E2E: GET
+// /api/v1/admin/users returned 500 with MFA_ENABLED=false).
+func TestNilRepositoryMethodsAreSafe(t *testing.T) {
+	var r *Repository
+
+	enabled, err := r.IsEnabledForUser(context.Background(), "u1")
+	if err != nil || enabled {
+		t.Fatalf("IsEnabledForUser on nil repo = (%v, %v), want (false, nil)", enabled, err)
+	}
+
+	set, err := r.EnabledForUsers(context.Background(), []string{"u1", "u2"})
+	if err != nil || len(set) != 0 {
+		t.Fatalf("EnabledForUsers on nil repo = (%v, %v), want (empty, nil)", set, err)
+	}
+}
