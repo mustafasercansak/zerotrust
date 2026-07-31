@@ -43,6 +43,42 @@ func TestRequireRole(t *testing.T) {
 	}
 }
 
+// TestRequireUserToken proves service-account tokens are rejected on
+// self-service routes while user session tokens pass through. (ISSUE_LIST #110)
+func TestRequireUserToken(t *testing.T) {
+	handler := RequireUserToken()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Missing claims
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", rr.Code)
+	}
+
+	// Service-account token
+	svcClaims := &auth.Claims{SubType: auth.SubTypeService, ClientID: "svc-1"}
+	ctxSvc := context.WithValue(req.Context(), ClaimsKey, svcClaims)
+	reqSvc := req.WithContext(ctxSvc)
+	rrSvc := httptest.NewRecorder()
+	handler.ServeHTTP(rrSvc, reqSvc)
+	if rrSvc.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for service token, got %d", rrSvc.Code)
+	}
+
+	// User session token
+	userClaims := &auth.Claims{SubType: auth.SubTypeUser, UserID: "u1"}
+	ctxUser := context.WithValue(req.Context(), ClaimsKey, userClaims)
+	reqUser := req.WithContext(ctxUser)
+	rrUser := httptest.NewRecorder()
+	handler.ServeHTTP(rrUser, reqUser)
+	if rrUser.Code != http.StatusOK {
+		t.Errorf("expected 200 for user token, got %d", rrUser.Code)
+	}
+}
+
 func TestRequirePermission(t *testing.T) {
 	handler := RequirePermission("users", "write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

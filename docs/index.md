@@ -78,9 +78,9 @@
 
 ## OIDC Identity Provider
 
-![Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider with roles/groups claims.](images/oidc_clients.png)
+![Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider.](images/oidc_clients.png)
 
-*Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider with roles/groups claims.*
+*Register and manage OIDC clients. ZeroTrust acts as a standards-compliant OpenID Connect provider.*
 
 ZeroTrust implements the Authorization Code flow with PKCE (S256, RFC 7636). Registered clients receive an authorization code on user consent, exchange it for an Ed25519-signed ID token and access token, and use the `refresh_token` grant (RFC 6749 §6) with `offline_access` scope to obtain long-lived rotating refresh tokens. Tokens can be introspected via `POST /oauth2/introspect` (RFC 7662) and revoked via `POST /oauth2/revoke` (RFC 7009). The `max_age` parameter (OIDC Core §3.1.2.1) enforces re-authentication when a session exceeds a client-specified age. Live profile claims are available at `/oauth2/userinfo`. All consent decisions, token exchanges, rotations, introspections, and revocations are written to the audit log. The discovery document at `/.well-known/openid-configuration` advertises all supported endpoints, scopes, and signing algorithms.
 

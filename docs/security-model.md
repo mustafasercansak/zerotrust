@@ -32,7 +32,7 @@ It is **not** designed to protect against:
 
 **Access tokens** are Ed25519-signed JWTs with a 1-minute TTL. The short expiry limits the window for a captured token. Tokens include a `jti` (JWT ID) that is checked against a Redis blocklist on every request, enabling instant revocation regardless of the TTL.
 
-**Refresh tokens** are 256-bit random opaques. Only their SHA-256 hash is stored in PostgreSQL. The server never holds the plaintext token after issuing it. On each use, the token is rotated atomically (`SELECT … FOR UPDATE`): the old hash is deleted and a new one issued. If the old hash is presented again after rotation, every session for that user is immediately revoked — this surfaces token theft.
+**Refresh tokens** are 256-bit random opaques. Only their SHA-256 hash is stored in PostgreSQL. The server never holds the plaintext token after issuing it. On each use, the token is rotated atomically (`SELECT … FOR UPDATE`): the old hash is retained as a revoked row (`revoked_reason='rotation'`) and a new one issued. If a rotation-revoked hash is presented again, every session for that user is immediately revoked — this surfaces token theft. Tokens revoked for other reasons (logout, admin action, cleanup) simply fail on replay.
 
 **DPoP (RFC 9449)** binds an access token to a client-held asymmetric key. Clients prove possession of the private key on each request. A stolen DPoP-bound token is unusable without the corresponding key.
 
@@ -76,6 +76,8 @@ The `max_login_attempts` setting (default 5) configures the threshold before the
 ### 6. Rate Limiting
 
 Sliding-window rate limits per source IP, stored in Redis. See the [API reference](api.md#rate-limits) for per-endpoint limits. The `Retry-After` header tells clients when they can retry.
+
+Rate limiting deliberately fails open when Redis is unavailable: availability is preferred over enforcement during an outage. Each occurrence is logged and counted in the `zerotrust_ratelimit_fail_opens_total` counter on `/metrics`, so a silently disabled limiter cannot go unnoticed.
 
 Trusted proxy IPs (configured via `TRUSTED_PROXIES`) are trusted for `X-Forwarded-For` extraction so that the real client IP — not the proxy IP — is used for rate limiting.
 
@@ -133,11 +135,15 @@ Applied to all responses by `authmw.SecurityHeaders(tlsEnabled)`:
 | `Permissions-Policy` | `geolocation=(), microphone=(), camera=()` |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (only when `TLS_ENABLED=true`) |
 
+A Content-Security-Policy (`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`) is delivered at the nginx layer in both dev-style and production deployments. `'unsafe-inline'` for `style-src` is required by MUI, which injects inline `<style>` tags.
+
 ### 10. Step-Up MFA
 
-Sensitive admin operations (role changes, session revocation, OIDC client management, settings changes, service account mutations) require re-verification of MFA within the last 10 minutes. This limits the blast radius of a hijacked admin session: even with a valid access token, the attacker cannot perform high-impact actions without the TOTP device.
+Sensitive admin operations (role changes, session revocation, OIDC client management, settings changes, service account mutations, user creation) require re-verification of MFA within the last 10 minutes. Self-service MFA management (`/mfa/setup`, `/mfa/verify`, `/mfa/disable`) and passkey registration/deletion require the same recent proof for users who already have MFA enabled. This limits the blast radius of a hijacked admin session: even with a valid access token, the attacker cannot perform high-impact actions without the TOTP device.
 
 Step-up state is stored in Redis with a 10-minute TTL. The frontend prompts for the TOTP code and calls `POST /api/v1/mfa/step-up` before retrying the protected action.
+
+Step-up validation fails closed when the Redis replay store is unavailable. Backup recovery codes are single-use and consumed atomically under a row lock (`SELECT … FOR UPDATE`), so two concurrent requests presenting the same code cannot both succeed.
 
 ### 11. RBAC and Permissions
 
@@ -179,4 +185,4 @@ Webhook delivery allows real-time forwarding of audit events to a SIEM or alerti
 - **Suspicious hour** check uses server local time, not the user's local time. A user working night shifts will score false positives. This is intentional — the signal is cheap and contributes only 20 points, which alone is insufficient to trigger enforcement.
 - **New device detection** uses the raw `User-Agent` string, which can be spoofed. It is a soft signal (+30 points), not a hard gate.
 - **GeoIP accuracy** is at the city level at best. Residential ISPs often use anycast or shared exit IPs, which can produce false impossible-travel detections for VPN or mobile users. Tune `risk_threshold_block` upward or disable the feature if your user base heavily uses VPNs.
-- The WebAuthn attestation verification step is optional (controlled by `require_hardware_attestation`). Without attestation, you cannot cryptographically verify that the passkey is backed by dedicated hardware.
+- The WebAuthn attestation verification step is optional (controlled by `require_hardware_attestation`). Without attestation, you cannot cryptographically verify that the passkey is backed by dedicated hardware. Even when enabled, enforcement is advisory: only certificate-chain-backed attestation (`basic_full`/`attca`) is accepted, but without an MDS/trust-anchor configuration the chain is not anchored to vendor root CAs.

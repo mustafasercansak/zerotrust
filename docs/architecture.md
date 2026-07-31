@@ -108,6 +108,8 @@ Browser                         Backend (middleware stack)
 
 **Why 1-minute access token TTL?** Short TTL limits the damage window if a token is captured. The refresh-token rotation model (one use per token) means stolen refresh tokens are detected on reuse.
 
+**Audience-confusion protection:** first-party session and service-account tokens carry a `token_use` claim (`session` / `service`); OIDC access tokens issued to external clients carry none. The internal `/api/v1` surface validates with `ValidateAccessToken`, which rejects tokens without a recognized `token_use`, so an OIDC token cannot be replayed against the first-party API. OIDC endpoints (UserInfo, Introspect, Revoke) use `ValidateOIDCAccessToken`, which checks signature and expiry only.
+
 **Key rotation** is zero-downtime: the keystore holds a primary key (used for signing) and an optional secondary key (used for verification only). Roll a new primary, demote the old one to secondary, then remove the secondary after all tokens signed with it have expired.
 
 ---
@@ -124,7 +126,7 @@ Each login creates a session row containing:
 
 **Session cap**: The oldest session is evicted when a user exceeds `max_sessions_per_user` (default 5). This prevents indefinite accumulation without forcing single-session semantics that frustrate multi-device users.
 
-**Reuse detection**: If a refresh token hash is presented after it has already been rotated (i.e., the hash is no longer in the DB), the server revokes *all* of that user's sessions. This surfaces stolen refresh tokens: the legitimate user's next refresh will fail and force re-login, alerting them that something is wrong.
+**Reuse detection**: Rotation no longer deletes the old session row — it marks it revoked with `revoked_reason='rotation'` (other reasons include `logout`, `mass_revoke`, `revoke_others`, `revoke_by_id`, `evicted`, `stale_initial`, `device_replaced`), and `sessions.refresh_token_hash` carries a unique index. Only replaying a rotation-revoked token is treated as theft: the server revokes *all* of that user's sessions, which also invalidates the user's OIDC refresh tokens. Tokens revoked for any other reason (logout, admin action, cleanup) simply fail on replay without triggering mass revocation. This surfaces stolen refresh tokens: the legitimate user's next refresh will fail and force re-login, alerting them that something is wrong.
 
 ---
 
@@ -137,7 +139,7 @@ The server starts three goroutines alongside the HTTP listener:
 | Session cleanup | 10 minutes | Delete expired sessions from PostgreSQL (prevents table bloat) |
 | Connection pool metrics | 5 minutes | Emit structured log lines with DB/Redis pool stats |
 | Service account listener | — | `LISTEN`/`NOTIFY` on PostgreSQL for real-time SA status changes (SSE broadcast) |
-| Resilient mailer | — | Bounded queue (1000) + worker pool (2) for async security alert email delivery |
+| Resilient mailer | — | Bounded queue (1000) + worker pool (2) for async security alert and password-reset email delivery |
 
 Workers are shut down gracefully: they listen on a `rootCtx` derived from `SIGINT`/`SIGTERM`, and the server waits up to 10 seconds for them to drain before exiting.
 
@@ -179,7 +181,7 @@ Every non-trivial action produces an `audit.Entry`. The write path is:
 
 1. Handler calls `auditRepo.Log(ctx, entry)` (synchronous for auth failures, async for everything else).
 2. `auditRepo` optionally encrypts `metadata` via the Vault/Bao client before writing to PostgreSQL.
-3. If a `webhook_url` is configured in system settings, the repo fans the entry out to the webhook URL via an HTTP POST (fire-and-forget with a 5-second timeout).
+3. If a `webhook_url` is configured in system settings, the repo fans the entry out to the webhook URL via an HTTP POST (fire-and-forget with a 5-second timeout). Dispatch is throttled to one webhook per IP+action combination per minute, with periodic pruning of the throttle map, so a flood of identical events cannot exhaust the outbound channel.
 4. On webhook delivery failure, a second audit entry is written (`auth.security_alert.delivery_failure`).
 
 Audit entries are queryable by admin users via `GET /api/v1/admin/audit` with filtering, sorting, and CSV export.
@@ -205,3 +207,5 @@ Client App          ZeroTrust (OP)              User Browser
 ```
 
 OIDC clients are registered in the database with a client secret (bcrypt hashed). The `/.well-known/openid-configuration` discovery document and `/.well-known/jwks.json` JWKS endpoint are public and cached for 1 hour.
+
+**OIDC refresh tokens** are stored in Redis and are single-use: each refresh consumes the old token and issues a rotated one within the same grant family (identified by a family ID). A per-user index lets the server invalidate every OIDC refresh token a user holds when all of their sessions are revoked. Consumed tokens leave a tombstone; replaying one is treated as theft and revokes the entire grant family (RFC 6819 §5.2.2.3).

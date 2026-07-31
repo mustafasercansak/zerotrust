@@ -83,7 +83,7 @@ func TestRepositoryCreateInvalidatesPreviousTokens(t *testing.T) {
 		t.Fatalf("active tokens=%d want=1", active)
 	}
 
-	err = repo.ConsumeAndReset(ctx, first, "new-pass", "new-hash")
+	err = repo.ConsumeAndReset(ctx, first, "new-pass")
 	if !errors.Is(err, ErrUsed) {
 		t.Fatalf("consume old token err=%v want=%v", err, ErrUsed)
 	}
@@ -110,12 +110,7 @@ func TestRepositoryConsumeAndResetSuccessRevokesSessions(t *testing.T) {
 		t.Fatalf("create reset token failed: %v", err)
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte("NewPassword1!"), bcrypt.DefaultCost)
-	if err != nil {
-		t.Fatalf("generate hash failed: %v", err)
-	}
-
-	if err := repo.ConsumeAndReset(ctx, rawToken, "NewPassword1!", string(newHash)); err != nil {
+	if err := repo.ConsumeAndReset(ctx, rawToken, "NewPassword1!"); err != nil {
 		t.Fatalf("consume and reset failed: %v", err)
 	}
 
@@ -124,8 +119,8 @@ func TestRepositoryConsumeAndResetSuccessRevokesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read user hash failed: %v", err)
 	}
-	if storedHash != string(newHash) {
-		t.Fatal("password hash was not updated")
+	if bcrypt.CompareHashAndPassword([]byte(storedHash), []byte("NewPassword1!")) != nil {
+		t.Fatal("password hash was not updated to the new password")
 	}
 
 	var revoked int
@@ -159,7 +154,7 @@ func TestRepositoryConsumeAndResetTokenStates(t *testing.T) {
 		t.Fatalf("create user failed: %v", err)
 	}
 
-	err = repo.ConsumeAndReset(ctx, "does-not-exist", "new-pass", "hash")
+	err = repo.ConsumeAndReset(ctx, "does-not-exist", "new-pass")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing token err=%v want=%v", err, ErrNotFound)
 	}
@@ -175,9 +170,49 @@ func TestRepositoryConsumeAndResetTokenStates(t *testing.T) {
 		t.Fatalf("insert expired token failed: %v", err)
 	}
 
-	err = repo.ConsumeAndReset(ctx, raw, "new-pass", "hash")
+	err = repo.ConsumeAndReset(ctx, raw, "new-pass")
 	if !errors.Is(err, ErrExpired) {
 		t.Fatalf("expired token err=%v want=%v", err, ErrExpired)
+	}
+}
+
+// TestRepositoryConsumeAndReset_InvalidTokenSkipsBcrypt proves an unknown token
+// is rejected without ever running bcrypt on the caller-supplied password —
+// bcrypt.GenerateFromPassword rejects passwords over 72 bytes, so a bcrypt
+// attempt on this input would surface as an unexpected error/panic rather than
+// the expected ErrNotFound. (ISSUE_LIST #84)
+func TestRepositoryConsumeAndReset_InvalidTokenSkipsBcrypt(t *testing.T) {
+	repo, _, pool, ctx := setupResetRepo(t)
+	defer pool.Close()
+
+	oversizedPassword := string(make([]byte, 100))
+	err := repo.ConsumeAndReset(ctx, "does-not-exist-either", oversizedPassword)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("invalid token with oversized password err=%v want=%v", err, ErrNotFound)
+	}
+}
+
+// TestRepositoryConsumeAndReset_ValidTokenRunsBcrypt proves that once a token
+// is confirmed valid, an oversized (>72 byte) password does reach bcrypt and
+// surfaces its error, confirming bcrypt only runs post-validation.
+// (ISSUE_LIST #84)
+func TestRepositoryConsumeAndReset_ValidTokenRunsBcrypt(t *testing.T) {
+	repo, userRepo, pool, ctx := setupResetRepo(t)
+	defer pool.Close()
+
+	u, err := userRepo.Create(ctx, "reset-oversized@example.com", "hash", "en")
+	if err != nil {
+		t.Fatalf("create user failed: %v", err)
+	}
+	rawToken, err := repo.Create(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("create reset token failed: %v", err)
+	}
+
+	oversizedPassword := string(make([]byte, 100))
+	err = repo.ConsumeAndReset(ctx, rawToken, oversizedPassword)
+	if err == nil || errors.Is(err, ErrNotFound) || errors.Is(err, ErrExpired) || errors.Is(err, ErrUsed) {
+		t.Fatalf("expected a bcrypt error for an oversized password on a valid token, got %v", err)
 	}
 }
 
@@ -201,12 +236,7 @@ func TestRepositoryConsumeAndResetReuseForbidden(t *testing.T) {
 		t.Fatalf("create reset token failed: %v", err)
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = repo.ConsumeAndReset(ctx, rawToken, password, string(newHash))
+	err = repo.ConsumeAndReset(ctx, rawToken, password)
 	if !errors.Is(err, ErrPasswordReuseForbidden) {
 		t.Fatalf("expected ErrPasswordReuseForbidden, got %v", err)
 	}

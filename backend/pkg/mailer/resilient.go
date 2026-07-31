@@ -9,14 +9,23 @@ import (
 )
 
 type AlertJob struct {
-	To           string
-	AlertType    string
-	IPAddress    string
-	Location     string
-	Details      string
-	Attempt      int
-	MaxRetries   int
-	BaseDelay    time.Duration
+	To         string
+	AlertType  string
+	IPAddress  string
+	Location   string
+	Details    string
+	ResetURL   string // non-empty marks a password-reset job instead of a security alert
+	Attempt    int
+	MaxRetries int
+	BaseDelay  time.Duration
+}
+
+// kind labels the job for log lines.
+func (j AlertJob) kind() string {
+	if j.ResetURL != "" {
+		return "password_reset"
+	}
+	return j.AlertType
 }
 
 type ResilientMailer struct {
@@ -55,9 +64,28 @@ func (rm *ResilientMailer) Stop() {
 	rm.wg.Wait()
 }
 
-func (rm *ResilientMailer) SendPasswordReset(ctx context.Context, to, resetURL string) error {
-	// Password resets are synchronous/direct (not anomalous alerts)
-	return rm.underlying.SendPasswordReset(ctx, to, resetURL)
+// SendPasswordReset queues a password-reset email on the same bounded worker
+// pool as security alerts, so a flood of reset requests cannot spawn
+// unbounded concurrent SMTP work (#93).
+func (rm *ResilientMailer) SendPasswordReset(_ context.Context, to, resetURL string) error {
+	baseDelay := rm.BaseDelay
+	if baseDelay == 0 {
+		baseDelay = 1 * time.Second
+	}
+	job := AlertJob{
+		To:         to,
+		ResetURL:   resetURL,
+		Attempt:    0,
+		MaxRetries: 5,
+		BaseDelay:  baseDelay,
+	}
+	select {
+	case rm.jobs <- job:
+		return nil
+	default:
+		slog.Error("mail queue is full, password reset email dropped", "to", to)
+		return fmt.Errorf("mailer queue is full")
+	}
 }
 
 func (rm *ResilientMailer) SendSecurityAlert(ctx context.Context, to, alertType, ipAddress, location, details string) error {
@@ -66,14 +94,14 @@ func (rm *ResilientMailer) SendSecurityAlert(ctx context.Context, to, alertType,
 		baseDelay = 1 * time.Second
 	}
 	job := AlertJob{
-		To:          to,
-		AlertType:   alertType,
-		IPAddress:   ipAddress,
-		Location:    location,
-		Details:     details,
-		Attempt:     0,
-		MaxRetries:  5,
-		BaseDelay:   baseDelay,
+		To:         to,
+		AlertType:  alertType,
+		IPAddress:  ipAddress,
+		Location:   location,
+		Details:    details,
+		Attempt:    0,
+		MaxRetries: 5,
+		BaseDelay:  baseDelay,
 	}
 	select {
 	case rm.jobs <- job:
@@ -104,26 +132,31 @@ func (rm *ResilientMailer) processJob(job AlertJob) {
 	ctx, cancel := context.WithTimeout(rm.ctx, 15*time.Second)
 	defer cancel()
 
-	err := rm.underlying.SendSecurityAlert(ctx, job.To, job.AlertType, job.IPAddress, job.Location, job.Details)
+	var err error
+	if job.ResetURL != "" {
+		err = rm.underlying.SendPasswordReset(ctx, job.To, job.ResetURL)
+	} else {
+		err = rm.underlying.SendSecurityAlert(ctx, job.To, job.AlertType, job.IPAddress, job.Location, job.Details)
+	}
 	if err == nil {
-		slog.Info("security alert email sent successfully", "to", job.To, "type", job.AlertType, "attempt", job.Attempt+1)
+		slog.Info("mail sent successfully", "to", job.To, "kind", job.kind(), "attempt", job.Attempt+1)
 		return
 	}
 
 	job.Attempt++
-	slog.Warn("failed to send security alert email", "to", job.To, "type", job.AlertType, "attempt", job.Attempt, "error", err)
+	slog.Warn("failed to send mail", "to", job.To, "kind", job.kind(), "attempt", job.Attempt, "error", err)
 
 	if job.Attempt >= job.MaxRetries {
-		slog.Error("failed to send security alert email: max retries reached", "to", job.To, "type", job.AlertType, "error", err)
+		slog.Error("failed to send mail: max retries reached", "to", job.To, "kind", job.kind(), "error", err)
 		if rm.auditLogFn != nil {
-			rm.auditLogFn(context.Background(), job.To, job.AlertType, job.IPAddress, job.Details, err)
+			rm.auditLogFn(context.Background(), job.To, job.kind(), job.IPAddress, job.Details, err)
 		}
 		return
 	}
 
 	// Calculate exponential backoff: BaseDelay * 2^(Attempt-1)
 	delay := job.BaseDelay * (1 << (job.Attempt - 1))
-	slog.Info("scheduling security alert email retry", "to", job.To, "delay", delay, "next_attempt", job.Attempt+1)
+	slog.Info("scheduling mail retry", "to", job.To, "kind", job.kind(), "delay", delay, "next_attempt", job.Attempt+1)
 
 	time.AfterFunc(delay, func() {
 		select {

@@ -40,7 +40,7 @@ type clientStore interface {
 	AuthenticateClient(ctx context.Context, clientID, clientSecret string) (*Client, error)
 	List(ctx context.Context) ([]*Client, error)
 	Create(ctx context.Context, clientID, secretHash, name string, redirectURIs, allowedScopes []string) (*Client, error)
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) (string, error)
 	Update(ctx context.Context, id, name string, redirectURIs, allowedScopes []string) (*Client, error)
 	RotateSecret(ctx context.Context, id string) (string, error)
 }
@@ -73,6 +73,16 @@ func NewHandler(svc *Service, clientRepo *ClientRepository, userSvc *user.Servic
 	}
 }
 
+// audienceContains reports whether clientID is one of the token's audiences.
+func audienceContains(aud jwt.ClaimStrings, clientID string) bool {
+	for _, a := range aud {
+		if a == clientID {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) logAudit(parent context.Context, entry audit.Entry) {
 	if h.auditRepo == nil {
 		return
@@ -98,6 +108,19 @@ func authorizeRedirectError(w http.ResponseWriter, r *http.Request, redirectURI,
 	}
 	parsed.RawQuery = q.Encode()
 	http.Redirect(w, r, parsed.String(), http.StatusFound)
+}
+
+// isSafeOIDCError reports whether err is one of the package's sentinel errors
+// whose message is a fixed, protocol-safe string. Only these may be returned to
+// (possibly anonymous) callers or stored in audit metadata; anything else may
+// wrap infrastructure details (Redis dial errors, DB errors) and must stay
+// server-side (#105).
+func isSafeOIDCError(err error) bool {
+	return errors.Is(err, ErrInvalidGrant) ||
+		errors.Is(err, ErrInvalidRedirectURI) ||
+		errors.Is(err, ErrInvalidScope) ||
+		errors.Is(err, ErrCodeVerifierFailed) ||
+		errors.Is(err, ErrRefreshTokenReuse)
 }
 
 // Authorize handles the initial GET /oauth2/authorize endpoint
@@ -280,9 +303,10 @@ func (h *Handler) Consent(w http.ResponseWriter, r *http.Request) {
 		req.Nonce,
 	)
 	if err != nil {
+		slog.Error("oidc auth code creation failed", "error", err, "client_id", req.ClientID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "server_error", "error_description": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": "server_error"})
 		return
 	}
 
@@ -356,15 +380,34 @@ func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		// Sentinel errors are protocol-safe and may be surfaced; anything else
+		// is logged server-side and reported generically so infrastructure
+		// details never reach callers or the unencrypted audit `reason` (#105).
+		reason := "internal_error"
+		errCode := "server_error"
+		status := http.StatusInternalServerError
+		description := ""
+		if isSafeOIDCError(err) {
+			reason = err.Error()
+			errCode = "invalid_grant"
+			status = http.StatusBadRequest
+			description = err.Error()
+		} else {
+			slog.Error("oidc token exchange failed", "error", err, "client_id", clientID, "grant_type", grantType)
+		}
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "oidc.token_exchange_failed",
 			Resource:  "oauth2",
 			IPAddress: r.RemoteAddr,
-			Metadata:  map[string]any{"client_id": clientID, "reason": err.Error(), "grant_type": grantType},
+			Metadata:  map[string]any{"client_id": clientID, "reason": reason, "grant_type": grantType},
 		})
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": err.Error()})
+		w.WriteHeader(status)
+		resp := map[string]string{"error": errCode}
+		if description != "" {
+			resp["error_description"] = description
+		}
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -392,7 +435,7 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-	claims, err := auth.ValidateAccessToken(h.ks, tokenStr)
+	claims, err := auth.ValidateOIDCAccessToken(h.ks, tokenStr)
 	if err != nil || (h.authSvc != nil && h.authSvc.IsRevoked(r.Context(), claims.ID)) {
 		http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 		return
@@ -422,8 +465,12 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		resp["given_name"] = u.FirstName
 		resp["family_name"] = u.LastName
 		resp["locale"] = u.Locale
-		resp["roles"] = u.Roles
-		resp["groups"] = u.Roles
+		if !oidcToken {
+			// Internal RBAC roles are first-party only; never disclosed to
+			// external OIDC clients (#100).
+			resp["roles"] = u.Roles
+			resp["groups"] = u.Roles
+		}
 	}
 	if includeEmail {
 		resp["email"] = u.Email
@@ -495,19 +542,18 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		hint := r.FormValue("token_type_hint")
 		// Route by hint first; fall back to trying JWT parse to discriminate.
 		if hint == "refresh_token" {
-			h.svc.RevokeRefreshToken(r.Context(), token)
+			h.svc.RevokeRefreshToken(r.Context(), token, clientID)
 		} else {
-			// Try to parse as a JWT access token. If it succeeds, blocklist the
-			// JTI. Otherwise treat it as an opaque refresh token.
-			if h.authSvc != nil {
-				if claims, err := auth.ValidateAccessToken(h.ks, token); err == nil {
-					_ = claims // validated; RevokeAccessToken re-parses internally
+			// Try to parse as a JWT access token. If it succeeds and the token
+			// was issued to this client, blocklist the JTI. RFC 7009 §2.1: a
+			// client must not revoke tokens belonging to other clients (#101).
+			// Otherwise treat it as an opaque refresh token.
+			if claims, err := auth.ValidateOIDCAccessToken(h.ks, token); err == nil {
+				if h.authSvc != nil && audienceContains(claims.Audience, clientID) {
 					h.authSvc.RevokeAccessToken(r.Context(), token)
-				} else {
-					h.svc.RevokeRefreshToken(r.Context(), token)
 				}
 			} else {
-				h.svc.RevokeRefreshToken(r.Context(), token)
+				h.svc.RevokeRefreshToken(r.Context(), token, clientID)
 			}
 		}
 		h.logAudit(r.Context(), audit.Entry{
@@ -585,6 +631,17 @@ func (h *Handler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if actor := authmw.ClaimsFrom(r.Context()); actor != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			UserID:    &actor.UserID,
+			Action:    "oidc.client_created",
+			Resource:  "oauth2_client",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  map[string]any{"client_uuid": client.ID, "client_id": client.ClientID},
+		})
+	}
+
 	resp := map[string]any{
 		"id":             client.ID,
 		"client_id":      client.ClientID,
@@ -608,7 +665,7 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.clientRepo.Delete(r.Context(), id)
+	clientID, err := h.clientRepo.Delete(r.Context(), id)
 	if err != nil {
 		if err == ErrClientNotFound {
 			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
@@ -616,6 +673,17 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if actor := authmw.ClaimsFrom(r.Context()); actor != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			UserID:    &actor.UserID,
+			Action:    "oidc.client_deleted",
+			Resource:  "oauth2_client",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  map[string]any{"client_uuid": id, "client_id": clientID},
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -649,6 +717,17 @@ func (h *Handler) UpdateClient(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if actor := authmw.ClaimsFrom(r.Context()); actor != nil {
+		h.logAudit(r.Context(), audit.Entry{
+			UserID:    &actor.UserID,
+			Action:    "oidc.client_updated",
+			Resource:  "oauth2_client",
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.Header.Get("User-Agent"),
+			Metadata:  map[string]any{"client_uuid": id, "client_id": client.ClientID},
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -714,8 +793,11 @@ func (h *Handler) Introspect(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	claims, err := auth.ValidateAccessToken(h.ks, r.FormValue("token"))
-	if err != nil || (h.authSvc != nil && h.authSvc.IsRevoked(r.Context(), claims.ID)) {
+	claims, err := auth.ValidateOIDCAccessToken(h.ks, r.FormValue("token"))
+	if err != nil || (h.authSvc != nil && h.authSvc.IsRevoked(r.Context(), claims.ID)) ||
+		!audienceContains(claims.Audience, clientID) {
+		// RFC 7662: a client may only introspect tokens issued to itself;
+		// anything else reports active:false without leaking token state (#101).
 		h.logAudit(r.Context(), audit.Entry{
 			Action:    "oidc.token_introspected",
 			Resource:  "oauth2",

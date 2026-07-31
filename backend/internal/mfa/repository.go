@@ -82,6 +82,47 @@ func (r *Repository) UpdateRecoveryCodes(ctx context.Context, userID string, cod
 	return err
 }
 
+// ConsumeRecoveryCode atomically validates-and-removes a recovery code. The
+// user's MFA row is locked (SELECT ... FOR UPDATE) while match inspects the
+// stored hashes and the matching entry is removed, so two concurrent requests
+// presenting the same code cannot both succeed (#95). It returns (false, nil)
+// when match finds nothing, and (true, nil) once the matched code is removed.
+func (r *Repository) ConsumeRecoveryCode(ctx context.Context, userID string, match func(hashes []string) (int, bool)) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	var codes []string
+	err = tx.QueryRow(ctx, `
+		SELECT recovery_codes FROM user_mfa WHERE user_id = $1 FOR UPDATE
+	`, userID).Scan(&codes)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+
+	idx, ok := match(codes)
+	if !ok {
+		return false, nil
+	}
+
+	updated := append(codes[:idx:idx], codes[idx+1:]...)
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_mfa SET recovery_codes = $2 WHERE user_id = $1
+	`, userID, updated); err != nil {
+		return false, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Delete removes the MFA record entirely (disables MFA).
 func (r *Repository) Delete(ctx context.Context, userID string) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM user_mfa WHERE user_id = $1`, userID)

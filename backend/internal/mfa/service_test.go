@@ -3,6 +3,7 @@ package mfa
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type stubStore struct {
 	enableErr     error
 	deleteErr     error
 	updateErr     error
+	consumeErr    error
 	enableCalled  bool
 	deleteCalled  bool
 	recoveryCodes []string
@@ -74,6 +76,18 @@ func (s *stubStore) UpdateRecoveryCodes(_ context.Context, _ string, codes []str
 	return nil
 }
 
+func (s *stubStore) ConsumeRecoveryCode(_ context.Context, _ string, match func(hashes []string) (int, bool)) (bool, error) {
+	if s.consumeErr != nil {
+		return false, s.consumeErr
+	}
+	idx, ok := match(s.recoveryCodes)
+	if !ok {
+		return false, nil
+	}
+	s.recoveryCodes = append(s.recoveryCodes[:idx:idx], s.recoveryCodes[idx+1:]...)
+	return true, nil
+}
+
 // testKey returns a deterministic 32-byte AES key suitable for tests only.
 func testKey() []byte { return make([]byte, 32) }
 
@@ -99,6 +113,19 @@ func newTOTPKey(t *testing.T) (secret, code string) {
 		t.Fatalf("generate TOTP code: %v", err)
 	}
 	return key.Secret(), code
+}
+
+// newMiniredis starts a throwaway in-memory Redis for replay-protection tests.
+func newMiniredis(t *testing.T) *redis.Client {
+	t.Helper()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+	return rdb
 }
 
 // --- Setup tests ---
@@ -164,7 +191,7 @@ func TestSetup_MFAEnabled_CorrectCode(t *testing.T) {
 	key := testKey()
 	totpSecret, currentCode := newTOTPKey(t)
 	stub := &stubStore{enabled: true, secretEnc: encryptSecret(t, key, totpSecret)}
-	svc := &Service{repo: stub, encKey: key}
+	svc := &Service{repo: stub, encKey: key, rdb: newMiniredis(t)}
 
 	originalSecretEnc := stub.secretEnc
 
@@ -282,7 +309,7 @@ func TestDisable(t *testing.T) {
 		key := testKey()
 		secret, code := newTOTPKey(t)
 		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
-		svc := &Service{repo: stub, encKey: key}
+		svc := &Service{repo: stub, encKey: key, rdb: newMiniredis(t)}
 
 		if err := svc.Disable(context.Background(), "user1", code); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -311,7 +338,7 @@ func TestDisable(t *testing.T) {
 		key := testKey()
 		secret, code := newTOTPKey(t)
 		stub := &stubStore{secretEnc: encryptSecret(t, key, secret), deleteErr: ErrNotFound}
-		svc := &Service{repo: stub, encKey: key}
+		svc := &Service{repo: stub, encKey: key, rdb: newMiniredis(t)}
 
 		err := svc.Disable(context.Background(), "user1", code)
 		if err != ErrNotFound {
@@ -355,9 +382,85 @@ func TestIsEnabledDelegatesToStore(t *testing.T) {
 	}
 }
 
-func TestValidateFailsWhenRecoveryCodesCannotBeUpdated(t *testing.T) {
+// deadRedis returns a client pointing at a closed port so every command fails.
+func deadRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:9999"})
+	t.Cleanup(func() { rdb.Close() })
+	return rdb
+}
+
+// TestDisable_FailsClosedWhenRedisDown: disabling MFA is high-risk, so a
+// replay-check outage must block the operation instead of silently disabling
+// single-use enforcement (#102).
+func TestDisable_FailsClosedWhenRedisDown(t *testing.T) {
 	key := testKey()
-	stub := &stubStore{updateErr: ErrNotFound}
+	secret, code := newTOTPKey(t)
+	stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+	svc := &Service{repo: stub, encKey: key, rdb: deadRedis(t)}
+
+	err := svc.Disable(context.Background(), "user1", code)
+	if !errors.Is(err, ErrReplayUnavailable) {
+		t.Fatalf("Disable error=%v want ErrReplayUnavailable", err)
+	}
+	if stub.deleteCalled {
+		t.Fatal("Delete must not be called when the replay check is unavailable")
+	}
+}
+
+// TestValidate_FailOpenVsFailClosed: ordinary logins stay available on a
+// replay-check outage (fail open), while step-up validation rejects
+// (fail closed) (#102).
+func TestValidate_FailOpenVsFailClosed(t *testing.T) {
+	key := testKey()
+	secret, code := newTOTPKey(t)
+
+	t.Run("login fails open", func(t *testing.T) {
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+		svc := &Service{repo: stub, encKey: key, rdb: deadRedis(t)}
+		if !svc.Validate(context.Background(), "user1", code) {
+			t.Fatal("expected ordinary Validate to fail open on Redis error")
+		}
+	})
+
+	t.Run("step-up fails closed", func(t *testing.T) {
+		stub := &stubStore{secretEnc: encryptSecret(t, key, secret)}
+		svc := &Service{repo: stub, encKey: key, rdb: deadRedis(t)}
+		if svc.ValidateStepUp(context.Background(), "user1", code) {
+			t.Fatal("expected ValidateStepUp to fail closed on Redis error")
+		}
+	})
+}
+
+// TestPreviousEncryptionKey: secrets encrypted under a rotated-out key must
+// still decrypt via the previous key (#103).
+func TestPreviousEncryptionKey(t *testing.T) {
+	oldKey := testKey()
+	newKey := make([]byte, 32)
+	for i := range newKey {
+		newKey[i] = 1
+	}
+	secret, code := newTOTPKey(t)
+	stub := &stubStore{secretEnc: encryptSecret(t, oldKey, secret)}
+
+	t.Run("decrypts with previous key", func(t *testing.T) {
+		svc := NewService(stub, newKey, newMiniredis(t), oldKey)
+		if !svc.Validate(context.Background(), "user1", code) {
+			t.Fatal("expected Validate to succeed via the previous encryption key")
+		}
+	})
+
+	t.Run("fails without previous key", func(t *testing.T) {
+		svc := NewService(stub, newKey, newMiniredis(t))
+		if svc.Validate(context.Background(), "user1", code) {
+			t.Fatal("expected Validate to fail when the old key is not configured")
+		}
+	})
+}
+
+func TestValidateFailsWhenRecoveryCodeCannotBeConsumed(t *testing.T) {
+	key := testKey()
+	stub := &stubStore{consumeErr: ErrNotFound}
 	svc := &Service{repo: stub, encKey: key}
 
 	_, _, rawCodes, err := svc.Setup(context.Background(), "user1", "user1@example.com", "")
@@ -367,7 +470,7 @@ func TestValidateFailsWhenRecoveryCodesCannotBeUpdated(t *testing.T) {
 	stub.recoveryCodes = append([]string(nil), stub.pendingCodes...)
 
 	if svc.Validate(context.Background(), "user1", rawCodes[0]) {
-		t.Fatal("expected Validate to fail when recovery codes cannot be updated")
+		t.Fatal("expected Validate to fail when the recovery code cannot be consumed")
 	}
 }
 

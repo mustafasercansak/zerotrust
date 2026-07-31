@@ -57,6 +57,7 @@ func hashTok(raw string) string {
 }
 
 type mockGeoIP struct{}
+
 func (m *mockGeoIP) Lookup(ip string) (*geoip.Location, error) {
 	if ip == "1.2.3.4" {
 		return &geoip.Location{Country: "United States", CountryCode: "US", City: "Mountain View"}, nil
@@ -256,5 +257,37 @@ func TestSessionRepository_GetActiveSessions(t *testing.T) {
 	}
 	if len(active) != 2 {
 		t.Fatalf("active=%d want=2", len(active))
+	}
+}
+
+// fakeOIDCRevoker records RevokeAllForUser calls; stands in for the OIDC
+// refresh-token store wired via SetOIDCRefreshRevoker (#82).
+type fakeOIDCRevoker struct {
+	called []string
+}
+
+func (f *fakeOIDCRevoker) RevokeAllForUser(_ context.Context, userID string) error {
+	f.called = append(f.called, userID)
+	return nil
+}
+
+// TestRevokeAllForUser_InvokesOIDCRevoker verifies that every
+// RevokeAllForUser call (password change, admin revoke-all, reuse response)
+// also reaches the registered OIDC refresh-token revoker (#82).
+func TestRevokeAllForUser_InvokesOIDCRevoker(t *testing.T) {
+	repo, userID, pool, ctx := setupSessionIntegrationRepo(t)
+	defer pool.Close()
+
+	fake := &fakeOIDCRevoker{}
+	repo.SetOIDCRefreshRevoker(fake)
+
+	if err := repo.Create(ctx, userID, hashTok("oidc-hook-tok"), "127.0.0.1", "agent", nil, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.RevokeAllForUser(ctx, userID); err != nil {
+		t.Fatalf("RevokeAllForUser: %v", err)
+	}
+	if len(fake.called) != 1 || fake.called[0] != userID {
+		t.Errorf("OIDC revoker calls = %v, want exactly [%s]", fake.called, userID)
 	}
 }

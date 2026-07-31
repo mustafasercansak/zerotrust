@@ -367,6 +367,46 @@ func TestFinishRegistration_NoSession(t *testing.T) {
 	}
 }
 
+// TestFinishLogin_CloneWarningRejected drives a signature-counter regression:
+// after a successful login at counter 5, a second assertion at counter 3 makes
+// go-webauthn flag CloneWarning, and the login must be rejected (#96).
+func TestFinishLogin_CloneWarningRejected(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+
+	rp := vwa.RelyingParty{ID: "localhost", Name: "ZeroTrust", Origin: "http://localhost:3000"}
+	authenticator := vwa.NewAuthenticator()
+	cred := vwa.NewCredential(vwa.KeyTypeEC2)
+
+	optsJSON, _ := svc.BeginRegistration(ctx, userID, "u@example.com", "U")
+	attOpts, _ := vwa.ParseAttestationOptions(string(optsJSON))
+	attResponse := vwa.CreateAttestationResponse(rp, authenticator, cred, *attOpts)
+	if err := svc.FinishRegistration(ctx, userID, "u@example.com", "U", "k", []byte(attResponse)); err != nil {
+		t.Fatalf("FinishRegistration: %v", err)
+	}
+	authenticator.AddCredential(cred)
+
+	// First login at counter 5 succeeds and stores signCount=5.
+	cred.Counter = 5
+	loginOptsJSON, _ := svc.BeginLogin(ctx, userID, "u@example.com", "U")
+	asrOpts, _ := vwa.ParseAssertionOptions(string(loginOptsJSON))
+	asrResponse := vwa.CreateAssertionResponse(rp, authenticator, cred, *asrOpts)
+	if err := svc.FinishLogin(ctx, userID, "u@example.com", "U", []byte(asrResponse)); err != nil {
+		t.Fatalf("first FinishLogin: %v", err)
+	}
+
+	// A cloned authenticator signs at counter 3 — a regression against the
+	// stored counter — and must be rejected.
+	cred.Counter = 3
+	loginOptsJSON2, _ := svc.BeginLogin(ctx, userID, "u@example.com", "U")
+	asrOpts2, _ := vwa.ParseAssertionOptions(string(loginOptsJSON2))
+	asrResponse2 := vwa.CreateAssertionResponse(rp, authenticator, cred, *asrOpts2)
+	if err := svc.FinishLogin(ctx, userID, "u@example.com", "U", []byte(asrResponse2)); !errors.Is(err, ErrCredentialCloneDetected) {
+		t.Fatalf("expected ErrCredentialCloneDetected, got %v", err)
+	}
+}
+
 func TestBeginRegistration_OptionsAreValidJSON(t *testing.T) {
 	svc, _ := newTestService(t)
 	opts, err := svc.BeginRegistration(context.Background(), uuid.NewString(), "u@example.com", "U")
@@ -540,10 +580,12 @@ func TestHardwareAttestationEnforcement(t *testing.T) {
 		t.Fatalf("expected ErrHardwareAttestationRequired for none/software attestation, got %v", err)
 	}
 
-	// 2. Packed attestation with a non-zero Aaguid should be accepted.
-	authenticatorHardware := vwa.NewAuthenticator()
-	authenticatorHardware.Aaguid = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	credHardware := vwa.NewCredential(vwa.KeyTypeEC2)
+	// 2. Packed *self* attestation (basic_surrogate) with a non-zero Aaguid must
+	// also be rejected: any software authenticator can forge it (#86). Only
+	// certificate-chain-backed attestation (basic_full / attca) is accepted.
+	authenticatorSoftware := vwa.NewAuthenticator()
+	authenticatorSoftware.Aaguid = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	credSoftware := vwa.NewCredential(vwa.KeyTypeEC2)
 
 	optsJSON2, err := svc.BeginRegistration(ctx, userID, "user@example.com", "User")
 	if err != nil {
@@ -553,10 +595,10 @@ func TestHardwareAttestationEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAttestationOptions: %v", err)
 	}
-	attResponseHardware := vwa.CreateAttestationResponse(rp, authenticatorHardware, credHardware, *attOpts2)
-	err = svc.FinishRegistration(ctx, userID, "user@example.com", "User", "Hardware Key", []byte(attResponseHardware))
-	if err != nil {
-		t.Fatalf("expected hardware attestation to succeed, got %v", err)
+	attResponseSoftware := vwa.CreateAttestationResponse(rp, authenticatorSoftware, credSoftware, *attOpts2)
+	err = svc.FinishRegistration(ctx, userID, "user@example.com", "User", "Software Key", []byte(attResponseSoftware))
+	if !errors.Is(err, ErrHardwareAttestationRequired) {
+		t.Fatalf("expected ErrHardwareAttestationRequired for self/software attestation, got %v", err)
 	}
 }
 

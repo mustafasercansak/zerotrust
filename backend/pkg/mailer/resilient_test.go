@@ -14,12 +14,19 @@ type mockBaseMailer struct {
 	alertFail    bool
 	alertFailMax int
 	resetCount   int
+	resetFail    bool
+	resetFailMax int
 }
 
 func (m *mockBaseMailer) SendPasswordReset(ctx context.Context, to, resetURL string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resetCount++
+	if m.resetFail {
+		if m.resetFailMax == 0 || m.resetCount <= m.resetFailMax {
+			return errors.New("smtp connection refused")
+		}
+	}
 	return nil
 }
 
@@ -135,18 +142,65 @@ func TestResilientMailer_MaxRetriesReached(t *testing.T) {
 	}
 }
 
+// TestResilientMailer_SendPasswordResetDelegatesToUnderlying proves password
+// resets are queued on the same bounded worker pool as security alerts
+// (ISSUE_LIST #93), rather than firing an unbounded goroutine per request,
+// and that the worker eventually delivers via the underlying mailer.
 func TestResilientMailer_SendPasswordResetDelegatesToUnderlying(t *testing.T) {
 	base := &mockBaseMailer{}
-	rm := NewResilientMailer(base, 1, nil)
+	rm := NewResilientMailer(base, 10, nil)
+	rm.BaseDelay = 1 * time.Millisecond
+	rm.Start(1)
+	defer rm.Stop()
 
 	if err := rm.SendPasswordReset(context.Background(), "user@example.com", "https://example/reset"); err != nil {
 		t.Fatalf("SendPasswordReset returned error: %v", err)
 	}
 
+	time.Sleep(50 * time.Millisecond)
+
 	base.mu.Lock()
 	defer base.mu.Unlock()
 	if base.resetCount != 1 {
 		t.Fatalf("expected 1 password reset send, got %d", base.resetCount)
+	}
+}
+
+// TestResilientMailer_PasswordResetQueueFull proves a full mail queue rejects
+// a password-reset request instead of blocking or spawning an unbounded
+// goroutine. (ISSUE_LIST #93)
+func TestResilientMailer_PasswordResetQueueFull(t *testing.T) {
+	base := &mockBaseMailer{}
+	rm := NewResilientMailer(base, 1, nil)
+	rm.BaseDelay = time.Millisecond
+
+	rm.jobs <- AlertJob{To: "existing@example.com"}
+
+	err := rm.SendPasswordReset(context.Background(), "user@example.com", "https://example/reset")
+	if err == nil {
+		t.Fatal("expected queue full error, got nil")
+	}
+}
+
+// TestResilientMailer_PasswordResetRetriesOnFailure proves password-reset
+// jobs use the same retry/backoff path as security alerts.
+func TestResilientMailer_PasswordResetRetriesOnFailure(t *testing.T) {
+	base := &mockBaseMailer{resetFail: true, resetFailMax: 2}
+	rm := NewResilientMailer(base, 10, nil)
+	rm.BaseDelay = 1 * time.Millisecond
+	rm.Start(1)
+	defer rm.Stop()
+
+	if err := rm.SendPasswordReset(context.Background(), "user@example.com", "https://example/reset"); err != nil {
+		t.Fatalf("SendPasswordReset returned error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if base.resetCount != 3 {
+		t.Errorf("expected 3 attempts (2 fails, 1 success), got %d", base.resetCount)
 	}
 }
 
@@ -165,7 +219,7 @@ func TestResilientMailer_SendSecurityAlertReturnsErrorWhenQueueIsFull(t *testing
 
 func TestResilientMailer_EdgeCases(t *testing.T) {
 	base := &mockBaseMailer{alertFail: true}
-	
+
 	// 1. BaseDelay is 0
 	rm := NewResilientMailer(base, 1, nil)
 	rm.BaseDelay = 0
@@ -188,14 +242,14 @@ func TestResilientMailer_EdgeCases(t *testing.T) {
 	rm3.BaseDelay = time.Millisecond
 	// Put a job in the queue to block retry
 	rm3.jobs <- AlertJob{To: "blocker@example.com"}
-	
+
 	rm3.processJob(AlertJob{
 		To:         "user@example.com",
 		MaxRetries: 5,
 		Attempt:    1,
 		BaseDelay:  time.Millisecond,
 	})
-	
+
 	// Clean up / stop rm3 context to exit any spawned fallback goroutines
 	rm3.Stop()
 }

@@ -30,12 +30,14 @@ Failures are logged as `auth.csrf.failure` in the audit log.
 
 | Limit group | Routes | Limit | Window |
 |---|---|---|---|
-| `login` | `/api/v1/auth/login`, `/auth/mfa/challenge`, WebAuthn login | 10 req | 1 min per IP |
-| `token` | `/oauth2/token`, `/oauth2/authorize`, `/oauth2/revoke`, `/oauth2/introspect`, `/oauth2/end_session`, `/api/v1/auth/token` | 30 req | 1 min per IP |
+| `login` | `/api/v1/auth/login`, `/auth/mfa/challenge`, WebAuthn login, `/auth/register`, `/auth/reset-password` | 10 req | 1 min per IP |
+| `token` | `/oauth2/token`, `/oauth2/authorize`, `/oauth2/revoke`, `/oauth2/introspect`, `/oauth2/end_session`, `/api/v1/auth/token`, `/api/v1/auth/refresh` | 30 req | 1 min per IP |
 | `global` | All routes (except `/health`, `/metrics`) | 300 req | 1 min per IP |
 | `protected` | All authenticated `/api/v1` routes | 300 req | 1 min per IP |
 
 When a limit is hit the server returns `429 Too Many Requests` with `Retry-After` and `X-RateLimit-Limit` / `X-RateLimit-Remaining` headers.
+
+Rate limiting fails open when Redis is unavailable — requests are allowed without enforcement so a Redis outage does not take down login; each occurrence is logged and counted in the `zerotrust_ratelimit_fail_opens_total` metric.
 
 ---
 
@@ -85,6 +87,9 @@ Prometheus-format plain text metrics.
 # HELP zerotrust_audit_write_failures_total Total audit log write failures.
 # TYPE zerotrust_audit_write_failures_total counter
 zerotrust_audit_write_failures_total 0
+# HELP zerotrust_ratelimit_fail_opens_total Total requests allowed through without rate-limit enforcement because Redis was unavailable.
+# TYPE zerotrust_ratelimit_fail_opens_total counter
+zerotrust_ratelimit_fail_opens_total 0
 ```
 
 ### `GET /.well-known/jwks.json`
@@ -224,7 +229,7 @@ Rotate the refresh token. The browser sends the `refresh_token` cookie automatic
 
 **Response `200 OK`**: sets new `access_token` and `refresh_token` cookies. No body.
 
-**Error codes:** `no_refresh_token` (cookie absent), `invalid_refresh_token` (expired, revoked, or reuse detected — all sessions revoked on reuse).
+**Error codes:** `no_refresh_token` (cookie absent), `invalid_refresh_token` (expired or revoked). Replaying a token revoked by rotation (`revoked_reason='rotation'`) is treated as theft and revokes all of the user's sessions; tokens revoked via logout, admin action, or cleanup simply fail.
 
 ### `POST /api/v1/auth/logout`
 
@@ -294,18 +299,21 @@ Basic Auth: `client_id:client_secret`
 ```
 grant_type=refresh_token&refresh_token=…
 ```
+OIDC refresh tokens are single-use and rotated on every refresh within a grant family. Replaying an already-consumed token revokes the entire grant family and returns `invalid_grant` (RFC 6819 §5.2.2.3). Confidential clients must present their `client_secret` (Basic Auth or form parameter) on the refresh grant.
+
+**Error contract:** OAuth2 protocol errors (invalid code, expired or reused token, …) return `400` with `invalid_grant` and an `error_description`. Internal failures return `500` with `server_error` and no `error_description`; details are logged server-side. The same split applies to the consent endpoint.
 
 ### `GET /oauth2/userinfo`
 
-Returns claims for the authenticated user (requires a valid OIDC access token in the Authorization header).
+Returns claims for the authenticated user (requires a valid OIDC access token in the Authorization header). Internal RBAC `roles`/`groups` claims are first-party only and are never disclosed to external OIDC clients — neither in UserInfo nor in ID tokens.
 
 ### `POST /oauth2/revoke`
 
-Revoke an access or refresh token.
+Revoke an access or refresh token. A client can only revoke tokens issued to itself (audience-scoped per RFC 7009 §2.1); revocation of another client's token is silently ignored.
 
 ### `POST /oauth2/introspect`
 
-Token introspection (RFC 7662).
+Token introspection (RFC 7662). A client can only introspect tokens issued to itself; anything else returns `{"active": false}`.
 
 ### `GET|POST /oauth2/end_session`
 
@@ -318,6 +326,8 @@ Called by the frontend after the user approves or denies the authorization reque
 ---
 
 ## User Profile Endpoints (authenticated)
+
+These routes (together with `/sessions*`, `/mfa/*`, `/webauthn/*`, and `/users/{id}/avatar`) require a first-party user session token; service-account tokens are rejected with `403 forbidden`.
 
 ### `GET /api/v1/me`
 
@@ -418,7 +428,7 @@ List the current user's active sessions.
 
 ### `GET /api/v1/sessions/events`
 
-Server-Sent Events stream. Emits a `revoked` event when any of the user's sessions is revoked, allowing the UI to force a re-login in real time.
+Server-Sent Events stream. Emits a `revoked` event when any of the user's sessions is revoked, allowing the UI to force a re-login in real time. In addition, the stream emits a terminal `data: expired` when the authenticating access token expires and `data: revoked` when its JTI is blocklisted (e.g. after logout), then closes.
 
 ### `DELETE /api/v1/sessions`
 
@@ -444,16 +454,18 @@ If MFA is disabled server-side, `supported` is `false`.
 
 ### `POST /api/v1/mfa/setup`
 
-Begin TOTP setup. Returns a `provisioning_uri` for the QR code and a `secret` for manual entry.
+Begin TOTP setup. Returns a `provisioning_uri` for the QR code and a `secret` for manual entry. Requires step-up MFA for users who already have MFA enabled.
 
 **Response:**
 ```json
 { "secret": "…", "provisioning_uri": "otpauth://totp/…" }
 ```
 
+**Error codes:** `too_many_attempts` (429, brute-force guard), `mfa_unavailable` (503, replay store unavailable — fails closed).
+
 ### `POST /api/v1/mfa/verify`
 
-Confirm setup by providing the first TOTP code. Also returns single-use backup recovery codes.
+Confirm setup by providing the first TOTP code. Also returns single-use backup recovery codes. Requires step-up MFA for users who already have MFA enabled.
 
 **Request:** `{ "code": "123456" }`
 
@@ -462,11 +474,15 @@ Confirm setup by providing the first TOTP code. Also returns single-use backup r
 { "recovery_codes": ["aaaa-bbbb", "cccc-dddd", "…"] }
 ```
 
+**Error codes:** `too_many_attempts` (429, brute-force guard), `mfa_unavailable` (503, replay store unavailable — fails closed).
+
 ### `POST /api/v1/mfa/disable`
 
-Disable TOTP. Requires a valid current TOTP code.
+Disable TOTP. Requires a valid current TOTP code and step-up MFA for users who already have MFA enabled.
 
 **Request:** `{ "code": "123456" }`
+
+**Error codes:** `too_many_attempts` (429, brute-force guard), `mfa_unavailable` (503, replay store unavailable — fails closed).
 
 ### `POST /api/v1/mfa/step-up`
 
@@ -480,11 +496,11 @@ Re-verify MFA to unlock step-up protected routes (admin mutations, OIDC client m
 
 ### `POST /api/v1/webauthn/register/begin`
 
-Begin passkey registration. Returns `PublicKeyCredentialCreationOptions`.
+Begin passkey registration. Returns `PublicKeyCredentialCreationOptions`. Requires step-up MFA for users who already have MFA enabled.
 
 ### `POST /api/v1/webauthn/register/finish`
 
-Complete registration.
+Complete registration. Requires step-up MFA for users who already have MFA enabled.
 
 **Request:**
 ```json
@@ -502,7 +518,9 @@ List registered passkeys.
 
 ### `DELETE /api/v1/webauthn/credentials/{id}`
 
-Remove a passkey.
+Remove a passkey. Requires step-up MFA for users who already have MFA enabled.
+
+**Clone detection:** the authenticator signature counter (signCount) is tracked per credential; a regression on login indicates a possibly cloned authenticator and the assertion is rejected.
 
 ---
 
@@ -531,15 +549,19 @@ Query params: `limit`, `offset`, `search`, `sort_by`, `sort_dir`.
 
 ### `POST /api/v1/admin/users`
 
-**Permission:** `users:create`
+**Permission:** `users:create` + step-up MFA
 
 **Request:** `{ "email": "…", "password": "…", "first_name": "…", "last_name": "…", "roles": ["user"] }`
+
+Granting the `admin` role requires the caller to hold `admin` themselves; otherwise the request fails with `403 role_escalation_forbidden`.
 
 ### `PATCH /api/v1/admin/users/{id}/roles`
 
 **Permission:** `users:update` + step-up MFA
 
 **Request:** `{ "roles": ["user", "admin"] }`
+
+Granting the `admin` role requires the caller to hold `admin` themselves; otherwise the request fails with `403 role_escalation_forbidden`.
 
 ### `PATCH /api/v1/admin/users/{id}/status`
 
@@ -713,4 +735,6 @@ Service accounts are M2M credentials that use the `client_credentials` OAuth2 gr
 
 ### `GET /api/v1/admin/service-accounts/events`
 
-SSE stream. Emits real-time status change events for the service accounts list UI. Auth is handled via the `access_token` cookie (EventSource does not support custom headers).
+SSE stream. Emits real-time status change events for the service accounts list UI.
+
+**Permission:** `service_accounts:read`

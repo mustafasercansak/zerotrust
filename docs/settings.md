@@ -89,7 +89,7 @@ When `device_trust_enabled` is `true`, every login attempt has its device finger
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `require_hardware_attestation` | boolean | `false` | When `true`, passkey registration requires attestation that the credential is backed by dedicated hardware (e.g., a hardware security key or a platform authenticator with verified attestation). Passkeys registered without attestation (e.g., iCloud Keychain synced passkeys) will be rejected. Enable only if your security policy requires hardware-bound credentials. |
+| `require_hardware_attestation` | boolean | `false` | When `true`, passkey registration only accepts attestation backed by an attestation certificate chain (`basic_full` / `attca`); `none` and self-attestation (`basic_surrogate`), which any software authenticator can forge with an arbitrary AAGUID, are rejected. **Advisory:** the server runs without an MDS/trust-anchor configuration, so the certificate chain is *not* anchored to vendor root CAs — a determined attacker could still forge a self-signed chain. Treat this as a gate against off-the-shelf software passkeys (e.g., iCloud Keychain synced passkeys), not a strict hardware-only guarantee; a startup warning is logged when the setting is enabled. |
 
 ---
 
@@ -98,7 +98,10 @@ When `device_trust_enabled` is `true`, every login attempt has its device finger
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `webhook_enabled` | boolean | `false` | When `true`, audit events are forwarded to `webhook_url` as HTTP POST requests. |
-| `webhook_url` | string | _(empty)_ | URL to receive audit events. Each request body is a single JSON audit entry. Delivery is fire-and-forget with a 5-second timeout. Delivery failures are themselves written to the audit log. |
+| `webhook_url` | string | _(empty)_ | URL to receive audit events. Each request body is a single JSON audit entry. Delivery is fire-and-forget with a 5-second timeout. Delivery failures are themselves written to the audit log. Must use `https` unless `webhook_allow_insecure` is enabled. |
+| `webhook_allow_insecure` | boolean | `false` | Allows plain `http://` webhook URLs. Development only — webhook payloads contain user email, IP and security-event details and must travel over TLS in production. |
+
+Outbound webhook dispatch is throttled to one event per IP+action combination per minute, so a flood of identical events cannot exhaust the channel.
 
 Test the webhook without changing settings: `POST /api/v1/admin/settings/webhook/test` with `{ "url": "…" }`.
 

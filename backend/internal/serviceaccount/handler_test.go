@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/pkg/middleware"
 )
@@ -36,38 +37,36 @@ func (w *nonFlushingResponseWriter) WriteHeader(statusCode int) {
 	w.code = statusCode
 }
 
-func newEventTestKeyStore(t *testing.T) *auth.KeyStore {
-	t.Helper()
-	ks, err := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
-	if err != nil {
-		t.Fatalf("key store: %v", err)
+// eventClaims builds claims with a far-future expiry, matching what the
+// Authenticate middleware would place in the request context after
+// validating a real token. The middleware chain (Authenticate +
+// RequirePermission("service_accounts","read")), not this handler, is now
+// responsible for signature/expiry/permission/EvaluateAccess/DPoP checks —
+// this route runs inside the same protected group as every other
+// /admin/service-accounts endpoint. (ISSUE_LIST #109)
+func eventClaims() *auth.Claims {
+	return &auth.Claims{
+		UserID:      "user-1",
+		Permissions: []string{"service_accounts:read"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "jti-1",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+		},
 	}
-	return ks
 }
 
-func newServiceAccountReadToken(t *testing.T, ks *auth.KeyStore) string {
-	t.Helper()
-	pair, err := auth.GenerateTokenPair(
-		ks,
-		"user-1",
-		"admin@example.com",
-		"en",
-		[]string{"admin"},
-		[]string{"service_accounts:read"},
-		time.Minute,
-	)
-	if err != nil {
-		t.Fatalf("generate token: %v", err)
-	}
-	return pair.AccessToken
+func withEventClaims(req *http.Request) *http.Request {
+	ctx := context.WithValue(req.Context(), middleware.ClaimsKey, eventClaims())
+	return req.WithContext(ctx)
 }
 
-func TestEventsRejectsQueryToken(t *testing.T) {
-	ks := newEventTestKeyStore(t)
-	token := newServiceAccountReadToken(t, ks)
-	h := NewHandler(nil, NewEventHub(), ks, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events?token="+token, nil)
+// TestEventsRejectsMissingClaims proves the handler still refuses to stream
+// if it's somehow reached without claims in context (defense in depth — the
+// route-level Authenticate middleware is expected to have already rejected
+// the request in that case).
+func TestEventsRejectsMissingClaims(t *testing.T) {
+	h := NewHandler(nil, NewEventHub(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
 	rr := httptest.NewRecorder()
 
 	h.Events(rr, req)
@@ -77,58 +76,9 @@ func TestEventsRejectsQueryToken(t *testing.T) {
 	}
 }
 
-func TestEventsRejectsMissingOrInvalidToken(t *testing.T) {
-	t.Run("missing token", func(t *testing.T) {
-		h := NewHandler(nil, NewEventHub(), newEventTestKeyStore(t), nil)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
-		rr := httptest.NewRecorder()
-
-		h.Events(rr, req)
-
-		if rr.Code != http.StatusUnauthorized {
-			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusUnauthorized, rr.Body.String())
-		}
-	})
-
-	t.Run("invalid token", func(t *testing.T) {
-		h := NewHandler(nil, NewEventHub(), newEventTestKeyStore(t), nil)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
-		req.Header.Set("Authorization", "Bearer invalid.token")
-		rr := httptest.NewRecorder()
-
-		h.Events(rr, req)
-
-		if rr.Code != http.StatusForbidden {
-			t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
-		}
-	})
-}
-
-func TestEventsRejectsTokenWithoutPermission(t *testing.T) {
-	ks := newEventTestKeyStore(t)
-	pair, err := auth.GenerateTokenPair(ks, "user-1", "admin@example.com", "en", []string{"admin"}, []string{"users:read"}, time.Minute)
-	if err != nil {
-		t.Fatalf("generate token: %v", err)
-	}
-
-	h := NewHandler(nil, NewEventHub(), ks, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
-	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
-	rr := httptest.NewRecorder()
-
-	h.Events(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
-	}
-}
-
 func TestEventsRejectsUnsupportedStreaming(t *testing.T) {
-	ks := newEventTestKeyStore(t)
-	token := newServiceAccountReadToken(t, ks)
-	h := NewHandler(nil, NewEventHub(), ks, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	h := NewHandler(nil, NewEventHub(), nil)
+	req := withEventClaims(httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil))
 	rw := &nonFlushingResponseWriter{}
 
 	h.Events(rw, req)
@@ -138,39 +88,12 @@ func TestEventsRejectsUnsupportedStreaming(t *testing.T) {
 	}
 }
 
-func TestEventsAcceptsAuthorizationBearerToken(t *testing.T) {
-	ks := newEventTestKeyStore(t)
-	token := newServiceAccountReadToken(t, ks)
-	h := NewHandler(nil, NewEventHub(), ks, nil)
+func TestEventsAcceptsClaimsFromContext(t *testing.T) {
+	h := NewHandler(nil, NewEventHub(), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rr := httptest.NewRecorder()
-
-	h.Events(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d want=%d body=%s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("Content-Type=%q want text/event-stream", got)
-	}
-	if body := rr.Body.String(); body != "data: connected\n\n" {
-		t.Fatalf("body=%q want connected event", body)
-	}
-}
-
-func TestEventsAcceptsAccessTokenCookie(t *testing.T) {
-	ks := newEventTestKeyStore(t)
-	token := newServiceAccountReadToken(t, ks)
-	h := NewHandler(nil, NewEventHub(), ks, nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil).WithContext(ctx)
-	req.AddCookie(&http.Cookie{Name: "access_token", Value: token})
+	req := withEventClaims(httptest.NewRequest(http.MethodGet, "/api/v1/admin/service-accounts/events", nil).WithContext(ctx))
 	rr := httptest.NewRecorder()
 
 	h.Events(rr, req)

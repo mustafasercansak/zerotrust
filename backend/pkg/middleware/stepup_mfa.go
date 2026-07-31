@@ -103,7 +103,7 @@ func RequireRecentMFA(mfa auth.MFAChecker, rdb *redis.Client, window time.Durati
 				return
 			}
 
-			if !mfa.Validate(r.Context(), claims.UserID, code) {
+			if !mfa.ValidateStepUp(r.Context(), claims.UserID, code) {
 				recordStepUpFailure(r.Context(), rdb, claims.UserID)
 				writeError(w, http.StatusForbidden, "mfa_required")
 				return
@@ -118,6 +118,33 @@ func RequireRecentMFA(mfa auth.MFAChecker, rdb *redis.Client, window time.Durati
 			}
 
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireRecentMFAIfEnabled enforces the same recent second-factor proof as
+// RequireRecentMFA, but only for users who have MFA enabled. Users without MFA
+// pass through, so first-time enrollment (/mfa/setup, /mfa/verify) and passkey
+// registration remain possible; once MFA is on, the sensitive routes behind
+// this middleware require step-up (#81).
+func RequireRecentMFAIfEnabled(mfa auth.MFAChecker, rdb *redis.Client, window time.Duration) func(http.Handler) http.Handler {
+	enforced := RequireRecentMFA(mfa, rdb, window)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := ClaimsFrom(r.Context())
+			if claims == nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			if mfa == nil || rdb == nil {
+				writeError(w, http.StatusServiceUnavailable, "mfa_unavailable")
+				return
+			}
+			if !mfa.IsEnabled(r.Context(), claims.UserID) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			enforced(next).ServeHTTP(w, r)
 		})
 	}
 }

@@ -572,7 +572,7 @@
     "tabSecurity": "Security & Sessions",
     "tabSystem": "System Settings",
     "requireHardwareAttestation": "Require Hardware Security Keys (FIDO2)",
-    "requireHardwareAttestationDesc": "Only permit registration of physical security keys (reject software and browser passkeys).",
+    "requireHardwareAttestationDesc": "Only permit passkeys with certificate-backed attestation (rejects software and browser passkeys). Advisory: attestation chains are not anchored to vendor root CAs, so this is not a strict hardware-only guarantee.",
     "deviceTrust": "Device Trust / Posture Assessment",
     "deviceTrustDesc": "Restrict access to devices running allowed operating systems and browser versions.",
     "deviceTrustEnabled": "Enable Device Trust Validation",

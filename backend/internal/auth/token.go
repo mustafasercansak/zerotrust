@@ -20,6 +20,15 @@ const (
 	SubTypeService = "service"
 )
 
+const (
+	// TokenUseSession marks first-party browser session tokens; TokenUseService
+	// marks service-account tokens. OIDC access tokens issued to external
+	// clients carry no token_use claim, which is how ValidateAccessToken tells
+	// them apart from first-party tokens (audience-confusion protection, #81).
+	TokenUseSession = "session"
+	TokenUseService = "service"
+)
+
 type Confirmation struct {
 	JKT string `json:"jkt,omitempty"`
 }
@@ -38,6 +47,10 @@ type Claims struct {
 
 	// Common
 	SubType string `json:"sub_type"`
+
+	// TokenUse distinguishes first-party tokens (session/service) from OIDC
+	// access tokens issued to external clients (empty).
+	TokenUse string `json:"token_use,omitempty"`
 
 	Confirmation *Confirmation `json:"cnf,omitempty"`
 
@@ -78,6 +91,7 @@ func GenerateTokenPair(ks *KeyStore, userID, email, locale string, roles, permis
 		Roles:       roles,
 		Permissions: permissions,
 		SubType:     SubTypeUser,
+		TokenUse:    TokenUseSession,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.NewString(),
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTTL)),
@@ -104,6 +118,7 @@ func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, 
 		ClientID: clientID,
 		Scopes:   scopes,
 		SubType:  SubTypeService,
+		TokenUse: TokenUseService,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   name,
 			ID:        uuid.NewString(),
@@ -128,7 +143,29 @@ func GenerateServiceToken(ks *KeyStore, clientID, name string, scopes []string, 
 	}, nil
 }
 
+// ValidateAccessToken validates a first-party access token (internal session or
+// service-account token). Tokens without a recognized token_use claim — such as
+// OIDC access tokens issued to external clients — are rejected so they cannot
+// be replayed against the internal /api/v1 surface (#81).
 func ValidateAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
+	claims, err := validateToken(ks, tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenUse != TokenUseSession && claims.TokenUse != TokenUseService {
+		return nil, ErrInvalidToken
+	}
+	return claims, nil
+}
+
+// ValidateOIDCAccessToken validates signature and expiry only, without the
+// first-party token_use requirement. Used by OIDC endpoints (UserInfo,
+// Introspect, Revoke) that legitimately accept external-client tokens.
+func ValidateOIDCAccessToken(ks *KeyStore, tokenStr string) (*Claims, error) {
+	return validateToken(ks, tokenStr)
+}
+
+func validateToken(ks *KeyStore, tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
 		kid, ok := t.Header["kid"].(string)
 		if !ok || kid == "" {

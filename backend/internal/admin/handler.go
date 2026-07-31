@@ -198,6 +198,16 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_profile")
 		return
 	}
+	// A caller may not grant a role it does not itself hold — otherwise a
+	// service account or user scoped only to users:create could mint a new
+	// admin account. (ISSUE_LIST #83)
+	if containsRole(req.Roles, "admin") {
+		claims := middleware.ClaimsFrom(r.Context())
+		if claims == nil || !containsRole(claims.Roles, "admin") {
+			writeError(w, http.StatusForbidden, "role_escalation_forbidden")
+			return
+		}
+	}
 
 	u, err := h.userSvc.RegisterWithRoles(r.Context(), req.Email, req.Password, req.Locale, req.Roles)
 	if err != nil {
@@ -235,15 +245,21 @@ type updateRolesRequest struct {
 // PATCH /api/v1/admin/users/{id}/roles
 func (h *Handler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
+	claims := middleware.ClaimsFrom(r.Context())
 	// Admins may not change their own roles — prevents self-demotion lockout and
 	// self-escalation. (ISSUE_LIST #34)
-	if claims := middleware.ClaimsFrom(r.Context()); claims != nil && claims.UserID == userID {
+	if claims != nil && claims.UserID == userID {
 		writeError(w, http.StatusForbidden, "self_modification_forbidden")
 		return
 	}
 	var req updateRolesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	// A caller may not grant a role it does not itself hold. (ISSUE_LIST #83)
+	if containsRole(req.Roles, "admin") && (claims == nil || !containsRole(claims.Roles, "admin")) {
+		writeError(w, http.StatusForbidden, "role_escalation_forbidden")
 		return
 	}
 	if err := h.userSvc.SetRoles(r.Context(), userID, req.Roles); err != nil {
@@ -488,6 +504,16 @@ func (h *Handler) UnlockUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// containsRole reports whether roles contains target (case-insensitive).
+func containsRole(roles []string, target string) bool {
+	for _, r := range roles {
+		if strings.EqualFold(r, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

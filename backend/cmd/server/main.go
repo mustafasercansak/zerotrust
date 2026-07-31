@@ -217,25 +217,32 @@ func run(ctx context.Context, cfg config) error {
 	const stepUpMFAWindow = 10 * time.Minute
 	if cfg.MFAEnabled {
 		mfaRepo = mfa.NewRepository(db)
-		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb)
+		var mfaPrevKeys [][]byte
+		if len(cfg.MFAEncryptionKeyPrevious) > 0 {
+			mfaPrevKeys = append(mfaPrevKeys, cfg.MFAEncryptionKeyPrevious)
+		}
+		mfaSvc = mfa.NewService(mfaRepo, cfg.MFAEncryptionKey, rdb, mfaPrevKeys...)
 		mfaHandler = mfa.NewHandler(mfaSvc, rdb, stepUpMFAWindow)
 		slog.Info("MFA enabled")
 	} else {
 		slog.Info("MFA disabled by configuration")
 	}
 
-	// Password reset mailer
+	// Password reset mailer. loadConfig already refuses to start with no
+	// SMTP_HOST outside DEV_MODE, so reaching the else branch here only
+	// happens in DEV_MODE. (ISSUE_LIST #89, #90)
 	var ml mailer.Mailer = mailer.LogMailer{}
 	if cfg.SMTPHost != "" {
-		ml = mailer.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPassword)
-		slog.Info("SMTP mailer configured", "host", cfg.SMTPHost)
+		smtpMailer := mailer.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPassword)
+		smtpMailer.AllowPlaintext = cfg.DevMode
+		ml = smtpMailer
+		slog.Info("SMTP mailer configured", "host", cfg.SMTPHost, "allow_plaintext_fallback", cfg.DevMode)
 	} else {
-		slog.Warn("SMTP_HOST not set — password reset emails will be logged only")
+		slog.Warn("SMTP_HOST not set (DEV_MODE) — password reset emails will be logged only")
 	}
-	prRepo := passwdreset.NewRepository(db)
-	prSvc := passwdreset.NewService(prRepo, userSvc, ml)
-
-	// Resilient Mailer Wrapper
+	// Resilient Mailer Wrapper — a bounded worker pool with retry/backoff for
+	// both security alerts and password-reset emails, so a flood of reset
+	// requests cannot spawn unbounded concurrent SMTP work. (ISSUE_LIST #93)
 	resilientMailer := mailer.NewResilientMailer(ml, 1000, func(ctx context.Context, email, alertType, ip, details string, sendErr error) {
 		var userID *string
 		if u, err := userSvc.FindByEmail(ctx, email); err == nil {
@@ -264,16 +271,33 @@ func run(ctx context.Context, cfg config) error {
 		resilientMailer.Stop()
 	}()
 
+	// Password reset also goes through the resilient/bounded mailer queue
+	// rather than firing an unbounded goroutine per request. (ISSUE_LIST #93)
+	prRepo := passwdreset.NewRepository(db)
+	prSvc := passwdreset.NewService(prRepo, userSvc, resilientMailer)
+	prSvc.SetRedis(rdb)
+
 	settingsRepo := settings.NewRepository(db)
 	settingsCache := settings.NewCache(settingsRepo)
 	auditRepo.SetSettingsReader(settingsCache)
 	settingsHandler := settings.NewHandler(settingsRepo, settingsCache)
+	// The hardware-attestation gate is advisory: without an MDS/trust-anchor
+	// configuration the attestation certificate chain is not anchored to vendor
+	// roots, so it stops off-the-shelf software passkeys but not a determined
+	// forgery (#86).
+	if settingsCache.GetBool(rootCtx, "require_hardware_attestation", false) {
+		slog.Warn("require_hardware_attestation is enabled: enforcement is advisory only " +
+			"(no MDS/trust-anchor configuration; attestation chains are not anchored to vendor roots)")
+	}
 
 	var mfaChecker auth.MFAChecker
 	if mfaSvc != nil {
 		mfaChecker = mfaSvc
 	}
 	stepUpMFA := authmw.RequireRecentMFA(mfaChecker, rdb, stepUpMFAWindow)
+	// Conditional variant for routes that must stay reachable during first-time
+	// MFA enrollment: enforces step-up only for users who already have MFA (#81).
+	stepUpMFAIfEnabled := authmw.RequireRecentMFAIfEnabled(mfaChecker, rdb, stepUpMFAWindow)
 	authSvc := auth.NewService(userSvc, sessionRepo, &saStoreAdapter{saSvc}, rdb, ks, mfaChecker, settingsCache)
 	geoipSvc := geoip.NewService(cfg.GeoIPDBPath)
 	sessionRepo.SetGeoIP(geoipSvc)
@@ -309,15 +333,19 @@ func run(ctx context.Context, cfg config) error {
 	oidcRepo := oidc.NewClientRepository(db)
 	oidcCodeStore := oidc.NewAuthCodeStore(rdb)
 	oidcRefreshStore := oidc.NewRefreshTokenStore(rdb)
+	// Every RevokeAllForUser path (password change, admin revoke-all, reuse
+	// detection) must also invalidate the user's OIDC refresh tokens (#82).
+	sessionRepo.SetOIDCRefreshRevoker(oidcRefreshStore)
 	oidcSvc := oidc.NewService(oidcRepo, oidcCodeStore, userSvc, ks, cfg.OIDCIssuerURL, oidcRefreshStore)
 	oidcHandler := oidc.NewHandler(oidcSvc, oidcRepo, userSvc, authSvc, ks, cfg.OIDCIssuerURL, cfg.PublicAppURL, auditRepo, mfaSvc, rdb)
 
 	authHandler := auth.NewHandler(authSvc, userSvc, auditRepo, cfg.CookiesSecure, cfg.RegistrationEnabled, prSvc, cfg.PublicAppURL, settingsCache)
 	sessionHandler := session.NewHandler(sessionRepo, sessionHub)
+	sessionHandler.SetRevocationChecker(authSvc)
 	adminHandler := admin.NewHandler(userSvc, sessionRepo, webauthnRepo, mfaRepo)
 	adminHandler.SetPostureProvider(userRepo)
 	adminHandler.SetLockoutManager(authSvc)
-	saHandler := serviceaccount.NewHandler(saSvc, saHub, ks, authSvc)
+	saHandler := serviceaccount.NewHandler(saSvc, saHub, authSvc)
 
 	loginRL := authmw.NewRateLimiter(rdb, "login", 10, time.Minute)
 	tokenRL := authmw.NewRateLimiter(rdb, "token", 30, time.Minute)
@@ -416,15 +444,14 @@ func run(ctx context.Context, cfg config) error {
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/passwordless/begin", authHandler.WebAuthnPasswordlessBegin)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/webauthn/passwordless/finish", authHandler.WebAuthnPasswordlessFinish)
 		r.With(publicAudit, tokenRL.Middleware()).Post("/auth/token", authHandler.Token)
-		r.With(publicAudit).Post("/auth/refresh", authHandler.Refresh)
+		r.With(publicAudit, tokenRL.Middleware()).Post("/auth/refresh", authHandler.Refresh)
 		r.With(publicAudit).Post("/auth/logout", authHandler.Logout)
-		r.With(publicAudit).Post("/auth/register", authHandler.Register)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/register", authHandler.Register)
 		r.With(publicAudit, loginRL.Middleware()).Post("/auth/forgot-password", authHandler.ForgotPassword)
-		r.With(publicAudit).Post("/auth/reset-password", authHandler.ResetPassword)
+		r.With(publicAudit, loginRL.Middleware()).Post("/auth/reset-password", authHandler.ResetPassword)
 		r.With(protectedRL.Middleware()).Post("/oauth2/consent", oidcHandler.Consent)
 
 		// SSE stream — auth handled inside handler via cookie (EventSource sends cookies automatically)
-		r.With(publicAudit).Get("/admin/service-accounts/events", saHandler.Events)
 
 		// Protected routes — ES256 + jti blocklist + audit log
 		r.Group(func(r chi.Router) {
@@ -433,398 +460,406 @@ func run(ctx context.Context, cfg config) error {
 			r.Use(protectedRL.Middleware())
 			r.Use(authmw.AuditLog(auditRepo))
 
-			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				profile, err := userRepo.FindByID(r.Context(), claims.UserID)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				// Use the JSON encoder rather than hand-formatting so
-				// user-controlled fields are always correctly escaped. (#37)
-				_ = json.NewEncoder(w).Encode(buildMeResponse(profile, claims.Permissions))
-			})
+			// Self-service routes (/me, /sessions*, /mfa/*, /webauthn/*,
+			// /users/{id}/avatar) are meaningless for a service-account token —
+			// require a first-party user session token. (ISSUE_LIST #110)
+			r.Group(func(r chi.Router) {
+				r.Use(authmw.RequireUserToken())
 
-			r.Patch("/me/profile", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				var req struct {
-					FirstName string `json:"first_name"`
-					LastName  string `json:"last_name"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				profile, err := userSvc.UpdateProfile(r.Context(), claims.UserID, req.FirstName, req.LastName)
-				if err != nil {
-					if errors.Is(err, user.ErrInvalidProfile) {
-						http.Error(w, `{"error":"invalid_profile"}`, http.StatusBadRequest)
+				r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					profile, err := userRepo.FindByID(r.Context(), claims.UserID)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 						return
 					}
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				roles := profile.Roles
-				if roles == nil {
-					roles = []string{}
-				}
-				perms := claims.Permissions
-				if perms == nil {
-					perms = []string{}
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{
-					"user_id":                profile.ID,
-					"email":                  profile.Email,
-					"first_name":             profile.FirstName,
-					"last_name":              profile.LastName,
-					"has_avatar":             profile.HasAvatar,
-					"locale":                 profile.Locale,
-					"notify_security_emails": profile.NotifySecurityEmails,
-					"roles":                  roles,
-					"permissions":            perms,
+					w.Header().Set("Content-Type", "application/json")
+					// Use the JSON encoder rather than hand-formatting so
+					// user-controlled fields are always correctly escaped. (#37)
+					_ = json.NewEncoder(w).Encode(buildMeResponse(profile, claims.Permissions))
 				})
-			})
 
-			r.Get("/session/policy", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				isAdmin := false
-				for _, role := range claims.Roles {
-					if role == "admin" {
-						isAdmin = true
-						break
+				r.Patch("/me/profile", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					var req struct {
+						FirstName string `json:"first_name"`
+						LastName  string `json:"last_name"`
 					}
-				}
-				var idleTimeout int
-				if isAdmin {
-					idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds_admin", 180)
-				} else {
-					idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds", 300)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprintf(w, `{"idle_timeout_seconds":%d}`, idleTimeout)
-			})
-
-			r.Patch("/me/locale", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				var req struct {
-					Locale string `json:"locale"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				allowed := map[string]bool{"tr": true, "en": true}
-				if !allowed[req.Locale] {
-					http.Error(w, `{"error":"invalid_locale"}`, http.StatusBadRequest)
-					return
-				}
-				existing, err := userRepo.FindByID(r.Context(), claims.UserID)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				if err := userRepo.UpdateLocale(r.Context(), claims.UserID, req.Locale); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				if existing.Locale != req.Locale {
-					uid := claims.UserID
-					_ = auditRepo.Log(r.Context(), audit.Entry{
-						UserID:    &uid,
-						Action:    "user.locale_changed",
-						Resource:  "user",
-						IPAddress: authmw.ClientIP(r),
-						Metadata: map[string]any{
-							"from":    existing.Locale,
-							"to":     req.Locale,
-							"outcome": "success",
-						},
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					profile, err := userSvc.UpdateProfile(r.Context(), claims.UserID, req.FirstName, req.LastName)
+					if err != nil {
+						if errors.Is(err, user.ErrInvalidProfile) {
+							http.Error(w, `{"error":"invalid_profile"}`, http.StatusBadRequest)
+							return
+						}
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					roles := profile.Roles
+					if roles == nil {
+						roles = []string{}
+					}
+					perms := claims.Permissions
+					if perms == nil {
+						perms = []string{}
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{
+						"user_id":                profile.ID,
+						"email":                  profile.Email,
+						"first_name":             profile.FirstName,
+						"last_name":              profile.LastName,
+						"has_avatar":             profile.HasAvatar,
+						"locale":                 profile.Locale,
+						"notify_security_emails": profile.NotifySecurityEmails,
+						"roles":                  roles,
+						"permissions":            perms,
 					})
-					if ml != nil && existing.NotifySecurityEmails {
-						_ = ml.SendSecurityAlert(r.Context(), existing.Email,
-							"locale_changed", authmw.ClientIP(r), "Unknown",
-							fmt.Sprintf("Your ZeroTrust interface language was changed from %q to %q. If this was not you, review your account immediately.", existing.Locale, req.Locale),
+				})
+
+				r.Get("/session/policy", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					isAdmin := false
+					for _, role := range claims.Roles {
+						if role == "admin" {
+							isAdmin = true
+							break
+						}
+					}
+					var idleTimeout int
+					if isAdmin {
+						idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds_admin", 180)
+					} else {
+						idleTimeout = settingsCache.GetInt(r.Context(), "session_idle_timeout_seconds", 300)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"idle_timeout_seconds":%d}`, idleTimeout)
+				})
+
+				r.Patch("/me/locale", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					var req struct {
+						Locale string `json:"locale"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					allowed := map[string]bool{"tr": true, "en": true}
+					if !allowed[req.Locale] {
+						http.Error(w, `{"error":"invalid_locale"}`, http.StatusBadRequest)
+						return
+					}
+					existing, err := userRepo.FindByID(r.Context(), claims.UserID)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					if err := userRepo.UpdateLocale(r.Context(), claims.UserID, req.Locale); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					if existing.Locale != req.Locale {
+						uid := claims.UserID
+						_ = auditRepo.Log(r.Context(), audit.Entry{
+							UserID:    &uid,
+							Action:    "user.locale_changed",
+							Resource:  "user",
+							IPAddress: authmw.ClientIP(r),
+							Metadata: map[string]any{
+								"from":    existing.Locale,
+								"to":      req.Locale,
+								"outcome": "success",
+							},
+						})
+						if ml != nil && existing.NotifySecurityEmails {
+							_ = ml.SendSecurityAlert(r.Context(), existing.Email,
+								"locale_changed", authmw.ClientIP(r), "Unknown",
+								fmt.Sprintf("Your ZeroTrust interface language was changed from %q to %q. If this was not you, review your account immediately.", existing.Locale, req.Locale),
+							)
+						}
+					}
+					w.WriteHeader(http.StatusNoContent)
+				})
+
+				r.Patch("/me/password", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					var req struct {
+						CurrentPassword string `json:"current_password"`
+						NewPassword     string `json:"new_password"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					if req.CurrentPassword == "" || req.NewPassword == "" {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+
+					profile, err := userRepo.FindByID(r.Context(), claims.UserID)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					if !userSvc.CheckPassword(profile.PasswordHash, req.CurrentPassword) {
+						http.Error(w, `{"error":"wrong_password"}`, http.StatusUnauthorized)
+						return
+					}
+
+					complexity := settingsCache.GetString(r.Context(), "password_complexity", "low")
+					if err := validation.PasswordWithComplexity(req.NewPassword, complexity); err != nil {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusBadRequest)
+						json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+						return
+					}
+
+					newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					if err := userSvc.UpdatePassword(r.Context(), claims.UserID, string(newHash)); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					// Revoke all sessions so any stolen session cannot outlive the password
+					// change. Consistent with the password-reset-via-email flow.
+					_ = sessionRepo.RevokeAllForUser(r.Context(), claims.UserID)
+					// Notify the user that their password was changed regardless of their
+					// notification preference — this is a security-critical alert.
+					if ml != nil {
+						_ = ml.SendSecurityAlert(r.Context(), profile.Email,
+							"password_changed", authmw.ClientIP(r), "Unknown",
+							"Your ZeroTrust password was just changed. If this was not you, contact your administrator immediately.",
 						)
 					}
-				}
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			r.Patch("/me/password", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				var req struct {
-					CurrentPassword string `json:"current_password"`
-					NewPassword     string `json:"new_password"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				if req.CurrentPassword == "" || req.NewPassword == "" {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-
-				profile, err := userRepo.FindByID(r.Context(), claims.UserID)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				if !userSvc.CheckPassword(profile.PasswordHash, req.CurrentPassword) {
-					http.Error(w, `{"error":"wrong_password"}`, http.StatusUnauthorized)
-					return
-				}
-
-				complexity := settingsCache.GetString(r.Context(), "password_complexity", "low")
-				if err := validation.PasswordWithComplexity(req.NewPassword, complexity); err != nil {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-					return
-				}
-
-				newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				if err := userSvc.UpdatePassword(r.Context(), claims.UserID, string(newHash)); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				// Revoke all sessions so any stolen session cannot outlive the password
-				// change. Consistent with the password-reset-via-email flow.
-				_ = sessionRepo.RevokeAllForUser(r.Context(), claims.UserID)
-				// Notify the user that their password was changed regardless of their
-				// notification preference — this is a security-critical alert.
-				if ml != nil {
-					_ = ml.SendSecurityAlert(r.Context(), profile.Email,
-						"password_changed", authmw.ClientIP(r), "Unknown",
-						"Your ZeroTrust password was just changed. If this was not you, contact your administrator immediately.",
-					)
-				}
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			r.Patch("/me/notifications", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				var req struct {
-					NotifySecurityEmails bool `json:"notify_security_emails"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				if err := userRepo.UpdateNotifySecurityEmails(r.Context(), claims.UserID, req.NotifySecurityEmails); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			r.Post("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
-				if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
-					http.Error(w, `{"error":"file_too_large"}`, http.StatusBadRequest)
-					return
-				}
-				file, header, err := r.FormFile("avatar")
-				if err != nil {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				defer file.Close()
-
-				// Sniff the first 512 bytes of the file to detect its actual content type.
-				buf := make([]byte, 512)
-				n, err := file.Read(buf)
-				if err != nil && err != io.EOF {
-					http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-					return
-				}
-				detectedType := http.DetectContentType(buf[:n])
-				if detectedType != "image/jpeg" && detectedType != "image/png" {
-					http.Error(w, `{"error":"invalid_file_type"}`, http.StatusBadRequest)
-					return
-				}
-
-				// Reset read pointer to the beginning of the file so io.Copy can write the whole content.
-				if _, err := file.Seek(0, io.SeekStart); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-
-				uploadDir := "uploads/avatars"
-				if err := os.MkdirAll(uploadDir, 0755); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-
-				filePath := filepath.Join(uploadDir, claims.UserID)
-				out, err := os.Create(filePath)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-				defer out.Close()
-
-				if _, err := io.Copy(out, file); err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-
-				profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, claims.UserID, int(header.Size))
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-
-				roles := profile.Roles
-				if roles == nil {
-					roles = []string{}
-				}
-				perms := claims.Permissions
-				if perms == nil {
-					perms = []string{}
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{
-					"user_id":                profile.ID,
-					"email":                  profile.Email,
-					"first_name":             profile.FirstName,
-					"last_name":              profile.LastName,
-					"has_avatar":             profile.HasAvatar,
-					"locale":                 profile.Locale,
-					"notify_security_emails": profile.NotifySecurityEmails,
-					"roles":                  roles,
-					"permissions":            perms,
+					w.WriteHeader(http.StatusNoContent)
 				})
-			})
 
-			r.Get("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				u, err := userSvc.FindByID(r.Context(), claims.UserID)
-				if err != nil || !u.HasAvatar {
-					http.NotFound(w, r)
-					return
-				}
-				filePath := filepath.Join("uploads/avatars", claims.UserID)
-				http.ServeFile(w, r, filePath)
-			})
-
-			r.Get("/users/{id}/avatar", func(w http.ResponseWriter, r *http.Request) {
-				id := chi.URLParam(r, "id")
-				u, err := userSvc.FindByID(r.Context(), id)
-				if err != nil || !u.HasAvatar {
-					http.NotFound(w, r)
-					return
-				}
-				filePath := filepath.Join("uploads/avatars", id)
-				http.ServeFile(w, r, filePath)
-			})
-
-			r.Delete("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				filePath := filepath.Join("uploads/avatars", claims.UserID)
-				_ = os.Remove(filePath)
-
-				profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, "", 0)
-				if err != nil {
-					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-					return
-				}
-
-				roles := profile.Roles
-				if roles == nil {
-					roles = []string{}
-				}
-				perms := claims.Permissions
-				if perms == nil {
-					perms = []string{}
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{
-					"user_id":                profile.ID,
-					"email":                  profile.Email,
-					"first_name":             profile.FirstName,
-					"last_name":              profile.LastName,
-					"has_avatar":             profile.HasAvatar,
-					"locale":                 profile.Locale,
-					"notify_security_emails": profile.NotifySecurityEmails,
-					"roles":                  roles,
-					"permissions":            perms,
+				r.Patch("/me/notifications", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					var req struct {
+						NotifySecurityEmails bool `json:"notify_security_emails"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					if err := userRepo.UpdateNotifySecurityEmails(r.Context(), claims.UserID, req.NotifySecurityEmails); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					w.WriteHeader(http.StatusNoContent)
 				})
-			})
 
-			// Session management — any authenticated user manages their own sessions
-			r.Get("/sessions", sessionHandler.List)
-			r.Get("/sessions/events", sessionHandler.Events)
-			r.Delete("/sessions", sessionHandler.RevokeOthers)
-			r.Delete("/sessions/{id}", sessionHandler.Revoke)
+				r.Post("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+					if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
+						http.Error(w, `{"error":"file_too_large"}`, http.StatusBadRequest)
+						return
+					}
+					file, header, err := r.FormFile("avatar")
+					if err != nil {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					defer file.Close()
 
-			// Own audit log — user sees only their own entries
-			r.Get("/me/audit", func(w http.ResponseWriter, r *http.Request) {
-				claims := authmw.ClaimsFrom(r.Context())
-				if claims == nil {
+					// Sniff the first 512 bytes of the file to detect its actual content type.
+					buf := make([]byte, 512)
+					n, err := file.Read(buf)
+					if err != nil && err != io.EOF {
+						http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+						return
+					}
+					detectedType := http.DetectContentType(buf[:n])
+					if detectedType != "image/jpeg" && detectedType != "image/png" {
+						http.Error(w, `{"error":"invalid_file_type"}`, http.StatusBadRequest)
+						return
+					}
+
+					// Reset read pointer to the beginning of the file so io.Copy can write the whole content.
+					if _, err := file.Seek(0, io.SeekStart); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+
+					uploadDir := "uploads/avatars"
+					if err := os.MkdirAll(uploadDir, 0755); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+
+					filePath := filepath.Join(uploadDir, claims.UserID)
+					out, err := os.Create(filePath)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+					defer out.Close()
+
+					if _, err := io.Copy(out, file); err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+
+					profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, claims.UserID, int(header.Size))
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+
+					roles := profile.Roles
+					if roles == nil {
+						roles = []string{}
+					}
+					perms := claims.Permissions
+					if perms == nil {
+						perms = []string{}
+					}
 					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-					return
-				}
-				q := r.URL.Query()
-				limit, offset := 25, 0
-				if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
-					limit = n
-				}
-				if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
-					offset = n
-				}
-				result, err := auditRepo.List(r.Context(), audit.ListParams{
-					Limit:              limit,
-					Offset:             offset,
-					SortBy:             q.Get("sort_by"),
-					SortDir:            q.Get("sort_dir"),
-					UserID:             claims.UserID,
-					SecurityEventsOnly: true,
+					json.NewEncoder(w).Encode(map[string]any{
+						"user_id":                profile.ID,
+						"email":                  profile.Email,
+						"first_name":             profile.FirstName,
+						"last_name":              profile.LastName,
+						"has_avatar":             profile.HasAvatar,
+						"locale":                 profile.Locale,
+						"notify_security_emails": profile.NotifySecurityEmails,
+						"roles":                  roles,
+						"permissions":            perms,
+					})
 				})
-				if err != nil {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{"data": result.Entries, "total": result.Total})
-			})
 
-			// MFA management — any authenticated user
-			if mfaHandler != nil {
-				r.Get("/mfa/status", mfaHandler.Status)
-				r.Post("/mfa/setup", mfaHandler.Setup)
-				r.Post("/mfa/verify", mfaHandler.Verify)
-				r.Post("/mfa/disable", mfaHandler.Disable)
-				r.Post("/mfa/step-up", mfaHandler.StepUp)
-				r.With(stepUpMFA).Post("/mfa/recovery-codes", mfaHandler.RegenerateRecoveryCodes)
-			} else {
-				r.Get("/mfa/status", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Type", "application/json")
-					w.Write([]byte(`{"enabled":false,"supported":false}`))
+				r.Get("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					u, err := userSvc.FindByID(r.Context(), claims.UserID)
+					if err != nil || !u.HasAvatar {
+						http.NotFound(w, r)
+						return
+					}
+					filePath := filepath.Join("uploads/avatars", claims.UserID)
+					http.ServeFile(w, r, filePath)
 				})
-			}
 
-			// WebAuthn / passkey management — any authenticated user
-			r.Post("/webauthn/register/begin", webauthnHandler.RegisterBegin)
-			r.Post("/webauthn/register/finish", webauthnHandler.RegisterFinish)
-			r.Get("/webauthn/credentials", webauthnHandler.List)
-			r.Patch("/webauthn/credentials/{id}", webauthnHandler.Rename)
-			r.Delete("/webauthn/credentials/{id}", webauthnHandler.Delete)
+				r.Get("/users/{id}/avatar", func(w http.ResponseWriter, r *http.Request) {
+					id := chi.URLParam(r, "id")
+					u, err := userSvc.FindByID(r.Context(), id)
+					if err != nil || !u.HasAvatar {
+						http.NotFound(w, r)
+						return
+					}
+					filePath := filepath.Join("uploads/avatars", id)
+					http.ServeFile(w, r, filePath)
+				})
+
+				r.Delete("/me/avatar", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					filePath := filepath.Join("uploads/avatars", claims.UserID)
+					_ = os.Remove(filePath)
+
+					profile, err := userSvc.UpdateAvatar(r.Context(), claims.UserID, "", 0)
+					if err != nil {
+						http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+						return
+					}
+
+					roles := profile.Roles
+					if roles == nil {
+						roles = []string{}
+					}
+					perms := claims.Permissions
+					if perms == nil {
+						perms = []string{}
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{
+						"user_id":                profile.ID,
+						"email":                  profile.Email,
+						"first_name":             profile.FirstName,
+						"last_name":              profile.LastName,
+						"has_avatar":             profile.HasAvatar,
+						"locale":                 profile.Locale,
+						"notify_security_emails": profile.NotifySecurityEmails,
+						"roles":                  roles,
+						"permissions":            perms,
+					})
+				})
+
+				// Session management — any authenticated user manages their own sessions
+				r.Get("/sessions", sessionHandler.List)
+				r.Get("/sessions/events", sessionHandler.Events)
+				r.Delete("/sessions", sessionHandler.RevokeOthers)
+				r.Delete("/sessions/{id}", sessionHandler.Revoke)
+
+				// Own audit log — user sees only their own entries
+				r.Get("/me/audit", func(w http.ResponseWriter, r *http.Request) {
+					claims := authmw.ClaimsFrom(r.Context())
+					if claims == nil {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusUnauthorized)
+						json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+						return
+					}
+					q := r.URL.Query()
+					limit, offset := 25, 0
+					if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+						limit = n
+					}
+					if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+						offset = n
+					}
+					result, err := auditRepo.List(r.Context(), audit.ListParams{
+						Limit:              limit,
+						Offset:             offset,
+						SortBy:             q.Get("sort_by"),
+						SortDir:            q.Get("sort_dir"),
+						UserID:             claims.UserID,
+						SecurityEventsOnly: true,
+					})
+					if err != nil {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{"data": result.Entries, "total": result.Total})
+				})
+
+				// MFA management — any authenticated user
+				if mfaHandler != nil {
+					r.Get("/mfa/status", mfaHandler.Status)
+					r.With(stepUpMFAIfEnabled).Post("/mfa/setup", mfaHandler.Setup)
+					r.With(stepUpMFAIfEnabled).Post("/mfa/verify", mfaHandler.Verify)
+					r.With(stepUpMFAIfEnabled).Post("/mfa/disable", mfaHandler.Disable)
+					r.Post("/mfa/step-up", mfaHandler.StepUp)
+					r.With(stepUpMFA).Post("/mfa/recovery-codes", mfaHandler.RegenerateRecoveryCodes)
+				} else {
+					r.Get("/mfa/status", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Write([]byte(`{"enabled":false,"supported":false}`))
+					})
+				}
+
+				// WebAuthn / passkey management — any authenticated user;
+				// registration and deletion require step-up MFA when enabled (#81)
+				r.With(stepUpMFAIfEnabled).Post("/webauthn/register/begin", webauthnHandler.RegisterBegin)
+				r.With(stepUpMFAIfEnabled).Post("/webauthn/register/finish", webauthnHandler.RegisterFinish)
+				r.Get("/webauthn/credentials", webauthnHandler.List)
+				r.Patch("/webauthn/credentials/{id}", webauthnHandler.Rename)
+				r.With(stepUpMFAIfEnabled).Delete("/webauthn/credentials/{id}", webauthnHandler.Delete)
+			})
 
 			// User management
 			r.With(authmw.RequirePermission("users", "read")).Get("/admin/users", adminHandler.ListUsers)
-			r.With(authmw.RequirePermission("users", "create")).Post("/admin/users", adminHandler.CreateUser)
+			r.With(authmw.RequirePermission("users", "create"), stepUpMFA).Post("/admin/users", adminHandler.CreateUser)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Post("/admin/users/bulk-status", adminHandler.BulkSetStatus)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/roles", adminHandler.UpdateRoles)
 			r.With(authmw.RequirePermission("users", "update"), stepUpMFA).Patch("/admin/users/{id}/status", adminHandler.SetStatus)
@@ -936,6 +971,7 @@ func run(ctx context.Context, cfg config) error {
 
 			// Service account management
 			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts", saHandler.List)
+			r.With(authmw.RequirePermission("service_accounts", "read")).Get("/admin/service-accounts/events", saHandler.Events)
 			r.With(authmw.RequirePermission("service_accounts", "create"), stepUpMFA).Post("/admin/service-accounts", saHandler.Create)
 			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}", saHandler.Update)
 			r.With(authmw.RequirePermission("service_accounts", "update"), stepUpMFA).Patch("/admin/service-accounts/{id}/status", saHandler.SetStatus)
@@ -1024,6 +1060,9 @@ func writeMetrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP zerotrust_audit_write_failures_total Total audit log write failures.\n")
 	fmt.Fprintf(w, "# TYPE zerotrust_audit_write_failures_total counter\n")
 	fmt.Fprintf(w, "zerotrust_audit_write_failures_total %d\n", audit.WriteFailures())
+	fmt.Fprintf(w, "# HELP zerotrust_ratelimit_fail_opens_total Total requests allowed through without rate-limit enforcement because Redis was unavailable.\n")
+	fmt.Fprintf(w, "# TYPE zerotrust_ratelimit_fail_opens_total counter\n")
+	fmt.Fprintf(w, "zerotrust_ratelimit_fail_opens_total %d\n", authmw.FailOpens())
 }
 
 type config struct {
@@ -1045,11 +1084,13 @@ type config struct {
 	CookiesSecure            bool
 	RegistrationEnabled      bool
 	MFAEnabled               bool
+	DevMode                  bool
 	CORSOrigins              []string
 	TrustedProxies           string
 	InitialAdminEmail        string
 	InitialAdminPasswordHash string
 	MFAEncryptionKey         []byte
+	MFAEncryptionKeyPrevious []byte
 	SMTPHost                 string
 	SMTPPort                 string
 	SMTPFrom                 string
@@ -1080,6 +1121,39 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	// DEV_MODE relaxes production-only guards (SMTP requirement below, and
+	// SMTPMailer.AllowPlaintext when STARTTLS isn't offered) for local
+	// development. Defaults to false so a deployment that forgets to set it
+	// fails closed rather than silently degrading. (ISSUE_LIST #89, #90)
+	devMode, err := boolEnv("DEV_MODE", false)
+	if err != nil {
+		return config{}, err
+	}
+	smtpHost := getEnv("SMTP_HOST", "")
+	if smtpHost == "" && !devMode {
+		return config{}, fmt.Errorf("SMTP_HOST must be configured so password-reset emails (which carry live account-takeover links) are actually delivered; set DEV_MODE=true to allow logging reset links to the console instead, for local development only")
+	}
+
+	// A deployment that forgets DATABASE_URL/REDIS_PASSWORD must not boot
+	// silently with published default credentials and sslmode=disable — that
+	// default previously matched this repo's own committed docker-compose
+	// example, so anyone reusing it verbatim in production would be exposed.
+	// Dev-only defaults now require an explicit opt-in via DEV_MODE.
+	// (ISSUE_LIST #91)
+	databaseURL := getEnv("DATABASE_URL", "")
+	if databaseURL == "" {
+		if !devMode {
+			return config{}, fmt.Errorf("DATABASE_URL must be configured outside DEV_MODE; set DEV_MODE=true to use the local development default (postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable)")
+		}
+		databaseURL = "postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable"
+	}
+	redisPassword := getEnv("REDIS_PASSWORD", "")
+	if redisPassword == "" && !devMode {
+		return config{}, fmt.Errorf("REDIS_PASSWORD must be configured outside DEV_MODE; set DEV_MODE=true to run against a local Redis with the development default password")
+	}
+	if redisPassword == "" {
+		redisPassword = "zerotrust_secret"
+	}
 	origins, err := parseCORSOrigins(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"))
 	if err != nil {
 		return config{}, err
@@ -1104,6 +1178,24 @@ func loadConfig() (config, error) {
 		mfaKey = b
 	}
 
+	// Optional previous key, tried only when decrypting with the primary key
+	// fails, so TOTP secrets encrypted before a rotation stay readable (#103).
+	var mfaPrevKey []byte
+	prevKeyHex := getEnv("MFA_ENCRYPTION_KEY_PREVIOUS", "")
+	if !mfaEnabled {
+		if prevKeyHex != "" {
+			slog.Warn("MFA_ENCRYPTION_KEY_PREVIOUS is set but ignored because MFA_ENABLED is false")
+		}
+		prevKeyHex = ""
+	}
+	if prevKeyHex != "" {
+		b, err := hex.DecodeString(prevKeyHex)
+		if err != nil || len(b) != 32 {
+			return config{}, fmt.Errorf("MFA_ENCRYPTION_KEY_PREVIOUS must be 64 hex chars / 32 bytes")
+		}
+		mfaPrevKey = b
+	}
+
 	dbMaxConns, err := intEnv("DATABASE_MAX_CONNS", 20)
 	if err != nil {
 		return config{}, err
@@ -1124,12 +1216,12 @@ func loadConfig() (config, error) {
 
 	return config{
 		ServerAddr:               getEnv("SERVER_ADDR", ":8080"),
-		DatabaseURL:              getEnv("DATABASE_URL", "postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable"),
+		DatabaseURL:              databaseURL,
 		DatabaseMaxConns:         dbMaxConns,
 		DatabaseMinConns:         dbMinConns,
 		DatabaseConnTimeout:      dbConnTimeout,
 		RedisAddr:                getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisPassword:            getEnv("REDIS_PASSWORD", "zerotrust_secret"),
+		RedisPassword:            redisPassword,
 		RedisPoolSize:            redisPoolSize,
 		MigrationsPath:           getEnv("MIGRATIONS_PATH", "migrations"),
 		JWTPrivateKeyFile:        getEnv("JWT_PRIVATE_KEY_FILE", ""),
@@ -1141,12 +1233,14 @@ func loadConfig() (config, error) {
 		CookiesSecure:            cookiesSecure,
 		RegistrationEnabled:      registrationEnabled,
 		MFAEnabled:               mfaEnabled,
+		DevMode:                  devMode,
 		CORSOrigins:              origins,
 		TrustedProxies:           getEnv("TRUSTED_PROXIES", ""),
 		InitialAdminEmail:        getEnv("INITIAL_ADMIN_EMAIL", ""),
 		InitialAdminPasswordHash: getEnv("INITIAL_ADMIN_PASSWORD_HASH", ""),
 		MFAEncryptionKey:         mfaKey,
-		SMTPHost:                 getEnv("SMTP_HOST", ""),
+		MFAEncryptionKeyPrevious: mfaPrevKey,
+		SMTPHost:                 smtpHost,
 		SMTPPort:                 getEnv("SMTP_PORT", "587"),
 		SMTPFrom:                 getEnv("SMTP_FROM", "noreply@localhost"),
 		SMTPUser:                 getEnv("SMTP_USER", ""),

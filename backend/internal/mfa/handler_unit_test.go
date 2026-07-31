@@ -53,6 +53,10 @@ func (m *mockMFAService) Validate(context.Context, string, string) bool {
 	return m.validateOK
 }
 
+func (m *mockMFAService) ValidateStepUp(context.Context, string, string) bool {
+	return m.validateOK
+}
+
 func (m *mockMFAService) RegenerateRecoveryCodes(context.Context, string) ([]string, error) {
 	if m.regenerateErr != nil {
 		return nil, m.regenerateErr
@@ -291,11 +295,133 @@ func TestMFAHandlerStepUp_Success(t *testing.T) {
 	}
 }
 
+// TestMFAHandlerSetup_BruteForceLockout mirrors the Disable lockout tests:
+// N consecutive current-code failures lock further /mfa/setup attempts for the
+// cooldown window (#87).
+func TestMFAHandlerSetup_BruteForceLockout(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	h := NewHandler(&mockMFAService{setupErr: errors.New("invalid_code")}, rdb, time.Minute)
+	for i := 0; i < mfaMaxFailedAttempts; i++ {
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/setup", bytes.NewBufferString(`{"current_code":"000000"}`)))
+		rr := httptest.NewRecorder()
+		h.Setup(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: status=%d want=%d", i+1, rr.Code, http.StatusBadRequest)
+		}
+	}
+
+	// The next attempt is locked out, even with a service that would succeed.
+	h = NewHandler(&mockMFAService{setupOTP: "otpauth://", setupSecret: "ABC", setupCodes: []string{"c1"}}, rdb, time.Minute)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/setup", bytes.NewBufferString(`{"current_code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Setup(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusTooManyRequests)
+	}
+
+	// current_code_required is not a failed guess and must not count towards
+	// the lockout: a fresh user key still allows attempts.
+	fresh := NewHandler(&mockMFAService{setupErr: errors.New("current_code_required")}, rdb, time.Minute)
+	req = withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/setup", bytes.NewBufferString(`{}`)))
+	req = req.WithContext(context.WithValue(req.Context(), authmw.ClaimsKey, &auth.Claims{UserID: "u2", Email: "u2@example.com"}))
+	rr = httptest.NewRecorder()
+	fresh.Setup(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+	if mr.Exists(mfaSetupAttemptsKey("u2")) {
+		t.Fatal("current_code_required must not increment the failure counter")
+	}
+}
+
+// TestMFAHandlerVerify_BruteForceLockout mirrors the Disable lockout tests:
+// N consecutive verification failures lock further /mfa/verify attempts (#87).
+func TestMFAHandlerVerify_BruteForceLockout(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	h := NewHandler(&mockMFAService{verifyErr: errors.New("invalid_code")}, rdb, time.Minute)
+	for i := 0; i < mfaMaxFailedAttempts; i++ {
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"000000"}`)))
+		rr := httptest.NewRecorder()
+		h.Verify(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: status=%d want=%d", i+1, rr.Code, http.StatusBadRequest)
+		}
+	}
+
+	// The next attempt is locked out, even with a service that would succeed.
+	h = NewHandler(&mockMFAService{}, rdb, time.Minute)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Verify(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusTooManyRequests)
+	}
+}
+
+// TestMFAHandlerVerify_SuccessClearsFailures ensures a successful verification
+// resets the failure counter (#87).
+func TestMFAHandlerVerify_SuccessClearsFailures(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	h := NewHandler(&mockMFAService{verifyErr: errors.New("invalid_code")}, rdb, time.Minute)
+	for i := 0; i < mfaMaxFailedAttempts-1; i++ {
+		req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"000000"}`)))
+		rr := httptest.NewRecorder()
+		h.Verify(rr, req)
+	}
+
+	h = NewHandler(&mockMFAService{}, rdb, time.Minute)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/verify", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Verify(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
+	}
+	if mr.Exists(mfaVerifyAttemptsKey("u1")) {
+		t.Fatal("successful verify must clear the failure counter")
+	}
+}
+
+// TestMFAHandlerDisable_ReplayUnavailableFailsClosed ensures /mfa/disable
+// returns 503 (not 400) when the replay-protection store is down (#102).
+func TestMFAHandlerDisable_ReplayUnavailableFailsClosed(t *testing.T) {
+	h := NewHandler(&mockMFAService{disableErr: ErrReplayUnavailable}, nil, 0)
+	req := withMFAClaims(httptest.NewRequest(http.MethodPost, "/api/v1/mfa/disable", bytes.NewBufferString(`{"code":"123456"}`)))
+	rr := httptest.NewRecorder()
+	h.Disable(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusServiceUnavailable)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil || resp["error"] != "mfa_unavailable" {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
 type mockNotifier struct {
 	calls []struct{ alertType, to string }
 	err   error
 }
-
 func (m *mockNotifier) SendSecurityAlert(_ context.Context, to, alertType, _, _, _ string) error {
 	m.calls = append(m.calls, struct{ alertType, to string }{alertType, to})
 	return m.err

@@ -54,6 +54,10 @@ type UserReader interface {
 type MFAChecker interface {
 	IsEnabled(ctx context.Context, userID string) bool
 	Validate(ctx context.Context, userID, code string) bool
+	// ValidateStepUp is the fail-closed variant of Validate for high-risk
+	// step-up checks: it rejects when the replay-protection store is
+	// unavailable instead of silently disabling single-use enforcement (#102).
+	ValidateStepUp(ctx context.Context, userID, code string) bool
 	Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error)
 	VerifyAndEnable(ctx context.Context, userID, code string) error
 }
@@ -781,7 +785,7 @@ func (s *Service) WebAuthnLoginFinish(ctx context.Context, pendingToken string, 
 	// Verified — consume the pending login (single-use) and issue tokens.
 	s.rdb.Del(ctx, key)
 	u, err := s.users.FindByID(ctx, m.UID)
-	if err != nil {
+	if err != nil || !u.IsActive {
 		return nil, ErrInvalidCredentials
 	}
 	return s.completeLogin(ctx, u, m.IP, m.UA, m.DeviceInfo, false)
@@ -968,10 +972,12 @@ func (s *Service) ClientCredentials(ctx context.Context, clientID, secret string
 // Logout revokes the session and blocklists the access token JTI.
 // RevokeAccessToken immediately blocks a token's JTI in Redis so it is
 // rejected on all subsequent requests. Called by the OAuth2 revocation
-// endpoint (RFC 7009). Expired or unparseable tokens are silently ignored
-// per the spec — the caller always gets a 200.
+// endpoint (RFC 7009) for OIDC access tokens, so it accepts tokens without
+// the first-party token_use marker; the caller is responsible for checking
+// the token's audience first (#101). Expired or unparseable tokens are
+// silently ignored per the spec — the caller always gets a 200.
 func (s *Service) RevokeAccessToken(ctx context.Context, tokenStr string) {
-	if claims, err := ValidateAccessToken(s.ks, tokenStr); err == nil {
+	if claims, err := ValidateOIDCAccessToken(s.ks, tokenStr); err == nil {
 		s.revokeJTI(ctx, claims.ID, time.Until(claims.ExpiresAt.Time))
 	}
 }
@@ -1205,6 +1211,9 @@ func (s *Service) EvaluateAccess(ctx context.Context, claims *Claims, ip, ua str
 				return ErrInvalidToken
 			}
 		}
+	default:
+		// Unknown token subject type — default deny (#81).
+		return ErrInvalidToken
 	}
 
 	return nil

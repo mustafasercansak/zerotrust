@@ -25,6 +25,10 @@ func (m *mockMFAChecker) Validate(ctx context.Context, userID, code string) bool
 	return m.valid && code != ""
 }
 
+func (m *mockMFAChecker) ValidateStepUp(ctx context.Context, userID, code string) bool {
+	return m.valid && code != ""
+}
+
 func (m *mockMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
 	return "", "", nil, nil
 }
@@ -230,5 +234,44 @@ func TestRequireRecentMFA_EdgeCases(t *testing.T) {
 	handlerBadRdb.ServeHTTP(rr3, req3)
 	if rr3.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 when marking MFA fails, got %d", rr3.Code)
+	}
+}
+
+// TestRequireRecentMFAIfEnabled covers the conditional step-up variant (#81):
+// users without MFA pass through (first-time enrollment stays possible), while
+// users with MFA enabled must present a recent proof or a live code.
+func TestRequireRecentMFAIfEnabled(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	claims := &auth.Claims{UserID: "user1"}
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	send := func(handler http.Handler, withCookie bool) int {
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		if withCookie {
+			req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "token1"})
+		}
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// MFA disabled → passes through even without any proof or cookie.
+	disabled := RequireRecentMFAIfEnabled(&mockMFAChecker{enabled: false}, rdb, 0)(ok)
+	if got := send(disabled, false); got != http.StatusOK {
+		t.Errorf("MFA-disabled user must pass through, got %d", got)
+	}
+
+	// MFA enabled, no proof and no X-MFA-Code → 403 mfa_required.
+	enabled := RequireRecentMFAIfEnabled(&mockMFAChecker{enabled: true, valid: true}, rdb, 0)(ok)
+	if got := send(enabled, true); got != http.StatusForbidden {
+		t.Errorf("MFA-enabled user without proof must get 403, got %d", got)
 	}
 }

@@ -92,6 +92,59 @@ describe("LoginPage component", () => {
     vi.restoreAllMocks();
   });
 
+  it("redirect_to=https://evil.example falls back to the default dashboard route", async () => {
+    mockSearchParams.set("redirect_to", "https://evil.example/fake-login");
+    vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith("https://evil.example/fake-login");
+    expect(mockLocation.href).toBe("");
+  });
+
+  it("redirect_to=//evil.example (protocol-relative) falls back to the default dashboard route", async () => {
+    mockSearchParams.set("redirect_to", "//evil.example/fake-login");
+    vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+    });
+    expect(mockLocation.href).toBe("");
+  });
+
+  it("redirect_to with a same-origin /oauth2/ path still navigates to the backend consent flow", async () => {
+    mockSearchParams.set("redirect_to", "/oauth2/authorize?client_id=demo&response_type=code");
+    vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(mockLocation.href).toBe("/oauth2/authorize?client_id=demo&response_type=code");
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith("/oauth2/authorize?client_id=demo&response_type=code");
+  });
+
+  it("redirect_to with another same-origin absolute path is honored via client-side navigation", async () => {
+    mockSearchParams.set("redirect_to", "/dashboard/sessions");
+    vi.spyOn(api, "login").mockResolvedValue({ ok: true, mfa_required: false });
+
+    render(React.createElement(LoginPage));
+    fireEvent.submit(document.querySelector("form")!);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/dashboard/sessions");
+    });
+    expect(mockLocation.href).toBe("");
+  });
+
   it("handles standard input typing", () => {
     render(React.createElement(LoginPage));
 

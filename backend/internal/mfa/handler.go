@@ -26,6 +26,7 @@ type mfaService interface {
 	Disable(ctx context.Context, userID, code string) error
 	IsEnabled(ctx context.Context, userID string) bool
 	Validate(ctx context.Context, userID, code string) bool
+	ValidateStepUp(ctx context.Context, userID, code string) bool
 	RegenerateRecoveryCodes(ctx context.Context, userID string) ([]string, error)
 }
 
@@ -46,6 +47,8 @@ const (
 // so that failed attempts from this handler and the middleware share one counter.
 func mfaStepUpAttemptsKey(userID string) string { return "mfa:stepup:fails:" + userID }
 func mfaDisableAttemptsKey(userID string) string { return "mfa:disable:fails:" + userID }
+func mfaSetupAttemptsKey(userID string) string   { return "mfa:setup:fails:" + userID }
+func mfaVerifyAttemptsKey(userID string) string  { return "mfa:verify:fails:" + userID }
 
 func mfaAttemptsExceeded(ctx context.Context, rdb *redis.Client, key string) bool {
 	if rdb == nil {
@@ -105,15 +108,32 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
+
+	// Brute-force guard on the current-code check (#87), mirroring Disable.
+	setupFailKey := mfaSetupAttemptsKey(claims.UserID)
+	if mfaAttemptsExceeded(r.Context(), h.rdb, setupFailKey) {
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+		return
+	}
 	otpAuthURL, secret, recoveryCodes, err := h.svc.Setup(r.Context(), claims.UserID, claims.Email, req.CurrentCode)
 	if err != nil {
-		if err.Error() == "invalid_code" || err.Error() == "current_code_required" {
+		if errors.Is(err, ErrReplayUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "mfa_unavailable")
+			return
+		}
+		if err.Error() == "invalid_code" || err.Error() == "code_already_used" {
+			recordMFAFailure(r.Context(), h.rdb, setupFailKey)
+			writeError(w, http.StatusBadRequest, "invalid_code")
+			return
+		}
+		if err.Error() == "current_code_required" {
 			writeError(w, http.StatusBadRequest, "invalid_code")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	clearMFAFailures(r.Context(), h.rdb, setupFailKey)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -137,10 +157,19 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Brute-force guard on the pending-secret verification code (#87),
+	// mirroring Disable.
+	verifyFailKey := mfaVerifyAttemptsKey(claims.UserID)
+	if mfaAttemptsExceeded(r.Context(), h.rdb, verifyFailKey) {
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+		return
+	}
 	if err := h.svc.VerifyAndEnable(r.Context(), claims.UserID, req.Code); err != nil {
+		recordMFAFailure(r.Context(), h.rdb, verifyFailKey)
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
 	}
+	clearMFAFailures(r.Context(), h.rdb, verifyFailKey)
 
 	if h.notif != nil {
 		_ = h.notif.SendSecurityAlert(r.Context(), claims.Email,
@@ -174,6 +203,10 @@ func (h *Handler) Disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Disable(r.Context(), claims.UserID, req.Code); err != nil {
+		if errors.Is(err, ErrReplayUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "mfa_unavailable")
+			return
+		}
 		recordMFAFailure(r.Context(), h.rdb, disableFailKey)
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return
@@ -229,7 +262,7 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
 		return
 	}
-	if !h.svc.Validate(r.Context(), claims.UserID, req.Code) {
+	if !h.svc.ValidateStepUp(r.Context(), claims.UserID, req.Code) {
 		recordMFAFailure(r.Context(), h.rdb, stepUpFailKey)
 		writeError(w, http.StatusBadRequest, "invalid_code")
 		return

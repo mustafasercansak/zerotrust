@@ -290,6 +290,9 @@ type testAnomalyMFAChecker struct {
 
 func (c *testAnomalyMFAChecker) IsEnabled(_ context.Context, _ string) bool   { return c.enabled }
 func (c *testAnomalyMFAChecker) Validate(_ context.Context, _, _ string) bool { return true }
+func (c *testAnomalyMFAChecker) ValidateStepUp(_ context.Context, _, _ string) bool {
+	return true
+}
 func (c *testAnomalyMFAChecker) Setup(_ context.Context, _, _, _ string) (string, string, []string, error) {
 	return "url", "secret", []string{"code1"}, nil
 }

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -583,6 +583,85 @@ func TestHandler_AuditLogging_RotateSecret(t *testing.T) {
 	}
 }
 
+// TestHandler_AuditLogging_ClientLifecycle verifies that OIDC client
+// create/update/delete each write a dedicated audit entry (#106).
+func TestHandler_AuditLogging_ClientLifecycle(t *testing.T) {
+	dbURL := testdb.URL(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Skipf("test db unavailable: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("test db unreachable: %v", err)
+	}
+	if err := database.RunMigrations(dbURL, "../../migrations"); err != nil {
+		t.Fatalf("migrations failed: %v", err)
+	}
+	pool.Exec(ctx, "TRUNCATE TABLE oauth2_clients CASCADE")
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	adminID := "admin-user-uuid"
+
+	clientRepo := NewClientRepository(pool)
+	al := &mockAuditLogger{}
+	h := &Handler{clientRepo: clientRepo, auditRepo: al, ks: ks}
+
+	withActor := func(req *http.Request) *http.Request {
+		ctx2 := context.WithValue(req.Context(), authmw.ClaimsKey, &auth.Claims{UserID: adminID})
+		return req.WithContext(ctx2)
+	}
+
+	// Create
+	createBody, _ := json.Marshal(map[string]any{
+		"client_id":      "audit-lifecycle-client",
+		"name":           "Audit Lifecycle",
+		"redirect_uris":  []string{"https://app.example.com/cb"},
+		"allowed_scopes": []string{"openid"},
+	})
+	createReq := withActor(httptest.NewRequest("POST", "/admin/oidc/clients", bytes.NewBuffer(createBody)))
+	createRR := httptest.NewRecorder()
+	h.CreateClient(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(createRR.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	// Update
+	updateBody, _ := json.Marshal(map[string]any{
+		"name":           "Audit Lifecycle Renamed",
+		"redirect_uris":  []string{"https://app.example.com/cb"},
+		"allowed_scopes": []string{"openid"},
+	})
+	updateReq := withActor(setChiParam(httptest.NewRequest("PUT", "/admin/oidc/clients/"+created.ID, bytes.NewBuffer(updateBody)), "id", created.ID))
+	updateRR := httptest.NewRecorder()
+	h.UpdateClient(updateRR, updateReq)
+	if updateRR.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d body=%s", updateRR.Code, updateRR.Body.String())
+	}
+
+	// Delete
+	deleteReq := withActor(setChiParam(httptest.NewRequest("DELETE", "/admin/oidc/clients/"+created.ID, nil), "id", created.ID))
+	deleteRR := httptest.NewRecorder()
+	h.DeleteClient(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	for _, action := range []string{"oidc.client_created", "oidc.client_updated", "oidc.client_deleted"} {
+		if !al.hasAction(action) {
+			t.Errorf("expected %s audit entry, got: %v", action, al.actions())
+		}
+	}
+}
+
 func TestHandler_AuditLogging_Introspect(t *testing.T) {
 	dbURL := testdb.URL(t)
 	ctx := context.Background()
@@ -726,7 +805,7 @@ func (s *stubClientRepo) List(_ context.Context) ([]*Client, error)  { return ni
 func (s *stubClientRepo) Create(_ context.Context, clientID, _, name string, uris, scopes []string) (*Client, error) {
 	return &Client{ClientID: clientID, Name: name, RedirectURIs: uris, AllowedScopes: scopes}, nil
 }
-func (s *stubClientRepo) Delete(_ context.Context, _ string) error { return nil }
+func (s *stubClientRepo) Delete(_ context.Context, _ string) (string, error) { return "stub-client", nil }
 func (s *stubClientRepo) Update(_ context.Context, id, name string, uris, scopes []string) (*Client, error) {
 	return &Client{ID: id, Name: name, RedirectURIs: uris, AllowedScopes: scopes}, nil
 }
@@ -769,26 +848,46 @@ func (m *testServiceAccountStore) CheckSecret(hash, secret string) bool {
 
 type mockAuditLogger struct {
 	mu      sync.Mutex
-	entries []string
+	entries []audit.Entry
 }
 
 func (m *mockAuditLogger) Log(_ context.Context, e audit.Entry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries = append(m.entries, e.Action)
+	m.entries = append(m.entries, e)
 	return nil
 }
 
 func (m *mockAuditLogger) hasAction(action string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return slices.Contains(m.entries, action)
+	for _, e := range m.entries {
+		if e.Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *mockAuditLogger) actions() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.entries...)
+	actions := make([]string, 0, len(m.entries))
+	for _, e := range m.entries {
+		actions = append(actions, e.Action)
+	}
+	return actions
+}
+
+func (m *mockAuditLogger) metadataFor(action string) map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.entries {
+		if e.Action == action {
+			return e.Metadata
+		}
+	}
+	return nil
 }
 
 // mockMFAChecker satisfies consentMFAGuard for unit tests.
@@ -830,6 +929,106 @@ func TestHandler_Consent_RequiresStepUpWhenMFAEnabled(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 mfa_required, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandler_Consent_InternalErrorNotLeaked verifies that a raw infrastructure
+// error (e.g. a Redis dial failure from the auth-code store) is never returned
+// to the caller — the response is a generic server_error (#105).
+func TestHandler_Consent_InternalErrorNotLeaked(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	codeStore := NewAuthCodeStore(rdb)
+	mr.Close() // force Save to fail with a raw dial error
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	clientRepo := &stubClientRepo{redirectURIs: []string{"https://app.example.com/cb"}}
+	svc := NewService(clientRepo, codeStore, user.NewService(&mockUserReader{}), ks, "https://issuer.example.com", nil)
+	h := &Handler{svc: svc, clientRepo: clientRepo, ks: ks}
+
+	tokenPair, _ := auth.GenerateTokenPair(ks, "user-1", "u@example.com", "en", nil, nil, time.Hour)
+	body, _ := json.Marshal(ConsentRequest{
+		ClientID:    "some-client",
+		RedirectURI: "https://app.example.com/cb",
+		Approved:    true,
+	})
+	req := httptest.NewRequest("POST", "/oauth2/consent", bytes.NewBuffer(body))
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: tokenPair.AccessToken})
+	rr := httptest.NewRecorder()
+
+	h.Consent(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	respBody := rr.Body.String()
+	if !strings.Contains(respBody, "server_error") {
+		t.Errorf("expected generic server_error, got %s", respBody)
+	}
+	if strings.Contains(respBody, "error_description") || strings.Contains(respBody, "dial") {
+		t.Errorf("raw internal error leaked to client: %s", respBody)
+	}
+}
+
+// TestHandler_Token_InternalErrorNotLeaked verifies that non-sentinel service
+// errors map to server_error with no detail, that sentinel errors keep their
+// protocol-safe description, and that audit metadata never stores a raw
+// err.Error() (#105).
+func TestHandler_Token_InternalErrorNotLeaked(t *testing.T) {
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	clientRepo := &stubClientRepo{}
+
+	// refreshStore == nil → ExchangeRefreshToken returns a raw non-sentinel error.
+	svc := NewService(clientRepo, nil, user.NewService(&mockUserReader{}), ks, "https://issuer.example.com", nil)
+	al := &mockAuditLogger{}
+	h := &Handler{svc: svc, clientRepo: clientRepo, auditRepo: al, ks: ks}
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"whatever"},
+		"client_id":     {"some-client"},
+	}
+	req := httptest.NewRequest("POST", "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	h.Token(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	respBody := rr.Body.String()
+	if !strings.Contains(respBody, `"error":"server_error"`) {
+		t.Errorf("expected server_error, got %s", respBody)
+	}
+	if strings.Contains(respBody, "refresh_token_not_supported") || strings.Contains(respBody, "error_description") {
+		t.Errorf("raw internal error leaked to client: %s", respBody)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	meta := al.metadataFor("oidc.token_exchange_failed")
+	if meta == nil {
+		t.Fatalf("expected oidc.token_exchange_failed audit entry, got: %v", al.actions())
+	}
+	if reason, _ := meta["reason"].(string); reason != "internal_error" {
+		t.Errorf("expected generic audit reason internal_error, got %q", reason)
+	}
+}
+
+// TestIsSafeOIDCError pins which service errors are considered protocol-safe.
+func TestIsSafeOIDCError(t *testing.T) {
+	safe := []error{ErrInvalidGrant, ErrInvalidRedirectURI, ErrInvalidScope, ErrCodeVerifierFailed, ErrRefreshTokenReuse}
+	for _, err := range safe {
+		if !isSafeOIDCError(err) {
+			t.Errorf("expected %v to be safe", err)
+		}
+	}
+	if isSafeOIDCError(errors.New("dial tcp 10.0.0.1:6379: connection refused")) {
+		t.Error("raw infrastructure error must not be considered safe")
 	}
 }
 
@@ -925,13 +1124,31 @@ func TestHandler_Introspect_Integration(t *testing.T) {
 	clientRepo := NewClientRepository(pool)
 	h := &Handler{ks: ks, authSvc: authSvc, clientRepo: clientRepo}
 
-	tokenPair, _ := auth.GenerateTokenPair(ks, u.ID, u.Email, u.Locale, nil, nil, time.Hour)
+	// Introspection requires a token whose audience is the calling client
+	// (#101), so mint an OIDC-style access token addressed to intro-client.
+	oidcToken, err := ks.Sign(auth.Claims{
+		UserID:  u.ID,
+		Email:   u.Email,
+		SubType: auth.SubTypeUser,
+		Scopes:  []string{"openid"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "http://localhost",
+			Subject:   u.ID,
+			Audience:  jwt.ClaimStrings{"intro-client"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        "intro-jti-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("sign oidc token: %v", err)
+	}
 
 	// Active token via form params
 	form := url.Values{}
 	form.Set("client_id", "intro-client")
 	form.Set("client_secret", "demo-secret")
-	form.Set("token", tokenPair.AccessToken)
+	form.Set("token", oidcToken)
 	req, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -951,11 +1168,35 @@ func TestHandler_Introspect_Integration(t *testing.T) {
 		t.Fatalf("expected sub=%s, got %v", u.ID, resp["sub"])
 	}
 
+	// A token addressed to a different client reports active:false (#101).
+	foreignToken, _ := ks.Sign(auth.Claims{
+		UserID:  u.ID,
+		SubType: auth.SubTypeUser,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{"other-client"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			ID:        "intro-jti-2",
+		},
+	})
+	foreignForm := url.Values{}
+	foreignForm.Set("client_id", "intro-client")
+	foreignForm.Set("client_secret", "demo-secret")
+	foreignForm.Set("token", foreignToken)
+	foreignReq, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(foreignForm.Encode()))
+	foreignReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	foreignRR := httptest.NewRecorder()
+	h.Introspect(foreignRR, foreignReq)
+	var foreignResp map[string]any
+	json.NewDecoder(foreignRR.Body).Decode(&foreignResp)
+	if foreignResp["active"] != false {
+		t.Errorf("expected active=false for foreign-audience token, got %v", foreignResp["active"])
+	}
+
 	// Bad client secret → 401
 	form2 := url.Values{}
 	form2.Set("client_id", "intro-client")
 	form2.Set("client_secret", "wrong-secret")
-	form2.Set("token", tokenPair.AccessToken)
+	form2.Set("token", oidcToken)
 	req2, _ := http.NewRequest("POST", "/oauth2/introspect", strings.NewReader(form2.Encode()))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 

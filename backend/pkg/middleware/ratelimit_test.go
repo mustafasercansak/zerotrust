@@ -138,3 +138,29 @@ func TestRateLimiter_AuthenticatedUserID(t *testing.T) {
 		t.Errorf("expected 200 for user_b, got %d", rrB1.Code)
 	}
 }
+
+// TestRateLimiter_FailsOpenAndRecordsMetricOnRedisError proves a Redis
+// outage still allows the request through (fail open — a limiter outage
+// must not become an availability outage) but is now visible via a counter
+// instead of failing silently. (ISSUE_LIST #111)
+func TestRateLimiter_FailsOpenAndRecordsMetricOnRedisError(t *testing.T) {
+	rdb, cleanup := newRateLimitTestRedis(t)
+	cleanup() // close the connection immediately so every Redis call errors
+
+	rl := NewRateLimiter(rdb, "testfailopen", 1, 10*time.Second)
+	handler := rl.Middleware()(okHandler())
+
+	before := FailOpens()
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "192.168.1.1:1234"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 (fail open) when Redis is unavailable, got %d", rr.Code)
+	}
+	if got := FailOpens(); got != before+1 {
+		t.Errorf("FailOpens()=%d want=%d", got, before+1)
+	}
+}

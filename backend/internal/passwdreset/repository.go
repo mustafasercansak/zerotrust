@@ -81,9 +81,11 @@ type tokenRow struct {
 
 // ConsumeAndReset atomically validates the reset token, marks it used, updates
 // the user's password hash, and revokes all their sessions in a single
-// transaction. bcrypt hashing must be done by the caller before this call.
+// transaction. The token is looked up and validated (found, unused, unexpired)
+// before any bcrypt work runs, so an unauthenticated caller submitting garbage
+// tokens cannot force expensive bcrypt comparisons/hashes. (ISSUE_LIST #84)
 // If any step fails the transaction is rolled back and the token remains valid.
-func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword, newPasswordHash string) error {
+func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword string) error {
 	hash := hashToken(rawToken)
 
 	tx, err := r.db.Begin(ctx)
@@ -112,7 +114,8 @@ func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword,
 		return ErrExpired
 	}
 
-	// Retrieve user's current password hash to check for reuse
+	// The token is now confirmed valid, unused, and unexpired — only from here
+	// on is any bcrypt work (reuse check, new-password hash) performed.
 	var currentPasswordHash string
 	err = tx.QueryRow(ctx, `
 		SELECT password_hash FROM users WHERE id = $1::uuid
@@ -125,6 +128,11 @@ func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword,
 		return ErrPasswordReuseForbidden
 	}
 
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
+	if err != nil {
+		return err
+	}
+
 	if _, err = tx.Exec(ctx, `
 		UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1
 	`, row.ID); err != nil {
@@ -133,7 +141,7 @@ func (r *Repository) ConsumeAndReset(ctx context.Context, rawToken, newPassword,
 
 	if _, err = tx.Exec(ctx, `
 		UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid
-	`, newPasswordHash, row.UserID); err != nil {
+	`, string(newHash), row.UserID); err != nil {
 		return err
 	}
 

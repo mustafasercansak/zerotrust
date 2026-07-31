@@ -73,6 +73,21 @@ func TestIsHighRiskEvent(t *testing.T) {
 			expect: true,
 		},
 		{
+			name:   "oidc client created",
+			entry:  Entry{Action: "oidc.client_created"},
+			expect: true,
+		},
+		{
+			name:   "oidc client updated",
+			entry:  Entry{Action: "oidc.client_updated"},
+			expect: true,
+		},
+		{
+			name:   "oidc client deleted",
+			entry:  Entry{Action: "oidc.client_deleted"},
+			expect: true,
+		},
+		{
 			name:   "random low-risk action",
 			entry:  Entry{Action: "user.profile_view", Metadata: map[string]any{"outcome": "success"}},
 			expect: false,
@@ -227,27 +242,31 @@ func TestTestWebhook_DeliveryFailure(t *testing.T) {
 
 func TestValidateWebhookURL(t *testing.T) {
 	cases := []struct {
-		name    string
-		url     string
-		wantErr bool
+		name          string
+		url           string
+		allowInsecure bool
+		wantErr       bool
 	}{
-		{"loopback rejected", "http://127.0.0.1/hook", true},
-		{"localhost rejected", "http://localhost/hook", true},
-		{"private 10.x rejected", "http://10.0.0.1/hook", true},
-		{"private 192.168.x rejected", "http://192.168.1.1/hook", true},
-		{"private 172.16.x rejected", "http://172.16.0.1/hook", true},
-		{"link-local rejected", "http://169.254.169.254/hook", true},
-		{"file scheme rejected", "file:///etc/passwd", true},
-		{"ftp scheme rejected", "ftp://example.com/hook", true},
-		{"empty URL rejected", "", true},
-		{"no hostname rejected", "http:///hook", true},
+		{"loopback rejected", "http://127.0.0.1/hook", true, true},
+		{"localhost rejected", "http://localhost/hook", true, true},
+		{"private 10.x rejected", "http://10.0.0.1/hook", true, true},
+		{"private 192.168.x rejected", "http://192.168.1.1/hook", true, true},
+		{"private 172.16.x rejected", "http://172.16.0.1/hook", true, true},
+		{"link-local rejected", "http://169.254.169.254/hook", true, true},
+		{"file scheme rejected", "file:///etc/passwd", false, true},
+		{"ftp scheme rejected", "ftp://example.com/hook", false, true},
+		{"empty URL rejected", "", false, true},
+		{"no hostname rejected", "http:///hook", true, true},
+		{"http rejected by default", "http://1.1.1.1/hook", false, true},
+		{"http allowed with allow-insecure", "http://1.1.1.1/hook", true, false},
+		{"https allowed", "https://1.1.1.1/hook", false, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateWebhookURL(tc.url)
+			err := validateWebhookURL(tc.url, tc.allowInsecure)
 			if (err != nil) != tc.wantErr {
-				t.Errorf("validateWebhookURL(%q) error=%v wantErr=%v", tc.url, err, tc.wantErr)
+				t.Errorf("validateWebhookURL(%q, %v) error=%v wantErr=%v", tc.url, tc.allowInsecure, err, tc.wantErr)
 			}
 		})
 	}
@@ -289,5 +308,90 @@ func TestRepository_LogTriggersWebhookAsynchronously(t *testing.T) {
 	defer mu.Unlock()
 	if !called {
 		t.Fatal("expected webhook to be triggered asynchronously")
+	}
+}
+
+// TestRepository_LogThrottlesRepeatedWebhooksBySameIP proves a flood of
+// identical high-risk events from the same IP fires the webhook once per
+// throttle window rather than once per event, protecting the outbound
+// webhook channel from exhaustion. (ISSUE_LIST #94)
+func TestRepository_LogThrottlesRepeatedWebhooksBySameIP(t *testing.T) {
+	pool, ctx, repo, _ := setupTestDB(t)
+	defer pool.Close()
+
+	var mu sync.Mutex
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	reader := &mockSettingsReader{enabled: true, url: server.URL}
+	repo.SetSettingsReader(reader)
+	repo.SetWebhookClient(http.DefaultClient)
+
+	for i := 0; i < 5; i++ {
+		entry := Entry{
+			Action:    "auth.refresh_failed",
+			IPAddress: "203.0.113.5",
+			Metadata:  map[string]any{"outcome": "failure"},
+		}
+		if err := repo.Log(ctx, entry); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("expected exactly 1 webhook dispatch for 5 repeated events, got %d", callCount)
+	}
+}
+
+// TestRepository_LogDoesNotThrottleDifferentIPs proves the throttle key is
+// scoped per source IP, so one attacker cannot suppress alerts for everyone.
+func TestRepository_LogDoesNotThrottleDifferentIPs(t *testing.T) {
+	pool, ctx, repo, _ := setupTestDB(t)
+	defer pool.Close()
+
+	var mu sync.Mutex
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	reader := &mockSettingsReader{enabled: true, url: server.URL}
+	repo.SetSettingsReader(reader)
+	repo.SetWebhookClient(http.DefaultClient)
+
+	ips := []string{"203.0.113.1", "203.0.113.2"}
+	for _, ip := range ips {
+		entry := Entry{
+			Action:    "auth.refresh_failed",
+			IPAddress: ip,
+			Metadata:  map[string]any{"outcome": "failure"},
+		}
+		if err := repo.Log(ctx, entry); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if callCount != 2 {
+		t.Fatalf("expected 2 webhook dispatches for 2 distinct IPs, got %d", callCount)
 	}
 }

@@ -6,10 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// webhookThrottleWindow bounds how often a webhook fires for the same
+// IP+action combination. Without it, a flood of identical high-risk events
+// (e.g. repeated failed /auth/refresh attempts from one IP) can exhaust the
+// outbound webhook channel — Slack will rate-limit or disable the endpoint,
+// killing the alerting channel for everything else. (ISSUE_LIST #94)
+const webhookThrottleWindow = time.Minute
 
 type Entry struct {
 	UserID    *string
@@ -42,6 +50,39 @@ type Repository struct {
 	locator       IPLocator
 	settings      SettingsReader
 	webhookClient *http.Client
+
+	webhookThrottleMu sync.Mutex
+	webhookThrottle   map[string]time.Time
+}
+
+// shouldDispatchWebhook reports whether a webhook should fire for this
+// IP+action combination, throttling repeats within webhookThrottleWindow.
+// (ISSUE_LIST #94)
+func (r *Repository) shouldDispatchWebhook(ip, action string) bool {
+	key := ip + "|" + action
+	now := time.Now()
+
+	r.webhookThrottleMu.Lock()
+	defer r.webhookThrottleMu.Unlock()
+
+	if r.webhookThrottle == nil {
+		r.webhookThrottle = make(map[string]time.Time)
+	}
+	if last, ok := r.webhookThrottle[key]; ok && now.Sub(last) < webhookThrottleWindow {
+		return false
+	}
+	r.webhookThrottle[key] = now
+
+	// Opportunistically prune expired entries so the map can't grow unbounded
+	// under many distinct source IPs.
+	if len(r.webhookThrottle) > 1000 {
+		for k, t := range r.webhookThrottle {
+			if now.Sub(t) >= webhookThrottleWindow {
+				delete(r.webhookThrottle, k)
+			}
+		}
+	}
+	return true
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
@@ -147,7 +188,7 @@ func (r *Repository) Log(ctx context.Context, e Entry) error {
 
 	if r.settings != nil && r.settings.GetBool(ctx, "webhook_enabled", false) {
 		url := r.settings.GetString(ctx, "webhook_url", "")
-		if url != "" && isHighRiskEvent(e) {
+		if url != "" && isHighRiskEvent(e) && r.shouldDispatchWebhook(e.IPAddress, e.Action) {
 			go func(entry Entry) {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()

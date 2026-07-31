@@ -3,7 +3,28 @@ package middleware
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/zerotrust/backend/internal/auth"
 )
+
+// RequireUserToken allows the request only for first-party user session
+// tokens, rejecting service-account tokens. Self-service routes (/me,
+// /sessions*, /mfa/*, /webauthn/*) are meaningless for a service account —
+// without this guard a service token can invoke them; writes mostly fail on
+// UUID/FK constraints, but reads (e.g. GET /users/{id}/avatar) do not.
+// (ISSUE_LIST #110) Must be applied after Authenticate.
+func RequireUserToken() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := ClaimsFrom(r.Context())
+			if claims == nil || claims.SubType != auth.SubTypeUser {
+				writeForbidden(w, "forbidden")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // RequireRole allows the request only if the authenticated user holds at least one of the given roles.
 // Must be applied after Authenticate.

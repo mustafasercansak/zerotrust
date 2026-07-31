@@ -572,7 +572,7 @@
     "tabSecurity": "Güvenlik & Oturumlar",
     "tabSystem": "Sistem Ayarları",
     "requireHardwareAttestation": "Donanımsal Güvenlik Anahtarı Zorunluluğu (FIDO2)",
-    "requireHardwareAttestationDesc": "Yalnızca fiziksel güvenlik anahtarlarının kaydedilmesine izin ver (yazılımsal ve tarayıcı geçiş anahtarlarını reddet).",
+    "requireHardwareAttestationDesc": "Yalnızca sertifika tabanlı doğrulama sunan geçiş anahtarlarına izin ver (yazılımsal ve tarayıcı geçiş anahtarlarını reddeder). Bilgilendirme amaçlıdır: doğrulama zincirleri üretici kök sertifikalarına bağlanmadığından kesin bir donanım garantisi değildir.",
     "deviceTrust": "Cihaz Güvenlik Analizi (Device Trust)",
     "deviceTrustDesc": "Erişimi yalnızca izin verilen işletim sistemlerine ve tarayıcı sürümlerine sahip cihazlarla sınırlandırın.",
     "deviceTrustEnabled": "Cihaz Güvenlik Analizini Etkinleştir",

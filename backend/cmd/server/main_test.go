@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -18,10 +19,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/zerotrust/backend/internal/audit"
 	"github.com/zerotrust/backend/internal/serviceaccount"
 	"github.com/zerotrust/backend/internal/testdb"
+	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
+
+// TestMain defaults DEV_MODE=true for the whole test binary (including
+// subprocesses spawned via exec.Command, which inherit os.Environ()), so
+// loadConfig's SMTP_HOST-or-DEV_MODE fail-fast (ISSUE_LIST #90) doesn't
+// require every existing test to configure SMTP. Tests that specifically
+// exercise the fail-fast path override it with t.Setenv("DEV_MODE", "false").
+func TestMain(m *testing.M) {
+	os.Setenv("DEV_MODE", "true")
+	os.Exit(m.Run())
+}
 
 func setIntegrationRedisEnv(t *testing.T) {
 	t.Helper()
@@ -37,6 +52,17 @@ func setIntegrationRedisEnv(t *testing.T) {
 
 	t.Setenv("REDIS_ADDR", addr)
 	t.Setenv("REDIS_PASSWORD", password)
+
+	// Flush leftover rate-limiter counters from other tests in this run. All
+	// of these integration tests bind loopback servers reached from
+	// 127.0.0.1 and share one Redis instance, so IP-keyed limiters (e.g.
+	// /auth/register, /auth/refresh — ISSUE_LIST #92, #94) can otherwise trip
+	// across unrelated tests that happen to run within the same window.
+	rdb := redis.NewClient(&redis.Options{Addr: addr, Password: password})
+	defer rdb.Close()
+	if err := rdb.FlushDB(context.Background()).Err(); err != nil {
+		t.Logf("warning: could not flush test redis before test: %v", err)
+	}
 }
 
 func TestLoadConfig_MFADisabledAllowsMissingOrInvalidKey(t *testing.T) {
@@ -135,6 +161,25 @@ func TestWriteMetricsIncludesAuditWriteFailures(t *testing.T) {
 		t.Fatalf("missing counter type in metrics body: %q", body)
 	}
 	want := "zerotrust_audit_write_failures_total " + strconv.FormatUint(before+1, 10)
+	if !strings.Contains(body, want) {
+		t.Fatalf("metrics body=%q want line containing %q", body, want)
+	}
+}
+
+// TestWriteMetricsIncludesRateLimiterFailOpens proves the rate-limiter
+// fail-open counter (ISSUE_LIST #111) is exposed via /metrics, so a Redis
+// outage that silently disables rate limiting is now observable.
+func TestWriteMetricsIncludesRateLimiterFailOpens(t *testing.T) {
+	before := authmw.FailOpens()
+
+	rr := httptest.NewRecorder()
+	writeMetrics(rr)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "# TYPE zerotrust_ratelimit_fail_opens_total counter") {
+		t.Fatalf("missing counter type in metrics body: %q", body)
+	}
+	want := "zerotrust_ratelimit_fail_opens_total " + strconv.FormatUint(before, 10)
 	if !strings.Contains(body, want) {
 		t.Fatalf("metrics body=%q want line containing %q", body, want)
 	}
@@ -261,7 +306,8 @@ func TestLoadConfig_ConnectionPoolTuning(t *testing.T) {
 func TestLoadConfig_InvalidNumericAndDurationEnv(t *testing.T) {
 	t.Setenv("MFA_ENABLED", "false")
 
-	t.Run("invalid database max conns", func(t *testing.T) {		t.Setenv("DATABASE_MAX_CONNS", "not-int")
+	t.Run("invalid database max conns", func(t *testing.T) {
+		t.Setenv("DATABASE_MAX_CONNS", "not-int")
 		if _, err := loadConfig(); err == nil {
 			t.Fatal("expected invalid DATABASE_MAX_CONNS error")
 		}
@@ -381,6 +427,89 @@ func TestLoadConfig_ParsesBooleanFlagsAndOrigins(t *testing.T) {
 	}
 	if cfg.TrustedProxies != "10.0.0.0/8,192.168.0.0/16" {
 		t.Fatalf("TrustedProxies=%q want=10.0.0.0/8,192.168.0.0/16", cfg.TrustedProxies)
+	}
+}
+
+// TestLoadConfig_RequiresSMTPOutsideDevMode proves loadConfig refuses to start
+// when SMTP_HOST is unset and DEV_MODE is not explicitly enabled, so password
+// reset emails aren't silently reduced to console-only delivery in production.
+// (ISSUE_LIST #90)
+func TestLoadConfig_RequiresSMTPOutsideDevMode(t *testing.T) {
+	t.Setenv("DEV_MODE", "false")
+	t.Setenv("SMTP_HOST", "")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected loadConfig to fail with no SMTP_HOST and DEV_MODE=false")
+	}
+}
+
+func TestLoadConfig_DevModeAllowsMissingSMTP(t *testing.T) {
+	t.Setenv("DEV_MODE", "true")
+	t.Setenv("SMTP_HOST", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if !cfg.DevMode {
+		t.Fatal("DevMode=false want true")
+	}
+	if cfg.SMTPHost != "" {
+		t.Fatalf("SMTPHost=%q want empty", cfg.SMTPHost)
+	}
+}
+
+func TestLoadConfig_SMTPHostConfiguredAllowsDevModeFalse(t *testing.T) {
+	t.Setenv("DEV_MODE", "false")
+	t.Setenv("SMTP_HOST", "smtp.example.com")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@db.example.com:5432/zerotrust?sslmode=require")
+	t.Setenv("REDIS_PASSWORD", "a-strong-redis-password")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.SMTPHost != "smtp.example.com" {
+		t.Fatalf("SMTPHost=%q want smtp.example.com", cfg.SMTPHost)
+	}
+}
+
+// TestLoadConfig_RequiresDatabaseURLOutsideDevMode proves the server refuses
+// to boot against the published default DATABASE_URL when DEV_MODE isn't
+// explicitly set, so a deployment can't silently run with well-known
+// credentials and sslmode=disable. (ISSUE_LIST #91)
+func TestLoadConfig_RequiresDatabaseURLOutsideDevMode(t *testing.T) {
+	t.Setenv("DEV_MODE", "false")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("REDIS_PASSWORD", "a-strong-redis-password")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected loadConfig to fail with no DATABASE_URL and DEV_MODE=false")
+	}
+}
+
+// TestLoadConfig_RequiresRedisPasswordOutsideDevMode mirrors the DATABASE_URL
+// case for REDIS_PASSWORD. (ISSUE_LIST #91)
+func TestLoadConfig_RequiresRedisPasswordOutsideDevMode(t *testing.T) {
+	t.Setenv("DEV_MODE", "false")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@db.example.com:5432/zerotrust?sslmode=require")
+	t.Setenv("REDIS_PASSWORD", "")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected loadConfig to fail with no REDIS_PASSWORD and DEV_MODE=false")
+	}
+}
+
+// TestLoadConfig_DevModeAllowsDefaultDatabaseAndRedis proves DEV_MODE=true
+// keeps the pre-existing local-development defaults working.
+func TestLoadConfig_DevModeAllowsDefaultDatabaseAndRedis(t *testing.T) {
+	t.Setenv("DEV_MODE", "true")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("REDIS_PASSWORD", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.DatabaseURL == "" {
+		t.Fatal("expected a non-empty development default DatabaseURL")
+	}
+	if cfg.RedisPassword == "" {
+		t.Fatal("expected a non-empty development default RedisPassword")
 	}
 }
 
@@ -822,6 +951,217 @@ func TestRun_ServerStartsAndResponds(t *testing.T) {
 	defer metricsResp.Body.Close()
 	if metricsResp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status=%d want=200", metricsResp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+// TestRun_ServiceAccountEventsRequiresAuth proves /admin/service-accounts/events
+// now runs behind the same Authenticate + RequirePermission middleware chain
+// as every other /admin/service-accounts route: no token is rejected with
+// 401, and a token lacking the service_accounts:read permission is rejected
+// with 403. Previously this route sat outside the authenticated group and
+// only checked token signature/expiry + a raw permission string, skipping
+// EvaluateAccess and DPoP verification entirely. (ISSUE_LIST #109)
+// TestRun_ServiceAccountTokenRejectedOnSelfServiceRoutes proves a service
+// account's client-credentials access token — a fully valid, non-expired
+// token — is rejected on self-service routes like GET /me with 403, instead
+// of being processed as if it were a user session. (ISSUE_LIST #110)
+func TestRun_ServiceAccountTokenRejectedOnSelfServiceRoutes(t *testing.T) {
+	dbURL := testdb.URL(t)
+	addr := "127.0.0.1:18773"
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	setIntegrationRedisEnv(t)
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "false")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	base := "http://" + addr
+	plainClient := &http.Client{Timeout: time.Second}
+	var resp *http.Response
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		resp, err = plainClient.Get(base + "/health")
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("server did not become ready: %v", err)
+	}
+	resp.Body.Close()
+
+	// Create the service account directly through the repository — bypassing
+	// the admin HTTP API (which requires step-up MFA) — since this test only
+	// needs a real, valid client-credentials token to probe self-service
+	// routes with.
+	saPool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("connect service-account pool: %v", err)
+	}
+	defer saPool.Close()
+	saRepo := serviceaccount.NewRepository(saPool)
+	sa, clientSecret, err := saRepo.Create(ctx, "self-service-probe", "", []string{"users:read"}, nil)
+	if err != nil {
+		t.Fatalf("create service account: %v", err)
+	}
+
+	tokenBody, _ := json.Marshal(map[string]any{
+		"grant_type":    "client_credentials",
+		"client_id":     sa.ClientID,
+		"client_secret": clientSecret,
+	})
+	tokenResp, err := plainClient.Post(base+"/api/v1/auth/token", "application/json", bytes.NewReader(tokenBody))
+	if err != nil {
+		t.Fatalf("client_credentials token request failed: %v", err)
+	}
+	defer tokenResp.Body.Close()
+	if tokenResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tokenResp.Body)
+		t.Fatalf("client_credentials token status=%d want=%d body=%s", tokenResp.StatusCode, http.StatusOK, body)
+	}
+	var tokenPayload struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenPayload); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if tokenPayload.AccessToken == "" {
+		t.Fatal("expected a non-empty service account access token")
+	}
+
+	meReq, _ := http.NewRequest(http.MethodGet, base+"/api/v1/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+tokenPayload.AccessToken)
+	meResp, err := plainClient.Do(meReq)
+	if err != nil {
+		t.Fatalf("GET /me with service token failed: %v", err)
+	}
+	meResp.Body.Close()
+	if meResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /me with service token status=%d want=%d", meResp.StatusCode, http.StatusForbidden)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+func TestRun_ServiceAccountEventsRequiresAuth(t *testing.T) {
+	dbURL := testdb.URL(t)
+	addr := "127.0.0.1:18772"
+
+	t.Setenv("DATABASE_URL", dbURL)
+	t.Setenv("MIGRATIONS_PATH", "../../migrations")
+	t.Setenv("SERVER_ADDR", addr)
+	setIntegrationRedisEnv(t)
+	t.Setenv("MFA_ENABLED", "false")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("COOKIES_SECURE", "false")
+	t.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	t.Setenv("TLS_ENABLED", "false")
+	t.Setenv("GEOIP_DB_PATH", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- run(ctx, cfg) }()
+
+	client := &http.Client{Timeout: time.Second}
+	base := "http://" + addr
+	var resp *http.Response
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		resp, err = client.Get(base + "/health")
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("server did not become ready: %v", err)
+	}
+	resp.Body.Close()
+
+	// No token at all.
+	noAuthResp, err := client.Get(base + "/api/v1/admin/service-accounts/events")
+	if err != nil {
+		t.Fatalf("request without auth failed: %v", err)
+	}
+	noAuthResp.Body.Close()
+	if noAuthResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no-auth status=%d want=%d", noAuthResp.StatusCode, http.StatusUnauthorized)
+	}
+
+	// Register + login a plain user (no service_accounts:read permission).
+	regBody, _ := json.Marshal(map[string]any{
+		"email": "sa-events-noperm@example.com", "password": "StrongPassword123!", "locale": "en",
+	})
+	regResp, err := client.Post(base+"/api/v1/auth/register", "application/json", bytes.NewReader(regBody))
+	if err != nil {
+		t.Fatalf("register request failed: %v", err)
+	}
+	regResp.Body.Close()
+	if regResp.StatusCode != http.StatusCreated {
+		t.Fatalf("register status=%d want=%d", regResp.StatusCode, http.StatusCreated)
+	}
+
+	jar, _ := cookiejar.New(nil)
+	authedClient := &http.Client{Timeout: time.Second, Jar: jar}
+	loginBody, _ := json.Marshal(map[string]any{
+		"email": "sa-events-noperm@example.com", "password": "StrongPassword123!",
+	})
+	loginResp, err := authedClient.Post(base+"/api/v1/auth/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("login status=%d want=%d", loginResp.StatusCode, http.StatusOK)
+	}
+
+	noPermResp, err := authedClient.Get(base + "/api/v1/admin/service-accounts/events")
+	if err != nil {
+		t.Fatalf("request without permission failed: %v", err)
+	}
+	noPermResp.Body.Close()
+	if noPermResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no-permission status=%d want=%d", noPermResp.StatusCode, http.StatusForbidden)
 	}
 
 	cancel()

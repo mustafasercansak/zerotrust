@@ -47,6 +47,12 @@ services:
       REGISTRATION_ENABLED: "false"
       MFA_ENABLED: ${MFA_ENABLED:-false}
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY}
+      # DEV_MODE relaxes production-only startup guards for local development:
+      # it allows booting with no SMTP_HOST configured (password-reset links
+      # are logged to the console instead of emailed) and permits plaintext
+      # SMTP delivery when a configured server offers no STARTTLS. Set to
+      # "false" and configure real SMTP_* values for any non-local deployment.
+      DEV_MODE: "${DEV_MODE:-true}"
       SMTP_HOST: ""
       SMTP_PORT: "587"
       SMTP_FROM: ""

@@ -61,6 +61,9 @@ func isHighRiskEvent(e Entry) bool {
 		"admin.user.session_revoke":      true,
 		"admin.user.sessions_revoke_all": true,
 		"webauthn.credential_delete":     true,
+		"oidc.client_created":            true,
+		"oidc.client_updated":            true,
+		"oidc.client_deleted":            true,
 	}
 
 	if criticalActions[e.Action] {
@@ -81,15 +84,21 @@ func (r *Repository) TestWebhook(ctx context.Context, url string) error {
 }
 
 // validateWebhookURL rejects URLs that could be used for Server-Side Request
-// Forgery (SSRF). It requires an http/https scheme and ensures the target
-// hostname resolves only to public, non-loopback, non-private addresses.
-func validateWebhookURL(rawURL string) error {
+// Forgery (SSRF). It requires an https scheme — webhook payloads contain user
+// email, IP and security-event details that must not travel in cleartext (#104)
+// — and ensures the target hostname resolves only to public, non-loopback,
+// non-private addresses. Plain http is accepted only when allowInsecure is set
+// (the webhook_allow_insecure setting, intended for local development).
+func validateWebhookURL(rawURL string, allowInsecure bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid webhook URL: %w", err)
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return errors.New("webhook URL scheme must be http or https")
+	if u.Scheme != "https" && !(allowInsecure && u.Scheme == "http") {
+		if allowInsecure {
+			return errors.New("webhook URL scheme must be http or https")
+		}
+		return errors.New("webhook URL scheme must be https (set webhook_allow_insecure for local development)")
 	}
 	hostname := u.Hostname()
 	if hostname == "" {
@@ -145,7 +154,8 @@ func ssrfSafeTransport() *http.Transport {
 func (r *Repository) sendWebhook(ctx context.Context, url string, e Entry) error {
 	// Skip SSRF check only when a test client has been explicitly injected.
 	if r.webhookClient == nil {
-		if err := validateWebhookURL(url); err != nil {
+		allowInsecure := r.settings != nil && r.settings.GetBool(ctx, "webhook_allow_insecure", false)
+		if err := validateWebhookURL(url, allowInsecure); err != nil {
 			return err
 		}
 	}

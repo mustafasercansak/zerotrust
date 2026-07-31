@@ -23,6 +23,11 @@ func withClaims(r *http.Request, userID string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), middleware.ClaimsKey, claims))
 }
 
+func withClaimsRoles(r *http.Request, userID string, roles ...string) *http.Request {
+	claims := &auth.Claims{UserID: userID, Roles: roles}
+	return r.WithContext(context.WithValue(r.Context(), middleware.ClaimsKey, claims))
+}
+
 func TestQueryInt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -101,24 +106,24 @@ func TestToResponseHandlesNilRoles(t *testing.T) {
 }
 
 type mockUserManager struct {
-	listResult          user.ListResult
-	listErr             error
-	registerUser        *user.User
-	registerErr         error
-	updateProfileUser   *user.User
-	updateProfileErr    error
-	setRolesErr         error
-	setActiveErr        error
-	bulkSetActiveErr    error
-	bulkSetActiveIDs    []string
-	bulkSetActiveValue  bool
-	findByIDUser        *user.User
-	findByIDErr         error
-	lastListParams      user.ListParams
-	lastSetRolesID      string
-	lastSetRoles        []string
-	lastSetActiveID     string
-	lastSetActiveValue  bool
+	listResult         user.ListResult
+	listErr            error
+	registerUser       *user.User
+	registerErr        error
+	updateProfileUser  *user.User
+	updateProfileErr   error
+	setRolesErr        error
+	setActiveErr       error
+	bulkSetActiveErr   error
+	bulkSetActiveIDs   []string
+	bulkSetActiveValue bool
+	findByIDUser       *user.User
+	findByIDErr        error
+	lastListParams     user.ListParams
+	lastSetRolesID     string
+	lastSetRoles       []string
+	lastSetActiveID    string
+	lastSetActiveValue bool
 }
 
 func (m *mockUserManager) List(_ context.Context, p user.ListParams) (user.ListResult, error) {
@@ -278,6 +283,7 @@ func TestCreateUserWithMockService_ErrorMapping(t *testing.T) {
 
 			body := `{"email":"mock@example.com","password":"Password1!","roles":["admin"]}`
 			req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+			req = withClaimsRoles(req, "admin-1", "admin")
 			rr := httptest.NewRecorder()
 
 			h.CreateUser(rr, req)
@@ -286,6 +292,53 @@ func TestCreateUserWithMockService_ErrorMapping(t *testing.T) {
 				t.Fatalf("status=%d want=%d", rr.Code, tt.statusCode)
 			}
 		})
+	}
+}
+
+func TestCreateUser_RoleEscalationForbidden(t *testing.T) {
+	mgr := &mockUserManager{registerUser: &user.User{ID: "u1"}}
+	h := NewHandler(mgr, nil, nil, nil)
+
+	body := `{"email":"mock@example.com","password":"Password1!","roles":["admin"]}`
+	req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+	req = withClaimsRoles(req, "svc-1", "users:create")
+	rr := httptest.NewRecorder()
+
+	h.CreateUser(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestCreateUser_NoClaimsCannotGrantAdmin(t *testing.T) {
+	mgr := &mockUserManager{registerUser: &user.User{ID: "u1"}}
+	h := NewHandler(mgr, nil, nil, nil)
+
+	body := `{"email":"mock@example.com","password":"Password1!","roles":["admin"]}`
+	req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+
+	h.CreateUser(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestCreateUser_NonAdminRoleAllowedWithoutAdminClaim(t *testing.T) {
+	mgr := &mockUserManager{registerUser: &user.User{ID: "u1"}}
+	h := NewHandler(mgr, nil, nil, nil)
+
+	body := `{"email":"mock@example.com","password":"Password1!","roles":["user"]}`
+	req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+	req = withClaimsRoles(req, "svc-1", "users:create")
+	rr := httptest.NewRecorder()
+
+	h.CreateUser(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status=%d want=%d", rr.Code, http.StatusCreated)
 	}
 }
 
@@ -343,6 +396,7 @@ func TestUpdateRolesWithMockService(t *testing.T) {
 		h := NewHandler(mgr, nil, nil, nil)
 		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin"]}`))
 		req = withURLParam(req, "id", "u1")
+		req = withClaimsRoles(req, "admin-1", "admin")
 		rr := httptest.NewRecorder()
 		h.UpdateRoles(rr, req)
 		if rr.Code != http.StatusUnprocessableEntity {
@@ -355,6 +409,7 @@ func TestUpdateRolesWithMockService(t *testing.T) {
 		h := NewHandler(mgr, nil, nil, nil)
 		req, _ := http.NewRequest("PATCH", "/api/v1/admin/users/u1/roles", bytes.NewBufferString(`{"roles":["admin","viewer"]}`))
 		req = withURLParam(req, "id", "u1")
+		req = withClaimsRoles(req, "admin-1", "admin")
 		rr := httptest.NewRecorder()
 		h.UpdateRoles(rr, req)
 		if rr.Code != http.StatusNoContent {
@@ -777,4 +832,3 @@ func TestUnlockUser(t *testing.T) {
 		}
 	})
 }
-

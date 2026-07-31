@@ -25,7 +25,7 @@ Variables marked **required** will cause the server to refuse to start if absent
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `DATABASE_URL` | `postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable` | In production | Full libpq connection string. |
+| `DATABASE_URL` | `postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable` | Unless `DEV_MODE=true` | Full libpq connection string. The published local-development default is only used when `DEV_MODE=true` — the server refuses to start with an unset `DATABASE_URL` otherwise, so a deployment can't silently boot against a well-known credential. |
 | `DATABASE_MAX_CONNS` | `20` | No | Maximum connections in the pool. |
 | `DATABASE_MIN_CONNS` | `2` | No | Minimum idle connections kept open. |
 | `DATABASE_CONN_TIMEOUT` | `5s` | No | Go duration string for the connection establish timeout. |
@@ -38,7 +38,7 @@ Variables marked **required** will cause the server to refuse to start if absent
 | Variable | Default | Required | Description |
 |---|---|---|---|
 | `REDIS_ADDR` | `localhost:6379` | In production | `host:port` of the Redis server. |
-| `REDIS_PASSWORD` | `zerotrust_secret` | In production | Redis AUTH password. |
+| `REDIS_PASSWORD` | `zerotrust_secret` | Unless `DEV_MODE=true` | Redis AUTH password. Same fail-fast as `DATABASE_URL` above: the default is only used when `DEV_MODE=true`. |
 | `REDIS_POOL_SIZE` | `10` | No | Maximum number of Redis connections in the pool. |
 
 ---
@@ -83,22 +83,33 @@ When TLS is enabled, the server offers the hybrid post-quantum key exchange **X2
 |---|---|---|---|
 | `MFA_ENABLED` | `false` | No | Set to `true` to enable TOTP multi-factor authentication. |
 | `MFA_ENCRYPTION_KEY` | _(empty)_ | If `MFA_ENABLED=true` | 64 hex characters (32 bytes) used for AES-256-GCM encryption of TOTP secrets at rest. Generate with `openssl rand -hex 32`. |
+| `MFA_ENCRYPTION_KEY_PREVIOUS` | _(empty)_ | No | Optional previous 64-hex-char key, tried only when decrypting with `MFA_ENCRYPTION_KEY` fails. Set this to the old key during a rotation so existing TOTP secrets stay readable; new secrets are always encrypted with the primary key. Remove it once all users have re-enrolled (or re-encrypted) their secrets. |
 
-When `MFA_ENABLED=false`, the `MFA_ENCRYPTION_KEY` variable is ignored even if set.
+When `MFA_ENABLED=false`, the `MFA_ENCRYPTION_KEY` and `MFA_ENCRYPTION_KEY_PREVIOUS` variables are ignored even if set.
 
 ---
 
 ## Email (SMTP)
 
+| Variable | Default | Required | Description |
+|---|---|---|---|
+| `SMTP_HOST` | _(empty)_ | Unless `DEV_MODE=true` | SMTP server hostname. The server refuses to start with no `SMTP_HOST` unless `DEV_MODE=true`, in which case outgoing emails (including password-reset links) are written to stdout as structured log lines (`LogMailer`) instead of delivered — the log line never includes the reset URL/token, only the recipient. |
+| `SMTP_PORT` | `587` | No | SMTP port. `587` uses STARTTLS. |
+| `SMTP_FROM` | `noreply@localhost` | No | Sender address for all outgoing emails. |
+| `SMTP_USER` | _(empty)_ | No | SMTP authentication username. |
+| `SMTP_PASSWORD` | _(empty)_ | No | SMTP authentication password. |
+
+Delivery fails closed unless the connection is TLS: implicit TLS on port `465`, or a verified STARTTLS upgrade on any other port. A server that offers no STARTTLS is rejected — password-reset links are live account-takeover tokens and must never travel in cleartext — unless `DEV_MODE=true`, which permits the plaintext fallback for local SMTP test servers.
+
+Emails (both security alerts and password resets) are sent asynchronously through a bounded queue (capacity 1000, 2 workers) with retry/backoff. Delivery failures are written to the audit log as `auth.security_alert.delivery_failure`. Repeated `POST /auth/forgot-password` requests for the same address are throttled to one send per 5 minutes.
+
+---
+
+## Development Mode
+
 | Variable | Default | Description |
 |---|---|---|
-| `SMTP_HOST` | _(empty)_ | SMTP server hostname. When empty, all outgoing emails are written to stdout as structured log lines (`LogMailer`). |
-| `SMTP_PORT` | `587` | SMTP port. `587` uses STARTTLS. |
-| `SMTP_FROM` | `noreply@localhost` | Sender address for all outgoing emails. |
-| `SMTP_USER` | _(empty)_ | SMTP authentication username. |
-| `SMTP_PASSWORD` | _(empty)_ | SMTP authentication password. |
-
-Emails are sent asynchronously through a bounded queue (capacity 1000, 2 workers). Delivery failures are written to the audit log as `auth.security_alert.delivery_failure`.
+| `DEV_MODE` | `false` | Relaxes production-only startup guards for local development: allows booting with `DATABASE_URL`/`REDIS_PASSWORD` unset (falling back to the published local-dev defaults) and `SMTP_HOST` unset (password-reset links are logged instead of emailed), and permits plaintext SMTP delivery when a configured server offers no STARTTLS. **Never set this to `true` outside local development** — the shipped `infra/docker-compose.yml` example sets it to `true` by default; override it to `false` and configure real `DATABASE_URL`/`REDIS_PASSWORD`/`SMTP_*` values for any non-local deployment. |
 
 ---
 
@@ -174,6 +185,7 @@ WARN BAO_ADDR/VAULT_ADDR not set — secrets client disabled (running without en
 
 Before going to production, verify:
 
+- [ ] `DEV_MODE=false` (or unset) — the shipped docker-compose example defaults it to `true`
 - [ ] `DATABASE_URL` points to a production database with a strong password
 - [ ] `REDIS_PASSWORD` is a strong random secret
 - [ ] `JWT_PRIVATE_KEY_FILE` is set to a persisted signing key (not ephemeral)

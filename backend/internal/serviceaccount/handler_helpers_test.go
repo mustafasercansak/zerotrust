@@ -48,36 +48,6 @@ func TestToResponseFormatsExpiresAt(t *testing.T) {
 	}
 }
 
-func TestEventAccessToken(t *testing.T) {
-	t.Run("prefers cookie", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Authorization", "Bearer header-token")
-		req.AddCookie(&http.Cookie{Name: "access_token", Value: "cookie-token"})
-
-		if got := eventAccessToken(req); got != "cookie-token" {
-			t.Fatalf("token=%q want=cookie-token", got)
-		}
-	})
-
-	t.Run("falls back to bearer token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Authorization", "Bearer header-token")
-
-		if got := eventAccessToken(req); got != "header-token" {
-			t.Fatalf("token=%q want=header-token", got)
-		}
-	})
-
-	t.Run("returns empty for invalid header", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Authorization", "Token header-token")
-
-		if got := eventAccessToken(req); got != "" {
-			t.Fatalf("token=%q want empty", got)
-		}
-	})
-}
-
 func TestWriteErrorAndQueryInt(t *testing.T) {
 	rr := httptest.NewRecorder()
 	writeError(rr, http.StatusForbidden, "forbidden")

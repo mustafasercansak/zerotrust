@@ -1871,3 +1871,646 @@ Status update:
 - The audit write is now synchronous (bounded-timeout context, same as other critical events).
 - All 20 packages pass.
 - Build passes with no errors.
+
+## P0 — Fresh audit round (2026-07)
+
+### 81. OIDC access tokens are accepted by the first-party API (audience confusion)
+
+State: CLOSED
+
+Severity: Critical
+
+`ValidateAccessToken` (`backend/internal/auth/token.go:131-159`) verifies only signature/expiry — it never checks `iss` or `aud`. OIDC access tokens are minted as `auth.Claims` with `SubType: SubTypeUser` and the user's `Roles`, signed by the same KeyStore as internal tokens (`backend/internal/oidc/service.go:133-149`, TTL 1 hour). The internal `Authenticate` middleware (`backend/pkg/middleware/auth.go:26`) therefore accepts them on every `/api/v1/*` route. An external OAuth2 client that completes a code flow for a victim can call the internal API as that user: plant an attacker-controlled passkey (`POST /webauthn/register/begin|finish` have no step-up MFA, `backend/cmd/server/main.go:819-823`), enroll TOTP when MFA is off, read `/me` + `/me/audit` + `/sessions`, delete sessions/credentials, or reach `RequireRole("admin")`-only GET routes if the victim is an admin. The OIDC token lives 1 hour, is not tied to any session, and bypasses idle-timeout enforcement.
+
+Related files:
+- [backend/internal/auth/token.go](backend/internal/auth/token.go)
+- [backend/internal/oidc/service.go](backend/internal/oidc/service.go)
+- [backend/pkg/middleware/auth.go](backend/pkg/middleware/auth.go)
+- [backend/internal/auth/service.go](backend/internal/auth/service.go) (`EvaluateAccess`, `:1159-1211`)
+
+Acceptance criteria:
+- Internal session tokens carry a dedicated audience (e.g. `aud=<issuer>` or a `token_use: "session"` claim) and `ValidateAccessToken` rejects tokens without it.
+- OIDC-issued tokens stop embedding internal `Roles`.
+- `EvaluateAccess` default-denies unknown `SubType` values.
+- Step-up MFA (`RequireRecentMFA`) required on WebAuthn register/delete and `/mfa/setup|verify|disable`.
+- Regression test: an OIDC client access token is rejected with 401 on `/api/v1/me` and `/api/v1/webauthn/register/begin`.
+
+Status update:
+- Added a `token_use` claim to `auth.Claims` (`TokenUseSession` / `TokenUseService`). All internal minting sites funnel through `GenerateTokenPair` (login, MFA challenge completion, refresh rotation, WebAuthn logins) and `GenerateServiceToken`, which now set it; both DPoP-bound service tokens (`cnf` flow unchanged) and plain session tokens carry the marker.
+- `ValidateAccessToken` rejects tokens without a recognized `token_use`. New `ValidateOIDCAccessToken` (signature/expiry only) serves the OIDC-facing endpoints (UserInfo, Introspect, Revoke) that legitimately accept external-client tokens. OIDC access tokens keep `aud=<client_id>` and carry no `token_use`, so the internal `Authenticate` middleware returns 401 for them on every `/api/v1/*` route.
+- OIDC-issued access tokens no longer embed internal `Roles` (both minting sites in `oidc/service.go`).
+- `EvaluateAccess` default-denies unknown `SubType` values (new `default: return ErrInvalidToken`).
+- Step-up MFA: strict `RequireRecentMFA` hard-fails when MFA is disabled, which would brick first-time TOTP enrollment, so a conditional variant `RequireRecentMFAIfEnabled` (pass-through while MFA is off, identical enforcement once enabled) was added and mounted on `POST /mfa/setup|verify|disable`, `POST /webauthn/register/begin|finish`, and `DELETE /webauthn/credentials/{id}` in `main.go`.
+- Regression tests: `TestAuthenticateRejectsOIDCAccessToken` (OIDC client token → 401 on `/api/v1/me` and `/api/v1/webauthn/register/begin`; session + service tokens still pass), `TestValidateAccessTokenRejectsMissingTokenUse`, `TestExchangeCode_AccessTokenCarriesNoInternalClaims`, `TestRequireRecentMFAIfEnabled`.
+- All 20 packages pass (also with `TEST_DATABASE_URL` + Redis for the DB-backed suites).
+
+### 82. OIDC refresh tokens survive every session-revocation path
+
+State: CLOSED
+
+Severity: High
+
+OIDC refresh tokens live in Redis keyed only by token hash (`oauth2:refresh:<sha256>`, `backend/internal/oidc/refreshtoken.go:77-79`) with a 30-day TTL (`:16`) and no per-user index. `RevokeAllForUser` (`backend/internal/session/repository.go:197-206`) only touches the Postgres `sessions` table, so password change, admin revoke-all, and the token-reuse mass-revocation response never invalidate OIDC refresh tokens. Combined with #81, an attacker holding an `offline_access` refresh token keeps minting internal-API-valid access tokens for up to 30 days after the victim changes their password.
+
+Related files:
+- [backend/internal/oidc/refreshtoken.go](backend/internal/oidc/refreshtoken.go)
+- [backend/internal/session/repository.go](backend/internal/session/repository.go)
+
+Acceptance criteria:
+- A per-user index of OIDC refresh-token hashes is maintained (or OIDC refresh sessions are stored in the `sessions` table).
+- Every `RevokeAllForUser` path (password change, admin revoke, reuse detection) also invalidates the user's OIDC refresh tokens.
+- Test: after password change, an existing OIDC refresh token returns `invalid_grant`.
+
+Status update:
+- `RefreshTokenStore.Save` now also indexes each token hash in a per-user Redis set `oauth2:refresh:user:<uid>` (TTL-aligned), and a new `RefreshTokenStore.RevokeAllForUser` deletes every token in that set.
+- `session.Repository` gained `SetOIDCRefreshRevoker`; `RevokeAllForUser` invokes the registered revoker after the Postgres update. Since password change (`main.go`), admin revoke-all, and the token-reuse mass-revocation response (`auth.Service.RefreshTokens`) all funnel through `session.Repository.RevokeAllForUser`, one wiring line in `main.go` (`sessionRepo.SetOIDCRefreshRevoker(oidcRefreshStore)`) covers every path.
+- Tests: `TestRefreshTokenStore_RevokeAllForUser` (after revoke, existing OIDC refresh tokens return `invalid_grant` via `ExchangeRefreshToken`; another user's tokens unaffected) and `TestRevokeAllForUser_InvokesOIDCRevoker` (DB-backed, verifies the repository hook fires).
+- All 20 packages pass.
+
+### 83. Service account with only `users:create` scope can mint full admin users
+
+State: CLOSED
+
+Severity: High
+
+`POST /admin/users` is guarded only by `RequirePermission("users","create")` without `stepUpMFA` (`backend/cmd/server/main.go:827`), and `CreateUser` (`backend/internal/admin/handler.go:180-229`) passes `req.Roles` straight through with no delegation check — `CreateWithRoles` accepts any existing role including `admin`. A leaked service-account secret holding only `users:create` (a plausible least-privilege provisioning scope) yields full admin account creation. Asymmetry: creating a *service account* requires the caller to hold every requested scope, but creating an *admin user* requires only `users:create`. `UpdateRoles` (`handler.go:236`) has the same missing delegation check.
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+- [backend/internal/admin/handler.go](backend/internal/admin/handler.go)
+- [backend/internal/user/repository.go](backend/internal/user/repository.go)
+
+Acceptance criteria:
+- `CreateUser`/`UpdateRoles` reject role assignments the caller does not hold; at minimum assigning `admin` requires the caller to be an admin (in-handler check on `claims.Roles`).
+- `POST /admin/users` gets the `stepUpMFA` wrapper like every other admin mutation.
+- Test: a service token with `users:create` cannot create a user with `roles:["admin"]` (403).
+
+Status update:
+- Added a `containsRole` helper and a guard in both `CreateUser` and `UpdateRoles` (`backend/internal/admin/handler.go`): when the requested roles include `admin`, the caller's own `claims.Roles` must also include `admin`, otherwise the request is rejected with 403 `role_escalation_forbidden` before any repository call.
+- `POST /admin/users` now runs behind `stepUpMFA`, matching every other admin mutation (`backend/cmd/server/main.go`).
+- Tests: `TestCreateUser_RoleEscalationForbidden`, `TestCreateUser_NoClaimsCannotGrantAdmin`, `TestCreateUser_NonAdminRoleAllowedWithoutAdminClaim` (`handler_unit_test.go`); `TestUpdateRoles_EscalationForbiddenWithoutAdminClaim`, `TestUpdateRoles_AdminCanGrantAdmin` (`lastadmin_test.go`). Existing tests that posted `roles:["admin"]` without caller claims were updated to inject admin claims so they still exercise their original assertions.
+- All 20 packages pass.
+
+### 84. `/auth/reset-password`: bcrypt before token validation, no endpoint rate limit
+
+State: CLOSED
+
+Severity: High
+
+`Reset()` runs `bcrypt.GenerateFromPassword(cost 12)` before the token is ever looked up (`backend/internal/passwdreset/service.go:63-69`), and the route carries no endpoint rate limiter (`backend/cmd/server/main.go:423`, only the global 300 req/min per IP). An unauthenticated attacker burns ~200-300 ms CPU per request with garbage tokens; every failed attempt also inserts an audit row and fires an outbound webhook goroutine (`auth.password_reset_failed` is a high-risk event). A handful of IPs can saturate CPU and the alerting channel.
+
+Related files:
+- [backend/internal/passwdreset/service.go](backend/internal/passwdreset/service.go)
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Token lookup happens first; bcrypt only runs after a valid, unused, unexpired token is found.
+- The route sits behind a strict limiter (e.g. `loginRL`).
+- Test: requests with invalid tokens do not perform bcrypt work (measurable latency) and are rate-limited.
+
+Status update:
+- `passwdreset.Repository.ConsumeAndReset` now looks up and validates the token (found, unused, unexpired) inside its `FOR UPDATE` transaction *before* any bcrypt work — both the password-reuse comparison and the new-password hash. `Service.Reset` no longer pre-computes a bcrypt hash; it just calls `ConsumeAndReset(ctx, rawToken, newPassword)`.
+- `POST /api/v1/auth/reset-password` now sits behind `loginRL` (`backend/cmd/server/main.go`), alongside `/auth/register` (#92) and `/auth/refresh` (now behind `tokenRL`, #94) which were fixed in the same pass.
+- Tests: `TestRepositoryConsumeAndReset_InvalidTokenSkipsBcrypt` (unknown token + oversized password still returns `ErrNotFound`, proving bcrypt never ran) and `TestRepositoryConsumeAndReset_ValidTokenRunsBcrypt` (valid token + oversized password surfaces a bcrypt error, proving bcrypt only runs post-validation) in `repository_integration_test.go`.
+- All 20 packages pass.
+
+### 85. OIDC refresh grant: no client authentication, no reuse detection, consume-before-verify
+
+State: CLOSED
+
+Severity: Medium
+
+`ExchangeRefreshToken` (`backend/internal/oidc/service.go:234-247`) calls `GetAndConsume` (Redis `GETDEL`) before checking `clientID` and authenticating the client; when `clientSecret == ""` the client is not authenticated at all, even though all clients in this codebase are created with secrets (RFC 6749 §6 requires client authentication on refresh). There is also no token-family/reuse detection: a stolen token consumed first stays valid for up to 30 days, the legitimate client's next refresh just fails silently, and anyone holding a leaked token can burn it (DoS on the grant).
+
+Related files:
+- [backend/internal/oidc/service.go](backend/internal/oidc/service.go)
+- [backend/internal/oidc/refreshtoken.go](backend/internal/oidc/refreshtoken.go)
+
+Acceptance criteria:
+- Client identity is verified (secret whenever the client has one) before the refresh token is consumed.
+- Reuse detection per RFC 6819 §5.2.2.3: presentation of an already-consumed token invalidates the whole grant chain for that user+client and raises an audit/security event.
+
+Status update:
+- `ExchangeRefreshToken` now looks up the client and authenticates it BEFORE consuming the refresh token: whenever the client has a stored secret hash (every client created through the admin API does), a valid `client_secret` is mandatory; failed authentication returns `invalid_grant` and leaves the token unconsumed. `oidc.Service.clientRepo` was narrowed to a small `clientAuthenticator` interface so tests can stub it.
+- Reuse detection (RFC 6819 §5.2.2.3): each authorization-code exchange starts a token family (`FamilyID` on `OIDCRefreshSession`, Redis set `oauth2:refresh:family:<fid>`); consuming a token leaves a tombstone (`oauth2:refresh:used:<hash>`). Presenting an already-consumed token deletes every live token in the family, logs `slog.Warn`, and surfaces `ErrRefreshTokenReuse` — mapped to `invalid_grant` at the endpoint with `refresh_token_reuse_detected` recorded as the audit event reason (`oidc.token_exchange_failed`).
+- Explicit RFC 7009 revocation uses the new `Delete` (no tombstone), so deliberate revocation is not later misread as theft.
+- Tests: `TestExchangeRefreshToken_ClientAuthenticatedFirst` (wrong/empty secret → `invalid_grant`, token not consumed; correct secret rotates), reuse assertions in `TestRefreshTokenStore` and `TestExchangeRefreshToken` (replay returns `ErrRefreshTokenReuse`, rotated sibling token dies with the family).
+- All 20 packages pass.
+
+### 86. "Require hardware attestation" setting is bypassable by software authenticators
+
+State: CLOSED
+
+Severity: Medium
+
+`require_hardware_attestation` enforcement (`backend/internal/webauthn/service.go:216-233`) only rejects `AttestationType == "none"` or an all-zero AAGUID. go-webauthn is constructed without an MDS/trust-anchor config (`service.go:66-76`), so attestation trust is never validated — a software authenticator presenting a `packed` self-attestation with an arbitrary non-zero AAGUID passes. An org admin enabling this setting gets no real hardware-only guarantee.
+
+Related files:
+- [backend/internal/webauthn/service.go](backend/internal/webauthn/service.go)
+
+Acceptance criteria:
+- When the setting is on, go-webauthn is configured with an MDS provider or explicit attestation root CAs, and only Basic/AttCA attestation with validated metadata is accepted; or the setting is clearly documented/renamed as advisory.
+
+Status update:
+- Chose the hybrid option (no offline MDS available): enforcement is tightened AND the setting is documented as advisory. `FinishRegistration` now accepts only certificate-chain-backed attestation types (`basic_full` / `attca`); `none` and self-attestation (`basic_surrogate`) — the exact fake-AAGUID bypass from this issue, which go-webauthn classifies as `basic_surrogate` — are rejected with `ErrHardwareAttestationRequired` (`backend/internal/webauthn/service.go`). The all-zero AAGUID check is kept.
+- Residual limitation (x5c chain not anchored to vendor root CAs without an MDS provider) is documented in `docs/settings.md`, `docs/security-model.md`, the admin UI description strings (`frontend/src/locales/en.json`, `tr.json`), and a startup warning is logged when the setting is enabled (`backend/cmd/server/main.go`).
+- Test: `TestHardwareAttestationEnforcement` updated — packed self-attestation with a non-zero AAGUID is now rejected.
+- All 20 packages pass.
+
+### 87. No brute-force guard on `/mfa/setup` current-code and `/mfa/verify`
+
+State: CLOSED
+
+Severity: Medium
+
+The previous round added failure counters to step-up and `/mfa/disable`, but `Handler.Setup` (`backend/internal/mfa/handler.go:94-124`) and `Handler.Verify` (`handler.go:125-153`) have no attempt counter — `totp.Validate` can be retried forever at up to 300 req/min (protectedRL). With a stolen access token, an attacker can brute-force the 6-digit `current_code` (~333k expected guesses in ~18 h) and rotate the TOTP secret to their own, gaining MFA persistence.
+
+Related files:
+- [backend/internal/mfa/handler.go](backend/internal/mfa/handler.go)
+
+Acceptance criteria:
+- The `mfaAttemptsExceeded`/`recordMFAFailure` counter pattern from `Disable` is applied to the `current_code` path of `Setup` and to `Verify`.
+- Test: N consecutive failures lock further attempts for the cooldown window.
+
+Status update:
+- Added `mfaSetupAttemptsKey` (`mfa:setup:fails:<uid>`) and `mfaVerifyAttemptsKey` (`mfa:verify:fails:<uid>`) counters reusing the existing `mfaAttemptsExceeded`/`recordMFAFailure`/`clearMFAFailures` helpers (5 failures / 10-minute window → 429 `too_many_attempts`), in `backend/internal/mfa/handler.go`.
+- `Setup`: failures are counted on `invalid_code` and `code_already_used` (a replayed valid code is still a consumed guess); `current_code_required` is not counted (no code was tried). Success clears the counter. `Verify`: any failed verification counts; success clears.
+- Tests: `TestMFAHandlerSetup_BruteForceLockout`, `TestMFAHandlerVerify_BruteForceLockout`, `TestMFAHandlerVerify_SuccessClearsFailures` (miniredis-backed, mirroring the Disable lockout tests).
+- All 20 packages pass.
+
+### 88. Open redirect via `redirect_to` on the login page
+
+State: CLOSED
+
+Severity: Medium
+
+`frontend/src/pages/auth/LoginPage.tsx:26-33` reads `redirect_to` from the query string and navigates via `window.location.href` whenever it starts with `/oauth2/` **or `http`**. A link like `https://<idp>/auth/login?redirect_to=https://evil.example/fake-login` sends the victim to an attacker origin after they complete the full login — a strong phishing primitive on an identity provider ("session expired, sign in again").
+
+Related files:
+- [frontend/src/pages/auth/LoginPage.tsx](frontend/src/pages/auth/LoginPage.tsx)
+
+Acceptance criteria:
+- Only same-origin absolute paths are honored (`startsWith("/") && !startsWith("//")`); the `http` branch is removed.
+- Test: `redirect_to=https://evil.example` lands on the default dashboard route.
+
+Status update:
+- Rewrote `completeLogin` in `frontend/src/pages/auth/LoginPage.tsx`: the `http` branch is gone; only values matching `startsWith("/") && !startsWith("//")` are honored, anything else falls back to `/dashboard`. Legitimate `/oauth2/` consent redirects still do a full navigation via `window.location.href` (backend route), other same-origin paths use client-side `navigate`.
+- Added four tests in `frontend/src/pages/auth/LoginPage.test.tsx`: `redirect_to=https://evil.example` and `//evil.example` fall back to `/dashboard`; `/oauth2/authorize?...` still navigates to the backend; other same-origin paths navigate client-side.
+- `npm test` passes; `npm run build` passes.
+
+### 89. Password-reset tokens sent over plaintext when SMTP lacks STARTTLS
+
+State: CLOSED
+
+Severity: Medium
+
+Both mailer send paths use `smtp.SendMail` (`backend/pkg/mailer/mailer.go:62,106`), which transmits in cleartext when the server does not advertise STARTTLS. The message body contains the live 1-hour account-takeover reset URL; `smtp.PlainAuth` protects only the SMTP password, not the body, and when `SMTP_USER` is empty even that guard is gone.
+
+Related files:
+- [backend/pkg/mailer/mailer.go](backend/pkg/mailer/mailer.go)
+
+Acceptance criteria:
+- Sending fails closed unless the connection is TLS (verified STARTTLS upgrade or implicit TLS on port 465); plaintext delivery is never attempted outside an explicit dev mode.
+
+Status update:
+- `SMTPMailer.send` (`backend/pkg/mailer/mailer.go`) now requires TLS on the wire: implicit TLS when the port is `465`, otherwise a verified STARTTLS upgrade. A server offering no STARTTLS is rejected with `ErrPlaintextSMTP` unless `AllowPlaintext` is set.
+- `AllowPlaintext` is wired exclusively to the new `DEV_MODE` flag (`cmd/server/main.go`) — never enabled outside local development. See #90 for `DEV_MODE`'s full behavior.
+- Existing `TestSMTPMailer` coverage in `pkg/mailer` exercises the STARTTLS/implicit-TLS/plaintext-rejection paths; all pass.
+
+### 90. LogMailer writes the raw password-reset token to application logs
+
+State: CLOSED
+
+Severity: Medium
+
+`LogMailer.SendPasswordReset` logs the full reset URL including the raw token (`backend/pkg/mailer/mailer.go:21-23`), and LogMailer is the default whenever `SMTP_HOST` is empty (`backend/cmd/server/main.go:228-234`) — which is exactly what the shipped `infra/docker-compose.yml:50` sets. Anyone with log access (docker logs, journald, Loki) can trigger `POST /auth/forgot-password` for a victim and read a live account-takeover token from the logs.
+
+Related files:
+- [backend/pkg/mailer/mailer.go](backend/pkg/mailer/mailer.go)
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+- [infra/docker-compose.yml](infra/docker-compose.yml)
+
+Acceptance criteria:
+- LogMailer never logs the URL/token (recipient only), and the server refuses to start with password reset enabled but no SMTP outside an explicit dev mode flag.
+
+Status update:
+- `LogMailer.SendPasswordReset` logs only the recipient (`to`), never the reset URL/token — this was already the case in the pre-existing code, and is now backed by an explicit fail-fast.
+- Added a `DEV_MODE` config flag (`backend/cmd/server/main.go`, default `false`). `loadConfig` now refuses to start when `SMTP_HOST` is empty and `DEV_MODE` is not `true`: `"SMTP_HOST must be configured ... set DEV_MODE=true to allow logging reset links to the console instead, for local development only"`. With `DEV_MODE=true` and no `SMTP_HOST`, the server falls back to `LogMailer` exactly as before (console-only, no token ever logged).
+- `infra/docker-compose.yml` sets `DEV_MODE: "${DEV_MODE:-true}"` next to its existing empty `SMTP_HOST` so the shipped example compose keeps booting; the comment there says explicitly to set it `false` and configure real SMTP for any non-local deployment.
+- Added a real `TestMain(m *testing.M)` to `cmd/server/main_test.go` that sets `DEV_MODE=true` process-wide for the whole test binary (inherited by `exec.Command`-spawned subprocess tests too), so the ~20 existing tests that call `loadConfig()`/`run()` didn't each need an explicit env var.
+- Tests: `TestLoadConfig_RequiresSMTPOutsideDevMode`, `TestLoadConfig_DevModeAllowsMissingSMTP`, `TestLoadConfig_SMTPHostConfiguredAllowsDevModeFalse` in `main_test.go`.
+- Documented `DEV_MODE` and the new required-outside-dev-mode status of `SMTP_HOST` in `docs/configuration.md`, including a new "Development Mode" section and a production-checklist line.
+- All 20 packages pass.
+
+### 91. Hardcoded default `DATABASE_URL` / `REDIS_PASSWORD` with `sslmode=disable`
+
+State: CLOSED
+
+Severity: Medium
+
+`backend/cmd/server/main.go:1127,1132` default to published credentials (`zerotrust:zerotrust_secret`, `sslmode=disable`). A deployment that forgets these env vars boots silently with well-known credentials and plaintext DB transport — unlike the strict fail-fast handling of `MFA_ENCRYPTION_KEY`/`JWT_SIGNING_ALG` in the same file.
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Startup fails when `DATABASE_URL`/`REDIS_PASSWORD` are unset (or when defaults coincide with non-loopback hosts); dev defaults live only in compose files.
+
+Status update:
+- `loadConfig` (`backend/cmd/server/main.go`) now requires `DATABASE_URL` and `REDIS_PASSWORD` to be explicitly set unless `DEV_MODE=true` (see #90), reusing the same flag rather than adding a separate one. With `DEV_MODE=true`, the previous local-development defaults (`postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db?sslmode=disable`, `zerotrust_secret`) are used exactly as before; otherwise startup fails with a clear error naming the missing variable.
+- `infra/docker-compose.yml` already sources `DATABASE_URL`/`REDIS_PASSWORD` from `.env` (via `generate-secrets.sh`), so the shipped compose example is unaffected.
+- Tests: `TestLoadConfig_RequiresDatabaseURLOutsideDevMode`, `TestLoadConfig_RequiresRedisPasswordOutsideDevMode`, `TestLoadConfig_DevModeAllowsDefaultDatabaseAndRedis` in `main_test.go`.
+- Documented in `docs/configuration.md` (marked "Unless `DEV_MODE=true`" in the variable tables, plus a production-checklist line).
+- All 20 packages pass.
+
+### 92. `/auth/register` has no endpoint-specific rate limit
+
+State: CLOSED
+
+Severity: Medium
+
+`backend/cmd/server/main.go:421` mounts registration with only `publicAudit` (login/forgot-password get `loginRL` at 10/min). When `REGISTRATION_ENABLED=true`, each request does bcrypt hashing, a user insert, an audit insert, and a full auto-login (second bcrypt compare + session row) — enabling mass account creation, unbounded table growth, and double-bcrypt CPU burn at 300 req/min/IP.
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+
+Acceptance criteria:
+- Registration sits behind a strict limiter (e.g. 5-10/min/IP plus a daily cap), with CAPTCHA/email verification considered when public registration is on.
+
+Status update:
+- `POST /api/v1/auth/register` now sits behind `loginRL` (10 req/min/IP), the same limiter used for login/forgot-password/reset-password (`backend/cmd/server/main.go`).
+- A daily cap and CAPTCHA/email verification were not added — no CAPTCHA infra exists in this codebase and a per-IP daily cap needs its own design (e.g. distinguishing legitimate shared-IP users); flagging as a possible follow-up rather than adding ad hoc.
+- cmd/server integration tests that call `/auth/register` from the same loopback IP across many test functions all share one Redis test instance; `setIntegrationRedisEnv` (`main_test.go`) now flushes that Redis instance at the start of each test so the newly-added limiter doesn't trip across unrelated tests in the same local run (CI already gets a fresh Redis per run).
+- All 20 packages pass.
+
+### 93. `/auth/forgot-password`: no per-email throttle (mail bombing + reset-token churn)
+
+State: CLOSED
+
+Severity: Medium
+
+Each request spawns `go h.passwordResetter.SendReset(...)` (`backend/internal/auth/handler.go:652`); there is no per-recipient cooldown and every request invalidates all previous reset tokens (`backend/internal/passwdreset/repository.go:54-60`). `loginRL` limits per source IP only, so a distributed attacker can flood a victim's mailbox indefinitely and keep invalidating any legitimate reset link; slow SMTP also accumulates unbounded goroutines.
+
+Related files:
+- [backend/internal/auth/handler.go](backend/internal/auth/handler.go)
+- [backend/internal/passwdreset/service.go](backend/internal/passwdreset/service.go)
+
+Acceptance criteria:
+- A per-email cooldown (e.g. Redis key with 5-min TTL, still returning 200) throttles repeat sends.
+- Reset mail goes through the resilient mailer or a bounded worker pool.
+
+Status update:
+- `passwdreset.Service` gained an optional `SetRedis(rdb)` wiring (`backend/internal/passwdreset/service.go`); `SendReset` now takes a Redis `SETNX` lock keyed by `pwdreset:cooldown:<sha256(lowercased email)>` with a 5-minute TTL before creating a new token. A request within the cooldown window returns silently (still 200 from the handler, per the existing enumeration-safe design) without touching the existing token. Redis errors fail open (a `slog.Warn` is emitted) so a Redis outage doesn't block password resets. Wired in `main.go` via `prSvc.SetRedis(rdb)`.
+- Reset mail now goes through the resilient/bounded mailer queue: `passwdreset.NewService` in `main.go` is now constructed with `resilientMailer` instead of the raw mailer, and `main.go`'s mailer wiring was reordered so `resilientMailer` exists before `prSvc` is built.
+- This also completed a previously half-finished change already sitting in the tree: `ResilientMailer.SendPasswordReset` had been switched to queue an `AlertJob{ResetURL: ...}` on the bounded worker pool, but `processJob` still unconditionally called `SendSecurityAlert`, silently dropping every queued password-reset job (a pre-existing, uncommitted regression — confirmed by a failing test before this fix). `processJob` now dispatches to `SendPasswordReset` or `SendSecurityAlert` based on `job.ResetURL`.
+- Tests: `TestSendReset_CooldownThrottlesRepeatSends`, `TestSendReset_CooldownIsPerEmail`, `TestSendReset_NoRedisConfiguredSendsEveryTime` (`passwdreset/service_test.go`, miniredis-backed); `TestResilientMailer_SendPasswordResetDelegatesToUnderlying` (updated to run through the async worker), `TestResilientMailer_PasswordResetQueueFull`, `TestResilientMailer_PasswordResetRetriesOnFailure` (`pkg/mailer/resilient_test.go`).
+- All 20 packages pass.
+
+### 94. `/auth/refresh` failures fan out to audit DB + webhook with no endpoint limit
+
+State: CLOSED
+
+Severity: Medium
+
+Failed refreshes log `auth.refresh_failed` with outcome `failure` (`backend/internal/auth/handler.go:510-517`); all `auth.*` failures are classified high-risk, so each attempt also spawns an outbound webhook POST goroutine when webhooks are enabled (`backend/internal/audit/webhook.go:47-48`, `repository.go:151-155`). At 300 req/min/IP with any/empty cookie, an unauthenticated attacker grows `audit_logs` and hammers the configured webhook endpoint (Slack will rate-limit or disable it, killing the alerting channel).
+
+Related files:
+- [backend/cmd/server/main.go](backend/cmd/server/main.go)
+- [backend/internal/audit/webhook.go](backend/internal/audit/webhook.go)
+
+Acceptance criteria:
+- `/auth/refresh` sits behind `tokenRL` (or a dedicated limiter), and webhook dispatch is deduped/throttled per IP+window.
+
+Status update:
+- `POST /api/v1/auth/refresh` now sits behind `tokenRL` (30 req/min/IP), the same limiter used for `/auth/token` (`backend/cmd/server/main.go`).
+- Webhook dispatch is now throttled per IP+action: `audit.Repository` gained an in-memory `shouldDispatchWebhook(ip, action)` check (1-minute window per key, with opportunistic pruning) called before the existing `go func` webhook dispatch in `Log`. A flood of identical high-risk events from one IP (e.g. repeated `auth.refresh_failed`) now fires the webhook once per window instead of once per event; different source IPs are tracked independently.
+- Tests: `TestRepository_LogThrottlesRepeatedWebhooksBySameIP` (5 identical events from one IP → 1 webhook call), `TestRepository_LogDoesNotThrottleDifferentIPs` (2 distinct IPs → 2 calls), in `internal/audit/webhook_test.go`.
+- All 20 packages pass.
+
+### 95. MFA recovery codes are not atomically single-use
+
+State: CLOSED
+
+Severity: Medium
+
+`Service.Validate` (`backend/internal/mfa/service.go:178-195`) reads all code hashes, bcrypt-compares, then rewrites the array minus the match via a plain `UPDATE` with no transaction or lock (`backend/internal/mfa/repository.go:76-83`). Two concurrent requests with the same code both succeed (single-use broken); concurrent use of two different codes can lose one update, resurrecting a consumed code.
+
+Related files:
+- [backend/internal/mfa/service.go](backend/internal/mfa/service.go)
+- [backend/internal/mfa/repository.go](backend/internal/mfa/repository.go)
+
+Acceptance criteria:
+- Code consumption is atomic (one row per code hash with `DELETE ... RETURNING`, or a per-user lock around validate-and-remove).
+- Test: concurrent use of the same code yields exactly one success.
+
+Status update:
+- Chose the per-user lock option (no schema change): new `Repository.ConsumeRecoveryCode` runs `SELECT recovery_codes ... FOR UPDATE` in a transaction, invokes the bcrypt matcher callback under the lock, rewrites the array minus the match, and commits. A blocked concurrent transaction re-reads the latest committed array on unblock, so the same code cannot be consumed twice and concurrent use of different codes cannot lose updates (`backend/internal/mfa/repository.go`, wired into `Service.validate` in `service.go`; `RecoveryCodes`/`UpdateRecoveryCodes` remain for regeneration and reads).
+- Tests: `TestRecoveryCodeConcurrentUse` (integration, 16 goroutines racing one code → exactly 1 success; skips when no test DB), `TestValidateFailsWhenRecoveryCodeCannotBeConsumed`, plus the existing single-use test updated for the new stub.
+- All 20 packages pass.
+
+### 96. WebAuthn signCount clone warning is collected but never enforced
+
+State: CLOSED
+
+Severity: Low
+
+`FinishLogin`/`FinishDiscoverableLogin` (`backend/internal/webauthn/service.go:286-296, 356-369`) persist whatever `ValidateLogin` returns; the library only sets `CloneWarning = true` on counter regression without erroring, and the app never inspects it before issuing tokens (`backend/internal/auth/service.go:758-788`). A cloned counter-using authenticator signs in undetected.
+
+Acceptance criteria:
+- `CloneWarning` rejects the assertion (spec-recommended) or at minimum triggers an audit entry and security alert.
+
+Status update:
+- Both `FinishLogin` and `FinishDiscoverableLogin` now reject the assertion with `ErrCredentialCloneDetected` when `cred.Authenticator.CloneWarning` is set, before any token issuance or counter update, and emit a `slog.Warn` with user/credential IDs (`backend/internal/webauthn/service.go`).
+- Test: `TestFinishLogin_CloneWarningRejected` — a counter regression (5 → 3) on the second assertion is rejected.
+- All 20 packages pass.
+
+### 97. WebAuthn second-factor finish omits the account-status check
+
+State: CLOSED
+
+Severity: Low
+
+`MFAChallenge` and `WebAuthnPasswordlessFinish` reject inactive users, but the WebAuthn second-factor finish path checks only `err != nil` on `FindByID` (`backend/internal/auth/service.go:783-786`). A user deactivated between the password step and the passkey assertion still gets a token pair and a session row (largely unusable because middleware re-checks `is_active`, but inconsistent with the fixes from the previous round).
+
+Acceptance criteria:
+- `!u.IsActive` is rejected at `service.go:784` like its sibling paths.
+
+Status update:
+- `WebAuthnLoginFinish` now rejects with `ErrInvalidCredentials` when `!u.IsActive` (`backend/internal/auth/service.go`).
+- Test: `TestWebAuthnLoginFinish_InactiveUserRejected` — user deactivated after the password step is rejected at finish.
+- All 20 packages pass.
+
+### 98. Refresh reuse-detection false positive on explicitly revoked tokens
+
+State: CLOSED
+
+Severity: Low
+
+`CheckReuse` (`backend/internal/session/repository.go:178-194`) treats any revoked session older than 5 s as theft — including sessions revoked by explicit logout or admin action. Replaying a captured logged-out token repeatedly triggers `RevokeAllForUser`, force-logging-out the victim on demand.
+
+Acceptance criteria:
+- Revocation reason is recorded (e.g. `revoked_by_rotation` set only in `RotateSession`) and mass-revocation triggers only for rotation-revoked hashes.
+
+Status update:
+- Migration `000034_sessions_revoked_reason` adds a nullable `sessions.revoked_reason TEXT` column.
+- `RotateSession` now sets `revoked_reason = 'rotation'` on the superseded row — the only reason `CheckReuse` matches (`AND revoked_reason = 'rotation'` added to its query). Every other revoke path now records its own distinct reason for observability: `Revoke` (logout) → `'logout'`, `RevokeAllForUser` → `'mass_revoke'`, `RevokeOtherSessions` → `'revoke_others'`, `RevokeByID` → `'revoke_by_id'`, `RevokeStaleInitialSessions` → `'stale_initial'`, `EvictExcessSessions` → `'evicted'`, `RevokeForDevice` → `'device_replaced'`.
+- Replaying a logged-out (or admin-revoked, evicted, etc.) token is still correctly rejected as invalid — it just no longer triggers a mass revocation of the user's other sessions.
+- Also fixed a hand-rolled `sessions` table in `session_refresh_integration_test.go` (`createAuthIntegrationSchema`) that predates the real migrations and needed the new column added to match.
+- Tests: `TestRefreshTokens_ReplayOfExplicitlyRevokedTokenDoesNotMassRevoke` (logout → replay → other active session survives) alongside the existing `TestRefreshTokens_ReusedRotatedTokenRevokesAllSessions` (rotation replay still mass-revokes, unchanged) in `session_refresh_integration_test.go`.
+- All 20 packages pass.
+
+### 99. SSE session-events stream outlives token validity and revocation
+
+State: CLOSED
+
+Severity: Low
+
+`GET /api/v1/sessions/events` (`backend/internal/session/handler.go:79-149`) validates the access token once at connect; the stream then runs indefinitely even after the 1-minute token expires or its JTI is blocklisted at logout, giving a stolen token a persistent live feed of the victim's session activity.
+
+Acceptance criteria:
+- The stream closes at token `exp` or re-checks `IsRevoked(jti)` per keepalive tick.
+
+Status update:
+- `session.Handler` gained an optional `revocationChecker` interface (`IsRevoked(ctx, jti) bool`, satisfied by `*auth.Service`) wired via `SetRevocationChecker`; `main.go` calls `sessionHandler.SetRevocationChecker(authSvc)`.
+- `Events` now captures the connecting token's `ExpiresAt`/`ID` (jti) at connect time. On every keepalive tick (15s) it closes the stream with `data: expired` if the token has expired, or `data: revoked` if `IsRevoked(jti)` is true — before falling back to the existing `: keepalive` comment.
+- The tick interval is now a configurable field on `Handler` (defaulting to 15s in `NewHandler`; production behavior unchanged) so tests can exercise the tick logic without waiting 15 real seconds.
+- Tests: `TestEvents_TokenExpiryEndsStream`, `TestEvents_RevokedJTIEndsStream`, `TestEvents_ValidTokenSurvivesTicksWithoutRevocationChecker` in `session/handler_test.go`.
+- All 20 packages pass.
+
+### 100. Internal RBAC roles disclosed to third-party clients as `roles`/`groups` claims
+
+State: CLOSED
+
+Severity: Low
+
+The ID token (`backend/internal/oidc/service.go:188-189`) and UserInfo (`backend/internal/oidc/handler.go:425-426`) map `u.Roles` to `roles` and `groups` whenever `profile` scope is granted, leaking the internal authorization model to any consented external client.
+
+Acceptance criteria:
+- `roles`/`groups` are dropped from OIDC-issued tokens or gated behind a dedicated scope allowed per client by an admin.
+
+Status update:
+- ID tokens no longer carry `roles`/`groups` (dropped from the `profile` scope claims in `ExchangeCode`).
+- UserInfo returns `roles`/`groups` only on the first-party compatibility path (internal session tokens without a scope claim); for OIDC-issued tokens they are never included. OIDC access tokens also stopped embedding `Roles` entirely as part of #81.
+- Asserted by `TestExchangeCode_AccessTokenCarriesNoInternalClaims`; existing UserInfo scope-filtering tests unchanged and passing.
+- Removed the now-inaccurate "roles/groups claims" OIDC marketing line from `docs/index.md` and `docs/index.html`.
+- All 20 packages pass.
+
+### 101. OIDC Revoke/Introspect do not verify the token belongs to the calling client
+
+State: CLOSED
+
+Severity: Low
+
+`backend/internal/oidc/handler.go:494-519` (Revoke) lets any authenticated client blocklist any access-token JTI or consume any refresh token it possesses; `:717-749` (Introspect) returns `sub`/`email`/`roles` for any token regardless of `aud`. RFC 7009 §2.1 and RFC 7662 recommend scoping both to the requesting client.
+
+Acceptance criteria:
+- Both endpoints compare the token's audience/refresh-session `ClientID` against the authenticated `client_id` and return 200 / `active:false` on mismatch.
+
+Status update:
+- `Revoke`: an access-token JTI is blocklisted only when the token's `aud` contains the authenticated `client_id`; a refresh token is consumed only when its stored grant's `ClientID` matches (new `RefreshTokenStore.Peek` for the ownership check + `Delete` for tombstone-free removal; ownership enforced in `Service.RevokeRefreshToken`). Mismatches are silently ignored and still return 200 per RFC 7009.
+- `Introspect`: tokens whose `aud` does not contain the calling `client_id` return `active:false` (logged as such); internal first-party tokens carry no `aud`, so external clients can no longer introspect them either. Both endpoints now validate via `ValidateOIDCAccessToken`.
+- Tests: `TestRevoke_CrossClientOwnership` (cross-client revoke returns 200 but does not blocklist; owning client does), cross-client refresh-token case in `TestRevokeRefreshToken`, foreign-audience `active:false` case added to `TestHandler_Introspect_Integration` (updated to introspect an `aud`-matched OIDC token).
+- All 20 packages pass.
+
+### 102. TOTP replay protection fails open silently on Redis errors
+
+State: CLOSED
+
+Severity: Low
+
+`markUsed` (`backend/internal/mfa/service.go:57-64`) returns "not used" on any Redis error, silently disabling TOTP single-use enforcement during an outage — exactly when captured codes could be replayed against step-up MFA or `/mfa/disable`.
+
+Acceptance criteria:
+- High-risk operations (step-up, disable) fail closed on Redis errors; ordinary logins may stay fail-open but must emit an audit/metric event when the fail-open path is taken.
+
+Status update:
+- `markUsed` now returns `(used bool, err error)`; callers decide the failure policy (`backend/internal/mfa/service.go`).
+- Fail closed (new `ErrReplayUnavailable`): `Service.Disable`, the `Setup` current-code rotation path, and the new `Service.ValidateStepUp` used by both step-up paths — `Handler.StepUp` and the `RequireRecentMFA` middleware (`auth.MFAChecker` gained `ValidateStepUp`; `pkg/middleware/stepup_mfa.go` calls it). `/mfa/disable` and `/mfa/setup` map it to 503 `mfa_unavailable`.
+- Fail open (ordinary login only): `Service.Validate` keeps accepting on Redis errors but now emits a `slog.Warn` ("TOTP replay protection unavailable") with user ID and the fail-open/fail-closed mode every time the degraded path is taken.
+- Tests: `TestDisable_FailsClosedWhenRedisDown`, `TestValidate_FailOpenVsFailClosed`, `TestMFAHandlerDisable_ReplayUnavailableFailsClosed`.
+- All 20 packages pass.
+
+### 103. `MFA_ENCRYPTION_KEY` has no rotation path
+
+State: CLOSED
+
+Severity: Low
+
+A single 32-byte key encrypts all TOTP secrets (`backend/cmd/server/main.go:1088-1105`). Rotating it renders every stored secret undecryptable — a forced rotation silently breaks MFA for all users, unlike JWT keys (primary+secondary) and the Vault transit key (versioned envelopes).
+
+Acceptance criteria:
+- A secondary/previous key is tried on decrypt failure (mirroring the JWT keystore), or ciphertexts are version-prefixed.
+
+Status update:
+- New optional `MFA_ENCRYPTION_KEY_PREVIOUS` env var (64 hex chars / 32 bytes, validated at startup; warned-and-ignored when `MFA_ENABLED=false`, mirroring the primary key handling in `backend/cmd/server/main.go`).
+- `mfa.NewService` accepts variadic previous keys; `decryptHex` tries the primary key first and falls back to each previous key on decrypt failure (`backend/internal/mfa/service.go`). New ciphertexts always use the primary key, mirroring the JWT primary+secondary keystore pattern.
+- Documented in `docs/configuration.md`.
+- Test: `TestPreviousEncryptionKey` — a secret encrypted under the old key validates via the previous key and fails without it.
+- All 20 packages pass.
+
+### 104. Webhook allows `http://` URLs, sending security alerts cleartext
+
+State: CLOSED
+
+Severity: Low
+
+`validateWebhookURL` (`backend/internal/audit/webhook.go:91-92`) accepts plain `http`; the payload includes user email, IP, and security-event details sent in the clear.
+
+Acceptance criteria:
+- `https` is required (optionally with an explicit allow-insecure setting for dev).
+
+Status update:
+- `validateWebhookURL` now requires the `https` scheme; plain `http` is accepted only when the new `webhook_allow_insecure` system setting is `true` (read via the repository's `SettingsReader` at dispatch time, so both `sendWebhook` and `TestWebhook` enforce it). SSRF/private-IP checks are unchanged.
+- New setting seeded by migration `000032_webhook_allow_insecure` (default `false`) and added to `allowedKeys` in `backend/internal/settings/handler.go`; documented in `docs/settings.md`.
+- Tests: `TestValidateWebhookURL` gained cases for http-rejected-by-default / http-allowed-with-allow-insecure / https-allowed (public literal IPs, no DNS dependency).
+- All 20 packages pass.
+
+### 105. OIDC endpoints return and persist raw internal error strings
+
+State: CLOSED
+
+Severity: Low
+
+The unauthenticated `/oauth2/token` endpoint returns `err.Error()` in `error_description` (`backend/internal/oidc/handler.go:367`, also `:285`); non-sentinel errors (e.g. Redis dial failures from `service.go:218`) leak infrastructure details to anonymous callers. The same string is stored in audit metadata under `reason`, one of the fields excluded from encryption (`backend/internal/audit/repository.go:86-95`).
+
+Acceptance criteria:
+- Non-sentinel errors map to `invalid_grant`/`server_error` at the handler boundary (detail logged server-side), and raw `err.Error()` never lands in audit metadata.
+
+Status update:
+- New `isSafeOIDCError` helper classifies the package's sentinel errors (`ErrInvalidGrant`, `ErrInvalidRedirectURI`, `ErrInvalidScope`, `ErrCodeVerifierFailed`, `ErrRefreshTokenReuse` — the reuse sentinel intentionally survives as the audit reason `refresh_token_reuse_detected`). In `Token`, sentinels still return 400 `invalid_grant` with their protocol-safe description; anything else is logged via `slog.Error` and returns 500 `server_error` with no `error_description`, and the audit `reason` is the fixed string `internal_error` — raw `err.Error()` never reaches the client or audit metadata.
+- `Consent`'s auth-code-creation failure path no longer returns `err.Error()`; it logs via `slog.Error` and answers a bare `server_error`.
+- Tests: `TestHandler_Consent_InternalErrorNotLeaked` (closed miniredis → raw dial error stays server-side), `TestHandler_Token_InternalErrorNotLeaked` (non-sentinel → 500/no description, audit reason `internal_error`), `TestIsSafeOIDCError`.
+- All 20 packages pass.
+
+### 106. OIDC client create/update/delete lack dedicated audit actions and webhook alerts
+
+State: CLOSED
+
+Severity: Low
+
+`CreateClient`/`DeleteClient`/`UpdateClient` (`backend/internal/oidc/handler.go:553,604,631`) write no `logAudit` entries (unlike `RotateClientSecret`), and `isHighRiskEvent` has no `oidc.client_*` entries — so no security alert fires for credential-creating/destroying operations.
+
+Acceptance criteria:
+- Explicit audit entries (actor, client_uuid, client_id) for all three operations, added to `criticalActions` in `webhook.go`.
+
+Status update:
+- `CreateClient`/`UpdateClient`/`DeleteClient` now emit `oidc.client_created`/`oidc.client_updated`/`oidc.client_deleted` audit entries following the `RotateClientSecret` pattern (actor from `authmw.ClaimsFrom`, resource `oauth2_client`, metadata `client_uuid` + `client_id`). `ClientRepository.Delete` now uses `DELETE … RETURNING client_id` so the delete entry carries the `client_id` too; the `clientStore` interface and test stub were updated accordingly.
+- All three actions added to `criticalActions` in `backend/internal/audit/webhook.go`, so high-risk webhook alerts fire for them.
+- Tests: `TestHandler_AuditLogging_ClientLifecycle` (create→update→delete each produce their audit entry, verified against a real DB); new `oidc.client_*` cases in `TestIsHighRiskEvent`.
+- All 20 packages pass.
+
+### 107. `sessions.refresh_token_hash` has no UNIQUE constraint
+
+State: CLOSED
+
+Severity: Low
+
+Plain index only (`backend/migrations/000001_init_schema.up.sql:24,35`), unlike every sibling token table. `FindUserIDByHash` has no `LIMIT 1` and returns an arbitrary row on duplicates; `RotateSession`'s revoke step would revoke all rows sharing a hash. Defense-in-depth/consistency (exploitation needs a SHA-256 collision).
+
+Acceptance criteria:
+- A migration adds `CREATE UNIQUE INDEX` on `sessions(refresh_token_hash)` (after verifying no duplicates) and/or `LIMIT 1` on the lookup.
+
+Status update:
+- Migration `000033_sessions_refresh_token_hash_unique`: the up migration first runs a `DO` block that raises an exception if any duplicate `refresh_token_hash` values exist (guard per the acceptance criteria), then replaces the plain `idx_sessions_token_hash` with a `CREATE UNIQUE INDEX` of the same name; the down migration restores the plain index. Both directions verified against a live PostgreSQL.
+- `FindUserIDByHash` (`backend/internal/session/repository.go`) also gained `LIMIT 1` as defense-in-depth.
+- All 20 packages pass (integration tests ran the new migration via `RunMigrations`).
+
+### 108. Down-migration 000027 re-seeds the demo OAuth2 client with a published secret
+
+State: CLOSED
+
+Severity: Low
+
+`backend/migrations/000027_remove_demo_client.down.sql:3-4` re-inserts `demo-client` with the same bcrypt hash whose secret is in public git history. A botched rollback silently restores a fully usable OAuth2 client.
+
+Acceptance criteria:
+- The down migration becomes a no-op (or re-seeds with a freshly generated secret).
+
+Status update:
+- `000027_remove_demo_client.down.sql` is now a no-op (`SELECT 1`) with an explanatory comment pointing admins at the admin API for creating a demo client with a fresh secret. Verified against a live PostgreSQL: the down migration runs cleanly and does not re-insert `demo-client`.
+- All 20 packages pass.
+
+### 109. Service-account SSE endpoint skips `EvaluateAccess` and DPoP binding
+
+State: CLOSED
+
+Severity: Low
+
+`/admin/service-accounts/events` (`backend/internal/serviceaccount/handler.go:241-292`) calls only `ValidateAccessToken` + `HasPermission`: deactivated users, role/scope changes, and IP/country/device policies are bypassed; DPoP-bound tokens are accepted without a proof; revocation is only polled every 30 s. Impact is limited (change pings only) but it is a real enforcement gap.
+
+Acceptance criteria:
+- The route moves into the authenticated group or replicates `EvaluateAccess` + DPoP verification in the handler.
+
+Status update:
+- Moved `GET /admin/service-accounts/events` into the same authenticated route group as every other `/admin/service-accounts` endpoint, behind `authmw.RequirePermission("service_accounts","read")` (`backend/cmd/server/main.go`), instead of a standalone public-group registration with its own manual token check.
+- `Handler.Events` (`backend/internal/serviceaccount/handler.go`) now reads claims via `middleware.ClaimsFrom(r.Context())` — the standard `Authenticate` middleware chain (signature/expiry, `EvaluateAccess`, DPoP proof verification) runs before the handler, exactly as it does for every other protected route (matching how `session.Handler.Events` already worked). Removed the now-dead `eventAccessToken` token-extraction helper and the handler's own `*auth.KeyStore` dependency.
+- Tests: rewrote `serviceaccount/handler_test.go`'s Events tests to inject claims via context instead of raw tokens (`TestEventsRejectsMissingClaims`, `TestEventsRejectsUnsupportedStreaming`, `TestEventsAcceptsClaimsFromContext`); added `TestRun_ServiceAccountEventsRequiresAuth` in `cmd/server/main_test.go` — a full end-to-end test proving no-token → 401 and a token without `service_accounts:read` → 403 against the real router.
+- All 20 packages pass.
+
+### 110. Service-account tokens are accepted on user self-service routes
+
+State: CLOSED
+
+Severity: Low
+
+Nothing in the protected group rejects `claims.SubType == SubTypeService`, so a service token can invoke `/me`, `/sessions*`, `/mfa/*`, `/webauthn/*`, `/users/{id}/avatar`. Writes fail on UUID/FK constraints today, but `GET /users/{id}/avatar` lets a zero-scope token probe/retrieve avatars by user ID.
+
+Acceptance criteria:
+- A `RequireUserToken()` middleware (or equivalent) rejects service tokens on the self-service route group.
+
+Status update:
+- Added `middleware.RequireUserToken()` (`backend/pkg/middleware/rbac.go`): rejects the request with 403 unless `claims.SubType == auth.SubTypeUser`.
+- Wrapped the self-service routes (`/me`, `/me/*`, `/sessions*`, `/mfa/*`, `/webauthn/*`, `/users/{id}/avatar`) in a nested `r.Group` inside the protected group with `r.Use(authmw.RequireUserToken())` (`backend/cmd/server/main.go`), leaving admin/service-account/OIDC-client routes (which already gate on permissions/scopes) untouched.
+- Tests: `TestRequireUserToken` (`pkg/middleware/rbac_test.go`) and an end-to-end `TestRun_ServiceAccountTokenRejectedOnSelfServiceRoutes` (`cmd/server/main_test.go`) that mints a real client-credentials service-account token and confirms `GET /me` returns 403.
+- Incidental finding surfaced by the new end-to-end test (not fixed, out of scope): when a service-account token reaches any audited protected route, the audit middleware attempts to insert an empty string for `user_id` (services have `ClientID`, not `UserID`), which Postgres rejects as an invalid UUID — the audit write fails (logged, non-fatal) rather than crashing the request. Worth a follow-up.
+- All 20 packages pass.
+
+### 111. Rate limiter fails open silently on Redis errors
+
+State: CLOSED
+
+Severity: Low
+
+`backend/pkg/middleware/ratelimit.go:34-38` skips enforcement on any Redis error with no log or metric — during a Redis outage every limiter (including login at 10/min) is silently disabled.
+
+Acceptance criteria:
+- `slog.Warn` + metric on the error path; consider failing closed for the login limiter.
+
+Status update:
+- `RateLimiter.Middleware` now calls `slog.Warn("rate limiter unavailable, request allowed without enforcement", ...)` and increments a new in-process counter on the fail-open path (`backend/pkg/middleware/ratelimit.go`, `ratelimit_metrics.go`), mirroring the existing `audit.WriteFailures()` pattern.
+- Kept fail-open behavior for all limiters, including login: failing closed on Redis errors would turn a Redis blip into a platform-wide login outage, a significant availability tradeoff the issue only asked to "consider" — flagging this choice explicitly rather than changing it silently.
+- The counter is exposed via `GET /metrics` as `zerotrust_ratelimit_fail_opens_total` (`backend/cmd/server/main.go`), alongside the existing `zerotrust_audit_write_failures_total`.
+- Tests: `TestRateLimiter_FailsOpenAndRecordsMetricOnRedisError` (`pkg/middleware/ratelimit_test.go`) and `TestWriteMetricsIncludesRateLimiterFailOpens` (`cmd/server/main_test.go`).
+- All 20 packages pass.
+
+### 112. Third-party stylesheet injected on the MFA page
+
+State: CLOSED
+
+Severity: Low
+
+`frontend/src/pages/dashboard/MfaPage.tsx:122` injects a Google Fonts `<link>` at runtime on the page handling TOTP secrets, recovery codes, and MFA codes. A compromised/malicious CSS response can exfiltrate input values via attribute selectors or spoof the UI; no SRI is possible for that dynamic endpoint.
+
+Acceptance criteria:
+- The font is self-hosted (bundled via Vite) and the remote `<link>` removed.
+
+Status update:
+- Removed the runtime Google Fonts `<link>` from `frontend/src/pages/dashboard/MfaPage.tsx`.
+- Self-hosted Outfit: downloaded the v15 woff2 files (latin + latin-ext) into `frontend/src/assets/fonts/` and added `outfit.css` with `@font-face` rules (variable weight axis 100-900, `font-display: swap`); `MfaPage.tsx` imports it via `@/assets/fonts/outfit.css`, so Vite bundles the files. No new npm dependency.
+
+### 113. SPA served without Content-Security-Policy; frontend image uses `npm install`
+
+State: CLOSED
+
+Severity: Low
+
+The backend sets `default-src 'none'` only on API responses (`backend/pkg/middleware/security.go:16`); the SPA HTML served by `frontend/nginx.conf` / edge `infra/nginx/nginx.conf` carries no CSP at all (defense-in-depth — no XSS sinks were found in `frontend/src`). Separately, `frontend/Dockerfile:4` uses `npm install` instead of `npm ci`, so image builds are not pinned to the lockfile.
+
+Acceptance criteria:
+- A restrictive CSP (e.g. `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'`) is added for frontend responses; the Dockerfile uses `npm ci`.
+
+Status update:
+- Added a server-level `Content-Security-Policy` header to `frontend/nginx.conf` and the edge `infra/nginx/nginx.conf`: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`. `'unsafe-inline'` in `style-src` covers MUI/Emotion's injected `<style>` tags; SSE/fetch/EventSource are same-origin so `connect-src 'self'` suffices; the self-hosted Outfit font is same-origin (`font-src 'self'`).
+- Changed `frontend/Dockerfile` from `npm install` to `npm ci` so image builds are pinned to `package-lock.json`.
+- Dev workflow unaffected: neither nginx config fronts the Vite dev server, so HMR/react-refresh keep working.
+- `npm test` passes; `npm run build` passes.

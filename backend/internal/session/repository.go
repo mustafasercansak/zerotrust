@@ -23,10 +23,17 @@ type geoIPService interface {
 	Lookup(ip string) (*geoip.Location, error)
 }
 
+// oidcRefreshRevoker is satisfied by oidc.RefreshTokenStore. Wired in main so
+// that RevokeAllForUser also invalidates the user's OIDC refresh tokens (#82).
+type oidcRefreshRevoker interface {
+	RevokeAllForUser(ctx context.Context, userID string) error
+}
+
 type Repository struct {
 	db    *pgxpool.Pool
 	hub   *EventHub
 	geoip geoIPService
+	oidc  oidcRefreshRevoker
 }
 
 func NewRepository(db *pgxpool.Pool, hub *EventHub) *Repository {
@@ -35,6 +42,12 @@ func NewRepository(db *pgxpool.Pool, hub *EventHub) *Repository {
 
 func (r *Repository) SetGeoIP(g geoIPService) {
 	r.geoip = g
+}
+
+// SetOIDCRefreshRevoker registers the OIDC refresh-token store that
+// RevokeAllForUser should also clear.
+func (r *Repository) SetOIDCRefreshRevoker(v oidcRefreshRevoker) {
+	r.oidc = v
 }
 
 // Create inserts a new session. ip is the client address (host:port or bare host).
@@ -54,7 +67,7 @@ func (r *Repository) Create(ctx context.Context, userID, tokenHash, ip, userAgen
 func (r *Repository) RevokeForDevice(ctx context.Context, userID, ip, userAgent string, deviceInfo map[string]string) error {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE sessions
-		SET is_revoked = true, last_used_at = now()
+		SET is_revoked = true, last_used_at = now(), revoked_reason = 'device_replaced'
 		WHERE user_id = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
@@ -79,6 +92,7 @@ func (r *Repository) FindUserIDByHash(ctx context.Context, hash string) (string,
 		  AND is_revoked = false
 		  AND expires_at > now()
 		  AND COALESCE(last_used_at, created_at) > now() - $2::interval
+		LIMIT 1
 	`, hash, activeSessionWindowSQL).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -130,8 +144,11 @@ func (r *Repository) RotateSession(
 		return err
 	}
 
+	// revoked_reason = 'rotation' marks this row as superseded-by-refresh, the
+	// only reason CheckReuse treats a later replay as evidence of theft.
+	// (ISSUE_LIST #98)
 	if _, err = tx.Exec(ctx, `
-		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		UPDATE sessions SET is_revoked = true, last_used_at = now(), revoked_reason = 'rotation'
 		WHERE refresh_token_hash = $1
 	`, oldHash); err != nil {
 		return err
@@ -154,7 +171,7 @@ func (r *Repository) Revoke(ctx context.Context, hash string) error {
 	var userID string
 	err := r.db.QueryRow(ctx, `
 		UPDATE sessions
-		SET is_revoked = true, last_used_at = now()
+		SET is_revoked = true, last_used_at = now(), revoked_reason = 'logout'
 		WHERE refresh_token_hash = $1
 		  AND is_revoked = false
 		RETURNING user_id
@@ -170,9 +187,12 @@ func (r *Repository) Revoke(ctx context.Context, hash string) error {
 }
 
 // CheckReuse looks up whether the given token hash belongs to a session that
-// was previously rotated (is_revoked = true). If so, it returns the owning
-// userID — the caller should treat this as evidence of token theft and revoke
-// all remaining sessions for that user.
+// was previously rotated (is_revoked = true AND revoked_reason = 'rotation').
+// If so, it returns the owning userID — the caller should treat this as
+// evidence of token theft and revoke all remaining sessions for that user.
+// Only rotation-revoked hashes count: a token revoked by explicit logout,
+// admin action, or session cleanup was deliberately invalidated, not stolen,
+// so replaying it must not force-logout the victim. (ISSUE_LIST #98)
 // Very recent rotations are ignored to avoid treating legitimate duplicate
 // refresh requests racing with each other as token theft.
 func (r *Repository) CheckReuse(ctx context.Context, hash string) (string, error) {
@@ -181,6 +201,7 @@ func (r *Repository) CheckReuse(ctx context.Context, hash string) (string, error
 		SELECT user_id FROM sessions
 		WHERE refresh_token_hash = $1
 		  AND is_revoked = true
+		  AND revoked_reason = 'rotation'
 		  AND COALESCE(last_used_at, created_at) <= now() - $2::interval
 		LIMIT 1
 	`, hash, tokenReuseGraceSQL).Scan(&userID)
@@ -194,13 +215,20 @@ func (r *Repository) CheckReuse(ctx context.Context, hash string) (string, error
 }
 
 // RevokeAllForUser revokes every active session belonging to the given user.
+// When an OIDC refresh revoker is configured, the user's OIDC refresh tokens
+// are invalidated too (#82).
 func (r *Repository) RevokeAllForUser(ctx context.Context, userID string) error {
 	_, err := r.db.Exec(ctx, `
-		UPDATE sessions SET is_revoked = true
+		UPDATE sessions SET is_revoked = true, revoked_reason = 'mass_revoke'
 		WHERE user_id = $1 AND is_revoked = false
 	`, userID)
 	if err == nil {
 		r.hub.BroadcastRevokedAll(userID)
+		if r.oidc != nil {
+			if oerr := r.oidc.RevokeAllForUser(ctx, userID); oerr != nil {
+				return oerr
+			}
+		}
 	}
 	return err
 }
@@ -209,7 +237,7 @@ func (r *Repository) RevokeAllForUser(ctx context.Context, userID string) error 
 // identified by currentHash. Used for "sign out all other devices".
 func (r *Repository) RevokeOtherSessions(ctx context.Context, userID, currentHash string) error {
 	tag, err := r.db.Exec(ctx, `
-		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		UPDATE sessions SET is_revoked = true, last_used_at = now(), revoked_reason = 'revoke_others'
 		WHERE user_id = $1
 		  AND is_revoked = false
 		  AND expires_at > now()
@@ -226,7 +254,7 @@ func (r *Repository) RevokeOtherSessions(ctx context.Context, userID, currentHas
 // a new session so the total never exceeds maxAllowed.
 func (r *Repository) EvictExcessSessions(ctx context.Context, userID string, keep int) error {
 	_, err := r.db.Exec(ctx, `
-		UPDATE sessions SET is_revoked = true
+		UPDATE sessions SET is_revoked = true, revoked_reason = 'evicted'
 		WHERE user_id = $1
 		  AND is_revoked = false
 		  AND id NOT IN (
@@ -335,7 +363,7 @@ func normalizeDeviceInfo(deviceInfo map[string]string) []byte {
 func (r *Repository) RevokeByID(ctx context.Context, id, userID string) error {
 	var tokenHash string
 	err := r.db.QueryRow(ctx, `
-		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		UPDATE sessions SET is_revoked = true, last_used_at = now(), revoked_reason = 'revoke_by_id'
 		WHERE id = $1 AND user_id = $2 AND is_revoked = false
 		RETURNING refresh_token_hash
 	`, id, userID).Scan(&tokenHash)
@@ -365,7 +393,7 @@ const staleInitialCutoffSQL = "90 seconds"
 // (via the SSE handler fall-through) and can update their session list.
 func (r *Repository) RevokeStaleInitialSessions(ctx context.Context) (int64, error) {
 	rows, err := r.db.Query(ctx, `
-		UPDATE sessions SET is_revoked = true, last_used_at = now()
+		UPDATE sessions SET is_revoked = true, last_used_at = now(), revoked_reason = 'stale_initial'
 		WHERE is_revoked = false
 		  AND expires_at > now()
 		  AND last_used_at IS NULL

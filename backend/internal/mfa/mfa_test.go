@@ -2,6 +2,8 @@ package mfa
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,6 +104,48 @@ func TestMFAIntegration(t *testing.T) {
 type mockRepo struct{ store }
 
 func (m mockRepo) IsEnabled(ctx context.Context, userID string) bool { return false }
+
+// TestRecoveryCodeConcurrentUse verifies that concurrent validation of the
+// same recovery code succeeds exactly once: consumption is atomic under a
+// per-user row lock (#95).
+func TestRecoveryCodeConcurrentUse(t *testing.T) {
+	h, svc, repo, userRepo, pool, ctx := mockHandlerDeps(t)
+	if h == nil {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	defer pool.Close()
+
+	u, err := userRepo.Create(ctx, "mfa-race@example.com", "hash", "en")
+	if err != nil {
+		t.Fatalf("User create failed: %v", err)
+	}
+
+	_, _, rawCodes, err := svc.Setup(ctx, u.ID, "mfa-race@example.com", "")
+	if err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+	if err := repo.Enable(ctx, u.ID); err != nil {
+		t.Fatalf("Enable failed: %v", err)
+	}
+
+	const attempts = 16
+	var wg sync.WaitGroup
+	var successes int64
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if svc.Validate(ctx, u.ID, rawCodes[0]) {
+				atomic.AddInt64(&successes, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("concurrent use of the same recovery code succeeded %d times, want exactly 1", successes)
+	}
+}
 
 func TestMFAInvalidKey(t *testing.T) {
 	_, _, _, err := NewService(mockRepo{}, []byte("short"), nil).Setup(context.Background(), "id", "email", "")

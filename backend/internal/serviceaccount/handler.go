@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,7 +17,6 @@ import (
 type Handler struct {
 	svc     serviceAccountService
 	hub     *EventHub
-	ks      *auth.KeyStore
 	authSvc *auth.Service
 }
 
@@ -31,8 +29,8 @@ type serviceAccountService interface {
 	RotateSecret(ctx context.Context, id string) (*ServiceAccount, string, error)
 }
 
-func NewHandler(svc *Service, hub *EventHub, ks *auth.KeyStore, authSvc *auth.Service) *Handler {
-	return &Handler{svc: svc, hub: hub, ks: ks, authSvc: authSvc}
+func NewHandler(svc *Service, hub *EventHub, authSvc *auth.Service) *Handler {
+	return &Handler{svc: svc, hub: hub, authSvc: authSvc}
 }
 
 type saResponse struct {
@@ -236,17 +234,19 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /api/v1/admin/service-accounts/events — SSE stream.
-// Auth: httpOnly cookie for browser EventSource, or Authorization: Bearer for API clients.
+// GET /api/v1/admin/service-accounts/events — SSE stream. Registered inside
+// the same authenticated route group as every other /admin/service-accounts
+// endpoint, so the standard Authenticate + RequirePermission middleware chain
+// runs before this handler: signature/expiry validation, EvaluateAccess
+// (revocation, inactive-user/service-account, IP/country/device policy), and
+// DPoP proof verification for DPoP-bound tokens all apply here exactly as
+// they do on every other protected route. Previously this route sat outside
+// that group and only checked signature/expiry + a raw permission string,
+// skipping all of the above. (ISSUE_LIST #109)
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
-	token := eventAccessToken(r)
-	if token == "" {
-		writeError(w, http.StatusUnauthorized, "missing_token")
-		return
-	}
-	claims, err := auth.ValidateAccessToken(h.ks, token)
-	if err != nil || !claims.HasPermission("service_accounts", "read") {
-		writeError(w, http.StatusForbidden, "forbidden")
+	claims := middleware.ClaimsFrom(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -289,17 +289,6 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-}
-
-func eventAccessToken(r *http.Request) string {
-	if c, err := r.Cookie("access_token"); err == nil && c.Value != "" {
-		return c.Value
-	}
-	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
-		return ""
-	}
-	return strings.TrimPrefix(h, "Bearer ")
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

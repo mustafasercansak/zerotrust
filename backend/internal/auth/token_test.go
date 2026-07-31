@@ -261,7 +261,8 @@ func TestMixedAlgorithmRotation(t *testing.T) {
 
 	// Token signed by the EdDSA secondary (as during rotation) validates too.
 	secondary := jwt.NewWithClaims(jwt.SigningMethodEdDSA, &auth.Claims{
-		UserID: "u",
+		UserID:   "u",
+		TokenUse: auth.TokenUseSession,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
 		},
@@ -289,4 +290,59 @@ func keyIDOf(t *testing.T, ks *auth.KeyStore, key crypto.Signer) string {
 		t.Fatalf("kid %q not found in keystore", kid)
 	}
 	return kid
+}
+
+// TestValidateAccessTokenRejectsMissingTokenUse pins the audience-confusion
+// guard (#81): a well-formed token signed by a trusted key but lacking the
+// first-party token_use marker (e.g. an OIDC client access token) is rejected
+// by the internal validator yet still accepted by the OIDC-facing one.
+func TestValidateAccessTokenRejectsMissingTokenUse(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	mint := func(claims *auth.Claims) string {
+		tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		tok.Header["kid"] = ks.PrimaryKID()
+		s, err := tok.SignedString(ks.PrimaryKey())
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		return s
+	}
+
+	oidcStyle := mint(&auth.Claims{
+		UserID:  "u1",
+		SubType: auth.SubTypeUser,
+		Roles:   []string{"admin"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "https://issuer.example.com",
+			Subject:   "u1",
+			Audience:  jwt.ClaimStrings{"some-external-client"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	})
+
+	if _, err := auth.ValidateAccessToken(ks, oidcStyle); err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken for token without token_use, got %v", err)
+	}
+	claims, err := auth.ValidateOIDCAccessToken(ks, oidcStyle)
+	if err != nil {
+		t.Fatalf("OIDC validator must accept the token: %v", err)
+	}
+	if claims.UserID != "u1" {
+		t.Errorf("UserID = %q, want u1", claims.UserID)
+	}
+
+	// Unknown token_use values are rejected too.
+	oddUse := mint(&auth.Claims{
+		UserID:   "u1",
+		SubType:  auth.SubTypeUser,
+		TokenUse: "made-up",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	})
+	if _, err := auth.ValidateAccessToken(ks, oddUse); err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken for unknown token_use, got %v", err)
+	}
 }

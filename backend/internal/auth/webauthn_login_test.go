@@ -156,6 +156,27 @@ func TestWebAuthnLoginFinish_Success(t *testing.T) {
 	}
 }
 
+// TestWebAuthnLoginFinish_InactiveUserRejected covers the case where the user
+// is deactivated between the password step and the passkey assertion: the
+// finish path must reject like its siblings (MFAChallenge, passwordless) (#97).
+func TestWebAuthnLoginFinish_InactiveUserRejected(t *testing.T) {
+	verifier := &fakeWebAuthnVerifier{hasCreds: true}
+	svc, rdb := newWebAuthnTestService(t, verifier)
+	ctx := context.Background()
+
+	token := "pending-inactive"
+	key := mfaPendingKey(hashToken(token))
+	raw, _ := json.Marshal(map[string]any{"uid": "u1", "ip": "1.2.3.4", "ua": "ua"})
+	rdb.Set(ctx, key, raw, time.Minute)
+
+	// Deactivate the user after the password step created the pending login.
+	svc.users.(*waLoginUserReader).u.IsActive = false
+
+	if _, err := svc.WebAuthnLoginFinish(ctx, token, []byte(`{"id":"abc"}`)); err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials for inactive user, got %v", err)
+	}
+}
+
 func TestWebAuthnLoginFinish_VerificationFails(t *testing.T) {
 	verifier := &fakeWebAuthnVerifier{hasCreds: true, finishErr: ErrInvalidToken}
 	svc, rdb := newWebAuthnTestService(t, verifier)

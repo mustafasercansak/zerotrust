@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/user"
@@ -366,5 +367,70 @@ func TestUserInfo_ScopeInAccessToken(t *testing.T) {
 	}
 	if out["sub"] == nil {
 		t.Error("sub must always be present")
+	}
+}
+
+// TestRevoke_CrossClientOwnership verifies that a client cannot blocklist an
+// access token issued to a different client, but can revoke its own (RFC 7009
+// §2.1, #101).
+func TestRevoke_CrossClientOwnership(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	userSvc := user.NewService(&mockUserReader{})
+	authSvc := auth.NewService(userSvc, &mockSessionRepo{}, &testServiceAccountStore{}, rdb, ks, nil, nil)
+	h := &Handler{
+		ks:         ks,
+		authSvc:    authSvc,
+		clientRepo: &stubClientRepo{}, // authenticates any client id/secret
+	}
+
+	mint := func(aud, jti string) string {
+		tok, err := ks.Sign(auth.Claims{
+			UserID:  "u1",
+			SubType: auth.SubTypeUser,
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience:  jwt.ClaimStrings{aud},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				ID:        jti,
+			},
+		})
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		return tok
+	}
+	tokenA := mint("client-a", "jti-a")
+
+	revoke := func(clientID, token string) int {
+		form := url.Values{}
+		form.Set("client_id", clientID)
+		form.Set("client_secret", "any")
+		form.Set("token", token)
+		req, _ := http.NewRequest("POST", "/oauth2/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+		h.Revoke(rr, req)
+		return rr.Code
+	}
+
+	// client-b tries to revoke client-a's token: 200 per spec, but the JTI
+	// must NOT be blocklisted.
+	if code := revoke("client-b", tokenA); code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if authSvc.IsRevoked(context.Background(), "jti-a") {
+		t.Error("cross-client revocation must not blocklist the token JTI")
+	}
+
+	// The owning client can revoke it.
+	if code := revoke("client-a", tokenA); code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if !authSvc.IsRevoked(context.Background(), "jti-a") {
+		t.Error("owning client's revocation must blocklist the token JTI")
 	}
 }

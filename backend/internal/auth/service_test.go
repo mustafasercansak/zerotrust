@@ -177,6 +177,9 @@ type testMFAChecker struct {
 
 func (m *testMFAChecker) IsEnabled(ctx context.Context, userID string) bool      { return true }
 func (m *testMFAChecker) Validate(ctx context.Context, userID, code string) bool { return m.valid }
+func (m *testMFAChecker) ValidateStepUp(ctx context.Context, userID, code string) bool {
+	return m.valid
+}
 func (m *testMFAChecker) Setup(ctx context.Context, userID, email, currentCode string) (string, string, []string, error) {
 	return "", "", nil, nil
 }

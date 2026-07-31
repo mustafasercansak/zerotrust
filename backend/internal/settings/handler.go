@@ -49,6 +49,9 @@ var allowedKeys = map[string]func(string) bool{
 		}
 		return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
 	},
+	"webhook_allow_insecure": func(v string) bool {
+		return v == "true" || v == "false"
+	},
 	"country_allowlist": func(v string) bool {
 		if v == "" {
 			return true

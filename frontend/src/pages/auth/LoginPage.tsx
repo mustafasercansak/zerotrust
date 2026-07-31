@@ -26,10 +26,14 @@ export default function LoginPage() {
   const redirectTo = searchParams.get("redirect_to") || "/dashboard";
 
   function completeLogin() {
-    if (redirectTo.startsWith("/oauth2/") || redirectTo.startsWith("http")) {
-      window.location.href = redirectTo;
+    // Only same-origin absolute paths are honored; absolute URLs and
+    // protocol-relative "//host" values fall back to the default route.
+    const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/dashboard";
+    if (target.startsWith("/oauth2/")) {
+      // OIDC consent flow lives on the backend — full navigation required.
+      window.location.href = target;
     } else {
-      navigate(redirectTo);
+      navigate(target);
     }
   }
 

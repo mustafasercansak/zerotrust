@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
@@ -226,4 +227,87 @@ func TestCAE(t *testing.T) {
 	}
 
 	mockSetts.ipAllowlist = "" // reset
+}
+
+// TestAuthenticateRejectsOIDCAccessToken is the regression test for the
+// audience-confusion finding (#81): an OIDC access token issued to an external
+// client (signed by the same KeyStore, carrying Roles, but no first-party
+// token_use marker) must be rejected with 401 on internal /api/v1 routes such
+// as /me and /webauthn/register/begin, while first-party session and service
+// tokens keep working.
+func TestAuthenticateRejectsOIDCAccessToken(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	// No user/service stores needed: the token must be rejected before any
+	// entity lookup, and first-party tokens skip the lookup when stores are nil.
+	authSvc := auth.NewService(nil, nil, nil, rdb, ks, nil, nil)
+
+	handler := middleware.Authenticate(ks, authSvc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Shape matches what oidc.Service.ExchangeCode mints for external clients.
+	oidcClaims := &auth.Claims{
+		UserID:  "victim-user",
+		Email:   "victim@example.com",
+		Roles:   []string{"admin"}, // pre-fix OIDC tokens even embedded roles
+		SubType: auth.SubTypeUser,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "https://issuer.example.com",
+			Subject:   "victim-user",
+			Audience:  jwt.ClaimStrings{"external-client"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        "oidc-jti-1",
+		},
+	}
+	oidcTok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, oidcClaims)
+	oidcTok.Header["kid"] = ks.PrimaryKID()
+	oidcTokenStr, err := oidcTok.SignedString(ks.PrimaryKey())
+	if err != nil {
+		t.Fatalf("sign oidc token: %v", err)
+	}
+
+	for _, path := range []string{"/api/v1/me", "/api/v1/webauthn/register/begin"} {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+oidcTokenStr)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s: expected 401 for OIDC client access token, got %d", path, rr.Code)
+		}
+	}
+
+	// First-party session token still passes.
+	pair, err := auth.GenerateTokenPair(ks, "victim-user", "victim@example.com", "en", []string{"admin"}, nil, time.Hour)
+	if err != nil {
+		t.Fatalf("generate session token: %v", err)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 for first-party session token, got %d", rr.Code)
+	}
+
+	// First-party service token still passes.
+	svcTok, err := auth.GenerateServiceToken(ks, "ci-client", "ci-bot", []string{"users:read"}, time.Hour, "")
+	if err != nil {
+		t.Fatalf("generate service token: %v", err)
+	}
+	req2 := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req2.Header.Set("Authorization", "Bearer "+svcTok.AccessToken)
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("expected 200 for first-party service token, got %d", rr2.Code)
+	}
 }

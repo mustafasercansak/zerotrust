@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zerotrust/backend/internal/auth"
 	"github.com/zerotrust/backend/internal/user"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type mockUserReader struct {
@@ -359,10 +360,10 @@ func TestRefreshTokenStore(t *testing.T) {
 		t.Errorf("got %+v, want u1/c1", got)
 	}
 
-	// Single-use: second fetch must fail
+	// Single-use: second fetch must be detected as reuse (#85)
 	_, err = store.GetAndConsume(ctx, token)
-	if err != ErrRefreshTokenNotFound {
-		t.Errorf("expected ErrRefreshTokenNotFound on reuse, got %v", err)
+	if err != ErrRefreshTokenReused {
+		t.Errorf("expected ErrRefreshTokenReused on reuse, got %v", err)
 	}
 }
 
@@ -417,10 +418,17 @@ func TestExchangeRefreshToken(t *testing.T) {
 		t.Errorf("scope = %q, want openid profile email", resp.Scope)
 	}
 
-	// Original token must be consumed (single-use)
+	// Original token must be consumed (single-use); replaying it is reuse (#85)
 	_, err = svc.ExchangeRefreshToken(ctx, origToken, "client-1", "", nil)
+	if err != ErrRefreshTokenReuse {
+		t.Errorf("expected ErrRefreshTokenReuse on token reuse, got %v", err)
+	}
+
+	// The reuse must have revoked the whole grant chain: the rotated token
+	// issued moments ago is dead too (RFC 6819 §5.2.2.3).
+	_, err = svc.ExchangeRefreshToken(ctx, resp.RefreshToken, "client-1", "", nil)
 	if err != ErrInvalidGrant {
-		t.Errorf("expected ErrInvalidGrant on token reuse, got %v", err)
+		t.Errorf("expected ErrInvalidGrant for family-revoked rotated token, got %v", err)
 	}
 
 	// Scope downscoping
@@ -468,13 +476,20 @@ func TestRevokeRefreshToken(t *testing.T) {
 	sess := &OIDCRefreshSession{UserID: "u1", ClientID: "c1", Scopes: []string{"openid", "offline_access"}, AuthTime: time.Now()}
 	token, _ := refreshStore.Save(ctx, sess)
 
-	// Revoke
-	svc.RevokeRefreshToken(ctx, token)
+	// Revoke (sess.ClientID is "c1" — ownership matches)
+	svc.RevokeRefreshToken(ctx, token, "c1")
 
 	// Token must be unusable after revocation
 	_, err = refreshStore.GetAndConsume(ctx, token)
 	if err != ErrRefreshTokenNotFound {
 		t.Errorf("expected ErrRefreshTokenNotFound after revocation, got %v", err)
+	}
+
+	// A different client must not be able to revoke the token (#101)
+	token2, _ := refreshStore.Save(ctx, sess)
+	svc.RevokeRefreshToken(ctx, token2, "other-client")
+	if _, err := refreshStore.Peek(ctx, token2); err != nil {
+		t.Errorf("token must survive a revocation attempt by another client, got %v", err)
 	}
 }
 
@@ -578,5 +593,177 @@ func TestExchangeCode_NoRefreshWithoutOfflineAccess(t *testing.T) {
 	}
 	if resp.RefreshToken != "" {
 		t.Errorf("expected no refresh_token without offline_access, got %q", resp.RefreshToken)
+	}
+}
+
+// TestExchangeCode_AccessTokenCarriesNoInternalClaims verifies that OIDC access
+// tokens issued to external clients contain no internal RBAC roles and no
+// first-party token_use marker, so the internal API rejects them (#81, #100).
+func TestExchangeCode_AccessTokenCarriesNoInternalClaims(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	u := &user.User{ID: "u-claims", Email: "claims@example.com", Locale: "en", Roles: []string{"admin"}, IsActive: true}
+	codeStore := NewAuthCodeStore(rdb)
+	svc := NewService(nil, codeStore, user.NewService(&mockUserReader{user: u}), ks, "https://issuer.example.com", nil)
+
+	sess := &AuthCodeSession{
+		Code: "code-claims", UserID: u.ID, ClientID: "client-1",
+		RedirectURI:         "http://localhost/cb",
+		Scopes:              []string{"openid", "profile"},
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
+		AuthTime:            time.Now(),
+	}
+	codeStore.Save(context.Background(), sess)
+
+	resp, err := svc.ExchangeCode(context.Background(), "code-claims", "client-1", "", "http://localhost/cb", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+
+	claims, err := auth.ValidateOIDCAccessToken(ks, resp.AccessToken)
+	if err != nil {
+		t.Fatalf("validate OIDC access token: %v", err)
+	}
+	if len(claims.Roles) != 0 {
+		t.Errorf("OIDC access token must not embed internal roles, got %v", claims.Roles)
+	}
+	if claims.TokenUse != "" {
+		t.Errorf("OIDC access token must not carry token_use, got %q", claims.TokenUse)
+	}
+	if len(claims.Audience) != 1 || claims.Audience[0] != "client-1" {
+		t.Errorf("audience = %v, want [client-1]", claims.Audience)
+	}
+
+	// The internal first-party validator must reject it (#81).
+	if _, err := auth.ValidateAccessToken(ks, resp.AccessToken); err != auth.ErrInvalidToken {
+		t.Errorf("expected ErrInvalidToken from internal validator, got %v", err)
+	}
+
+	// The ID token must not disclose internal roles/groups either (#100).
+	idToken, err := jwt.Parse(resp.IDToken, func(tok *jwt.Token) (any, error) {
+		pub, _, _ := ks.PublicKey(ks.PrimaryKID())
+		return pub, nil
+	})
+	if err != nil {
+		t.Fatalf("id token parse: %v", err)
+	}
+	idClaims := idToken.Claims.(jwt.MapClaims)
+	if idClaims["roles"] != nil || idClaims["groups"] != nil {
+		t.Errorf("ID token must not contain roles/groups, got roles=%v groups=%v", idClaims["roles"], idClaims["groups"])
+	}
+}
+
+// TestExchangeRefreshToken_ClientAuthenticatedFirst verifies that a client with
+// a stored secret must authenticate before the refresh token is consumed:
+// a wrong secret fails without burning the token (#85).
+func TestExchangeRefreshToken_ClientAuthenticatedFirst(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	u := &user.User{ID: "u-ca", Email: "ca@example.com", Locale: "en", IsActive: true}
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(&stubSecretClientRepo{}, nil, user.NewService(&mockUserReader{user: u}), ks, "https://issuer.example.com", refreshStore)
+
+	ctx := context.Background()
+	rt, _ := refreshStore.Save(ctx, &OIDCRefreshSession{
+		UserID:   u.ID,
+		ClientID: "confidential-client",
+		Scopes:   []string{"openid", "offline_access"},
+		AuthTime: time.Now(),
+	})
+
+	// Wrong secret → invalid_grant, and the token must NOT be consumed.
+	if _, err := svc.ExchangeRefreshToken(ctx, rt, "confidential-client", "wrong-secret", nil); err != ErrInvalidGrant {
+		t.Fatalf("expected ErrInvalidGrant for bad secret, got %v", err)
+	}
+	if _, err := refreshStore.Peek(ctx, rt); err != nil {
+		t.Fatalf("refresh token must survive a failed client authentication, got %v", err)
+	}
+
+	// Empty secret against a confidential client → rejected as well.
+	if _, err := svc.ExchangeRefreshToken(ctx, rt, "confidential-client", "", nil); err != ErrInvalidGrant {
+		t.Fatalf("expected ErrInvalidGrant for missing secret, got %v", err)
+	}
+
+	// Correct secret succeeds and rotates.
+	resp, err := svc.ExchangeRefreshToken(ctx, rt, "confidential-client", stubSecretClientSecret, nil)
+	if err != nil {
+		t.Fatalf("exchange with correct secret: %v", err)
+	}
+	if resp.RefreshToken == "" || resp.RefreshToken == rt {
+		t.Errorf("expected rotated refresh token")
+	}
+}
+
+// stubSecretClientRepo is a clientAuthenticator stub holding one confidential
+// client whose secret is stubSecretClientSecret.
+type stubSecretClientRepo struct{}
+
+const stubSecretClientSecret = "stub-secret-123"
+
+func (s *stubSecretClientRepo) FindByClientID(_ context.Context, clientID string) (*Client, error) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte(stubSecretClientSecret), bcrypt.MinCost)
+	return &Client{ClientID: clientID, ClientSecretHash: string(hash)}, nil
+}
+func (s *stubSecretClientRepo) AuthenticateClient(_ context.Context, clientID, secret string) (*Client, error) {
+	c, err := s.FindByClientID(context.Background(), clientID)
+	if err != nil {
+		return nil, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(c.ClientSecretHash), []byte(secret)) != nil {
+		return nil, ErrInvalidClientSecret
+	}
+	return c, nil
+}
+
+func TestRefreshTokenStore_RevokeAllForUser(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ks, _ := auth.LoadOrGenerateKeyStore("", "", auth.AlgEdDSA)
+	u := &user.User{ID: "u-rev", Email: "rev@example.com", Locale: "en", IsActive: true}
+	refreshStore := NewRefreshTokenStore(rdb)
+	svc := NewService(nil, nil, user.NewService(&mockUserReader{user: u}), ks, "https://issuer.example.com", refreshStore)
+
+	ctx := context.Background()
+	mk := func(uid string) string {
+		tok, err := refreshStore.Save(ctx, &OIDCRefreshSession{
+			UserID:   uid,
+			ClientID: "c1",
+			Scopes:   []string{"openid", "offline_access"},
+			AuthTime: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		return tok
+	}
+	tok1, tok2 := mk("u-rev"), mk("u-rev")
+	other := mk("u-other")
+
+	// Simulates the RevokeAllForUser path taken on password change (#82).
+	if err := refreshStore.RevokeAllForUser(ctx, "u-rev"); err != nil {
+		t.Fatalf("RevokeAllForUser: %v", err)
+	}
+
+	for _, tok := range []string{tok1, tok2} {
+		if _, err := svc.ExchangeRefreshToken(ctx, tok, "c1", "", nil); err != ErrInvalidGrant {
+			t.Errorf("expected ErrInvalidGrant after RevokeAllForUser, got %v", err)
+		}
+	}
+
+	// Another user's tokens are untouched.
+	if _, err := svc.ExchangeRefreshToken(ctx, other, "c1", "", nil); err != nil {
+		t.Errorf("other user's token must survive, got %v", err)
 	}
 }

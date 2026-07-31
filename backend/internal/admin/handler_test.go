@@ -121,6 +121,7 @@ func TestHandler_CreateUser(t *testing.T) {
 
 	body := `{"email": "new@example.com", "first_name": "Alice", "last_name": "Smith", "password": "Password1!", "roles": ["admin"]}`
 	req, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+	req = withClaimsRoles(req, "admin-caller", "admin")
 	rr := httptest.NewRecorder()
 	h.CreateUser(rr, req)
 
@@ -131,6 +132,7 @@ func TestHandler_CreateUser(t *testing.T) {
 	// Test conflict
 	rrConflict := httptest.NewRecorder()
 	reqConflict, _ := http.NewRequest("POST", "/api/v1/admin/users", bytes.NewBufferString(body))
+	reqConflict = withClaimsRoles(reqConflict, "admin-caller", "admin")
 	h.CreateUser(rrConflict, reqConflict)
 	if rrConflict.Code != http.StatusConflict {
 		t.Fatalf("Expected 409 Conflict, got %d", rrConflict.Code)
@@ -169,6 +171,7 @@ func TestHandler_UpdateRoles(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", u.ID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = withClaimsRoles(req, "admin-caller", "admin")
 
 	rr := httptest.NewRecorder()
 	h.UpdateRoles(rr, req)
@@ -196,6 +199,7 @@ func TestHandler_UpdateRoles(t *testing.T) {
 	bodyRevokeFail := `{"roles": ["admin"]}`
 	reqRevokeFail, _ := http.NewRequest("PATCH", "/api/v1/admin/users/"+u.ID+"/roles", bytes.NewBufferString(bodyRevokeFail))
 	reqRevokeFail = reqRevokeFail.WithContext(context.WithValue(reqRevokeFail.Context(), chi.RouteCtxKey, rctx))
+	reqRevokeFail = withClaimsRoles(reqRevokeFail, "admin-caller", "admin")
 	rrRevokeFail := httptest.NewRecorder()
 	h.UpdateRoles(rrRevokeFail, reqRevokeFail)
 	if rrRevokeFail.Code != http.StatusInternalServerError {

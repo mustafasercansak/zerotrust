@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,10 +22,21 @@ var (
 	ErrInvalidScope       = errors.New("invalid_scope")
 	ErrInvalidGrant       = errors.New("invalid_grant")
 	ErrCodeVerifierFailed = errors.New("code_verifier_verification_failed")
+	// ErrRefreshTokenReuse is returned when an already-consumed OIDC refresh
+	// token is presented. The token endpoint still answers invalid_grant, but
+	// the distinct error surfaces in the audit/security event reason.
+	ErrRefreshTokenReuse = errors.New("refresh_token_reuse_detected")
 )
 
+// clientAuthenticator is the subset of *ClientRepository the Service needs;
+// tests may supply a stub.
+type clientAuthenticator interface {
+	FindByClientID(ctx context.Context, clientID string) (*Client, error)
+	AuthenticateClient(ctx context.Context, clientID, clientSecret string) (*Client, error)
+}
+
 type Service struct {
-	clientRepo   *ClientRepository
+	clientRepo   clientAuthenticator
 	codeStore    *AuthCodeStore
 	refreshStore *RefreshTokenStore
 	userSvc      *user.Service
@@ -32,7 +44,7 @@ type Service struct {
 	issuer       string
 }
 
-func NewService(clientRepo *ClientRepository, codeStore *AuthCodeStore, userSvc *user.Service, ks *auth.KeyStore, issuer string, refreshStore *RefreshTokenStore) *Service {
+func NewService(clientRepo clientAuthenticator, codeStore *AuthCodeStore, userSvc *user.Service, ks *auth.KeyStore, issuer string, refreshStore *RefreshTokenStore) *Service {
 	return &Service{
 		clientRepo:   clientRepo,
 		codeStore:    codeStore,
@@ -134,8 +146,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 		UserID:      u.ID,
 		Email:       u.Email,
 		Locale:      u.Locale,
-		Roles:       u.Roles,
-		Permissions: []string{}, // intentionally empty: OIDC access tokens are issued to external clients and must not carry internal RBAC permissions
+		Permissions: []string{}, // intentionally empty: OIDC access tokens are issued to external clients and must not carry internal RBAC permissions or roles (#81)
 		Scopes:      session.Scopes, // granted OAuth2 scopes, used by UserInfo to filter the response
 		SubType:     auth.SubTypeUser,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -185,8 +196,8 @@ func (s *Service) ExchangeCode(ctx context.Context, code, clientID, clientSecret
 				idClaims["given_name"] = u.FirstName
 				idClaims["family_name"] = u.LastName
 				idClaims["locale"] = u.Locale
-				idClaims["roles"] = u.Roles
-				idClaims["groups"] = u.Roles
+				// Internal RBAC roles/groups are deliberately not exposed to
+				// third-party clients (#100).
 			case "email":
 				idClaims["email"] = u.Email
 				idClaims["email_verified"] = true
@@ -231,19 +242,35 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 		return nil, errors.New("refresh_token_not_supported")
 	}
 
+	// Authenticate the client BEFORE the refresh token is consumed (RFC 6749 §6).
+	// Confidential clients — every client created through the admin API has a
+	// secret — must present it; a client with no stored secret hash is treated
+	// as public and may omit it.
+	if s.clientRepo != nil {
+		client, err := s.clientRepo.FindByClientID(ctx, clientID)
+		if err != nil {
+			return nil, ErrInvalidGrant
+		}
+		if client.ClientSecretHash != "" {
+			if _, err := s.clientRepo.AuthenticateClient(ctx, clientID, clientSecret); err != nil {
+				return nil, ErrInvalidGrant
+			}
+		}
+	}
+
 	sess, err := s.refreshStore.GetAndConsume(ctx, refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrRefreshTokenReused) {
+			// RFC 6819 §5.2.2.3: an already-consumed token was presented; the
+			// store has revoked the whole grant chain (token family).
+			slog.Warn("OIDC refresh token reuse detected — grant chain revoked", "client_id", clientID)
+			return nil, ErrRefreshTokenReuse
+		}
 		return nil, ErrInvalidGrant
 	}
 
 	if sess.ClientID != clientID {
 		return nil, ErrInvalidGrant
-	}
-
-	if clientSecret != "" {
-		if _, err := s.clientRepo.AuthenticateClient(ctx, clientID, clientSecret); err != nil {
-			return nil, ErrInvalidGrant
-		}
 	}
 
 	// Use requested scopes if they are a subset of the original grant; otherwise
@@ -276,7 +303,6 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 		UserID:      u.ID,
 		Email:       u.Email,
 		Locale:      u.Locale,
-		Roles:       u.Roles,
 		Permissions: []string{},
 		Scopes:      scopes, // granted OAuth2 scopes, used by UserInfo to filter the response
 		SubType:     auth.SubTypeUser,
@@ -299,6 +325,7 @@ func (s *Service) ExchangeRefreshToken(ctx context.Context, refreshToken, client
 		ClientID: clientID,
 		Scopes:   scopes,
 		AuthTime: sess.AuthTime,
+		FamilyID: sess.FamilyID, // keep the grant chain identity for reuse detection
 	})
 	if err != nil {
 		return nil, err
@@ -355,12 +382,16 @@ func hasScope(scopes []string, target string) bool {
 }
 
 // RevokeRefreshToken deletes an OIDC refresh token from the store so it cannot
-// be exchanged again. Per RFC 7009 the caller always receives 200; errors are
-// swallowed here.
-func (s *Service) RevokeRefreshToken(ctx context.Context, token string) {
+// be exchanged again, but only when the token's grant belongs to clientID
+// (RFC 7009 §2.1, #101). Per RFC 7009 the caller always receives 200; errors
+// and ownership mismatches are silently ignored here.
+func (s *Service) RevokeRefreshToken(ctx context.Context, token, clientID string) {
 	if s.refreshStore == nil {
 		return
 	}
-	// GetAndConsume atomically deletes; we discard the returned session.
-	s.refreshStore.GetAndConsume(ctx, token) //nolint:errcheck
+	sess, err := s.refreshStore.Peek(ctx, token)
+	if err != nil || sess.ClientID != clientID {
+		return
+	}
+	s.refreshStore.Delete(ctx, token) //nolint:errcheck
 }

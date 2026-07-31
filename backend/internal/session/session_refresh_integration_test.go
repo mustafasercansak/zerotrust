@@ -126,6 +126,7 @@ func createAuthIntegrationSchema(t *testing.T, db *pgxpool.Pool) {
 			ip_address INET,
 			user_agent TEXT,
 			is_revoked BOOLEAN NOT NULL DEFAULT false,
+			revoked_reason TEXT,
 			expires_at TIMESTAMPTZ NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -290,6 +291,53 @@ func TestRefreshTokens_RevokedTokenFails(t *testing.T) {
 	_, err := svc.RefreshTokens(context.Background(), refresh, "127.0.0.1", "ua", nil)
 	if !errors.Is(err, auth.ErrInvalidToken) {
 		t.Fatalf("RefreshTokens error=%v want ErrInvalidToken", err)
+	}
+}
+
+// TestRefreshTokens_ReplayOfExplicitlyRevokedTokenDoesNotMassRevoke proves the
+// #98 fix: replaying a token that was revoked by explicit logout (not
+// rotation) is rejected as invalid, but must NOT be treated as evidence of
+// theft — it must not force-revoke the user's other active sessions.
+func TestRefreshTokens_ReplayOfExplicitlyRevokedTokenDoesNotMassRevoke(t *testing.T) {
+	db := setupAuthIntegrationDB(t)
+	repo := session.NewRepository(db, session.NewEventHub())
+	u := createIntegrationUser(t, db, "logout-replay@example.com")
+	svc := newIntegrationAuthService(t, u, repo)
+
+	const loggedOutRefresh = "logged-out-refresh-token"
+	if err := repo.Create(context.Background(), u.ID, hashRefreshToken(loggedOutRefresh), "127.0.0.1", "ua", nil, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repo.Create(context.Background(), u.ID, hashRefreshToken("other-active-session"), "127.0.0.2", "ua2", nil, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("create other active session: %v", err)
+	}
+
+	// Explicit logout revokes the first session (revoked_reason = 'logout',
+	// not 'rotation').
+	if err := repo.Revoke(context.Background(), hashRefreshToken(loggedOutRefresh)); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	// Age it beyond the reuse-detection grace window, same as a genuine replay.
+	if _, err := db.Exec(context.Background(), `
+		UPDATE sessions SET last_used_at = now() - ('10 seconds'::interval)
+		WHERE refresh_token_hash = $1
+	`, hashRefreshToken(loggedOutRefresh)); err != nil {
+		t.Fatalf("age logged-out token: %v", err)
+	}
+
+	if count := countActiveSessions(t, db, u.ID); count != 1 {
+		t.Fatalf("active session count before replay=%d want 1", count)
+	}
+
+	_, err := svc.RefreshTokens(context.Background(), loggedOutRefresh, "127.0.0.1", "ua", nil)
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("replayed logged-out token error=%v want ErrInvalidToken", err)
+	}
+
+	// The other, unrelated session must survive — a replayed logged-out token
+	// is not evidence of theft.
+	if count := countActiveSessions(t, db, u.ID); count != 1 {
+		t.Fatalf("active session count after replay=%d want 1 (other session must survive)", count)
 	}
 }
 

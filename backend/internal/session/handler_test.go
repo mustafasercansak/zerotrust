@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/zerotrust/backend/internal/auth"
 	authmw "github.com/zerotrust/backend/pkg/middleware"
 )
@@ -57,6 +58,18 @@ func (s *fakeStore) RevokeOtherSessions(ctx context.Context, userID, currentHash
 
 func withClaims(r *http.Request, userID string) *http.Request {
 	claims := &auth.Claims{UserID: userID}
+	ctx := context.WithValue(r.Context(), authmw.ClaimsKey, claims)
+	return r.WithContext(ctx)
+}
+
+func withClaimsExpiryAndJTI(r *http.Request, userID, jti string, expiresAt time.Time) *http.Request {
+	claims := &auth.Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
+	}
 	ctx := context.WithValue(r.Context(), authmw.ClaimsKey, claims)
 	return r.WithContext(ctx)
 }
@@ -314,11 +327,15 @@ func waitForSubscription(t *testing.T, hub *EventHub, userID string) {
 
 func runEventStream(t *testing.T, req *http.Request, hub *EventHub, drive func(rec *httptest.ResponseRecorder, cancel context.CancelFunc)) string {
 	t.Helper()
+	return runEventStreamWithHandler(t, NewHandler(&fakeStore{}, hub), req, hub, drive)
+}
+
+func runEventStreamWithHandler(t *testing.T, h *Handler, req *http.Request, hub *EventHub, drive func(rec *httptest.ResponseRecorder, cancel context.CancelFunc)) string {
+	t.Helper()
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
-	h := NewHandler(&fakeStore{}, hub)
 
 	done := make(chan struct{})
 	go func() {
@@ -447,5 +464,78 @@ func TestEvents_RevokedAllEndsStream(t *testing.T) {
 
 	if !strings.Contains(body, "data: connected") || !strings.Contains(body, "data: revoked") {
 		t.Fatalf("unexpected stream body: %q", body)
+	}
+}
+
+type fakeRevocationChecker struct {
+	revokedJTIs map[string]bool
+}
+
+func (f *fakeRevocationChecker) IsRevoked(_ context.Context, jti string) bool {
+	return f.revokedJTIs[jti]
+}
+
+// TestEvents_TokenExpiryEndsStream proves the SSE stream closes once the
+// access token that authenticated it expires, instead of running forever on
+// a stale token. (ISSUE_LIST #99)
+func TestEvents_TokenExpiryEndsStream(t *testing.T) {
+	hub := NewEventHub()
+	h := NewHandler(&fakeStore{}, hub)
+	h.tickInterval = 10 * time.Millisecond
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/events", nil)
+	req = withClaimsExpiryAndJTI(req, "u1", "jti-1", time.Now().Add(-time.Second))
+
+	body := runEventStreamWithHandler(t, h, req, hub, func(_ *httptest.ResponseRecorder, _ context.CancelFunc) {
+		time.Sleep(50 * time.Millisecond)
+	})
+
+	if !strings.Contains(body, "data: expired") {
+		t.Fatalf("expected stream to close with an 'expired' event, got: %q", body)
+	}
+}
+
+// TestEvents_RevokedJTIEndsStream proves the SSE stream closes once the
+// authenticating token's JTI is blocklisted (e.g. by logout) mid-stream.
+// (ISSUE_LIST #99)
+func TestEvents_RevokedJTIEndsStream(t *testing.T) {
+	hub := NewEventHub()
+	h := NewHandler(&fakeStore{}, hub)
+	h.tickInterval = 10 * time.Millisecond
+	h.SetRevocationChecker(&fakeRevocationChecker{revokedJTIs: map[string]bool{"jti-1": true}})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/events", nil)
+	req = withClaimsExpiryAndJTI(req, "u1", "jti-1", time.Now().Add(time.Hour))
+
+	body := runEventStreamWithHandler(t, h, req, hub, func(_ *httptest.ResponseRecorder, _ context.CancelFunc) {
+		time.Sleep(50 * time.Millisecond)
+	})
+
+	if !strings.Contains(body, "data: revoked") {
+		t.Fatalf("expected stream to close with a 'revoked' event, got: %q", body)
+	}
+}
+
+// TestEvents_ValidTokenSurvivesTicksWithoutRevocationChecker proves a
+// non-expired, non-revoked token keeps the stream alive across ticks, and
+// that a nil revocation checker (no auth service wired) never panics.
+func TestEvents_ValidTokenSurvivesTicksWithoutRevocationChecker(t *testing.T) {
+	hub := NewEventHub()
+	h := NewHandler(&fakeStore{}, hub)
+	h.tickInterval = 10 * time.Millisecond
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/events", nil)
+	req = withClaimsExpiryAndJTI(req, "u1", "jti-1", time.Now().Add(time.Hour))
+
+	body := runEventStreamWithHandler(t, h, req, hub, func(_ *httptest.ResponseRecorder, cancel context.CancelFunc) {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	})
+
+	if strings.Contains(body, "data: expired") || strings.Contains(body, "data: revoked") {
+		t.Fatalf("valid, non-revoked token should not close the stream: %q", body)
+	}
+	if !strings.Contains(body, ": keepalive") {
+		t.Fatalf("expected at least one keepalive tick: %q", body)
 	}
 }

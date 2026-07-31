@@ -19,13 +19,30 @@ type store interface {
 	RevokeOtherSessions(ctx context.Context, userID, currentHash string) error
 }
 
+// revocationChecker reports whether an access token's JTI has been
+// blocklisted (e.g. by logout). *auth.Service satisfies this.
+type revocationChecker interface {
+	IsRevoked(ctx context.Context, jti string) bool
+}
+
+const defaultEventTickInterval = 15 * time.Second
+
 type Handler struct {
-	repo store
-	hub  *EventHub
+	repo         store
+	hub          *EventHub
+	revoked      revocationChecker // optional; nil disables the per-tick revocation check
+	tickInterval time.Duration     // overridden in tests; production always uses the default
 }
 
 func NewHandler(repo store, hub *EventHub) *Handler {
-	return &Handler{repo: repo, hub: hub}
+	return &Handler{repo: repo, hub: hub, tickInterval: defaultEventTickInterval}
+}
+
+// SetRevocationChecker wires JTI-blocklist checks into the SSE stream so a
+// token revoked (e.g. by logout) mid-stream ends the connection instead of
+// leaving it open until the next session-table event. (ISSUE_LIST #99)
+func (h *Handler) SetRevocationChecker(rc revocationChecker) {
+	h.revoked = rc
 }
 
 // GET /api/v1/sessions — list the caller's active sessions
@@ -104,7 +121,13 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := h.hub.Subscribe(claims.UserID)
 	defer unsub()
 
-	tick := time.NewTicker(15 * time.Second)
+	var tokenExpiry time.Time
+	if claims.ExpiresAt != nil {
+		tokenExpiry = claims.ExpiresAt.Time
+	}
+	jti := claims.ID
+
+	tick := time.NewTicker(h.tickInterval)
 	defer tick.Stop()
 
 	for {
@@ -112,6 +135,20 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-tick.C:
+			// The access token that authenticated this connection is
+			// re-checked on every tick, so a stolen token's live feed of
+			// session activity doesn't outlive the token's validity or
+			// survive a logout. (ISSUE_LIST #99)
+			if !tokenExpiry.IsZero() && !time.Now().Before(tokenExpiry) {
+				fmt.Fprintf(w, "data: expired\n\n")
+				flusher.Flush()
+				return
+			}
+			if jti != "" && h.revoked != nil && h.revoked.IsRevoked(r.Context(), jti) {
+				fmt.Fprintf(w, "data: revoked\n\n")
+				flusher.Flush()
+				return
+			}
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		case event := <-ch:

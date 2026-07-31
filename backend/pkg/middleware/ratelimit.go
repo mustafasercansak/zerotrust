@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -33,6 +34,13 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 
 			count, retryAfter, err := rl.increment(r.Context(), key)
 			if err != nil {
+				// Fail open: an unavailable Redis must not turn every rate
+				// limiter (login included) into a hard outage. The failure
+				// is still surfaced via logs/metrics so a Redis outage
+				// silently disabling rate limiting doesn't go unnoticed.
+				// (ISSUE_LIST #111)
+				recordFailOpen()
+				slog.Warn("rate limiter unavailable, request allowed without enforcement", "prefix", rl.prefix, "error", err)
 				next.ServeHTTP(w, r)
 				return
 			}

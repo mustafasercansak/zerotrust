@@ -10,10 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 
 	"strings"
 
+	"github.com/go-webauthn/webauthn/metadata"
 	"github.com/go-webauthn/webauthn/protocol"
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
@@ -31,6 +33,7 @@ var (
 	ErrSessionNotFound             = errors.New("webauthn_session_not_found")
 	ErrCredentialInUse             = errors.New("webauthn_credential_already_registered")
 	ErrHardwareAttestationRequired = errors.New("hardware_attestation_required")
+	ErrCredentialCloneDetected     = errors.New("webauthn_credential_clone_detected")
 )
 
 // ceremonySessionTTL bounds how long a begun registration/login ceremony can be
@@ -213,13 +216,28 @@ func (s *Service) FinishRegistration(ctx context.Context, userID, name, displayN
 		return err
 	}
 
-	// Verify hardware attestation if required
 	requireHardware := false
 	if s.settings != nil {
 		requireHardware = s.settings.GetBool(ctx, "require_hardware_attestation", false)
 	}
+	// Verify hardware attestation if required. Only attestation types backed by
+	// an attestation certificate chain (Basic Full / AttCA) carry any hardware
+	// signal: "none" and self ("surrogate") attestation can be produced by any
+	// software authenticator with an arbitrary AAGUID, so they are rejected
+	// (#86).
+	//
+	// NOTE: go-webauthn is constructed without an MDS/trust-anchor provider, so
+	// the x5c chain itself is NOT anchored to vendor root CAs — a determined
+	// attacker could still forge a self-signed chain. Treat this setting as an
+	// advisory gate against off-the-shelf software passkeys, not a strict
+	// hardware-only guarantee (a startup warning says the same).
 	if requireHardware {
-		isNone := cred.AttestationType == "none" || cred.AttestationType == ""
+		switch cred.AttestationType {
+		case string(metadata.BasicFull), string(metadata.AttCA):
+			// attestation certificate chain was present and verified
+		default:
+			return ErrHardwareAttestationRequired
+		}
 		allZeroes := true
 		for _, b := range cred.Authenticator.AAGUID {
 			if b != 0 {
@@ -227,7 +245,7 @@ func (s *Service) FinishRegistration(ctx context.Context, userID, name, displayN
 				break
 			}
 		}
-		if isNone || allZeroes {
+		if allZeroes {
 			return ErrHardwareAttestationRequired
 		}
 	}
@@ -289,6 +307,14 @@ func (s *Service) FinishLogin(ctx context.Context, userID, name, displayName str
 	}
 
 	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	// A signature-counter regression means the credential private key may be
+	// cloned; reject the assertion rather than issuing tokens (#96).
+	if cred.Authenticator.CloneWarning {
+		slog.Warn("webauthn signCount regression: possible cloned authenticator",
+			"user_id", userID, "credential_id", credID)
+		return ErrCredentialCloneDetected
+	}
+
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return err
@@ -359,6 +385,14 @@ func (s *Service) FinishDiscoverableLogin(ctx context.Context, ceremonyID string
 	}
 
 	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	// A signature-counter regression means the credential private key may be
+	// cloned; reject the assertion rather than issuing tokens (#96).
+	if cred.Authenticator.CloneWarning {
+		slog.Warn("webauthn signCount regression: possible cloned authenticator",
+			"user_id", resolvedUserID, "credential_id", credID)
+		return "", ErrCredentialCloneDetected
+	}
+
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return "", err

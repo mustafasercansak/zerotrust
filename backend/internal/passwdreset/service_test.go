@@ -6,6 +6,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/zerotrust/backend/internal/user"
 )
 
@@ -28,7 +31,7 @@ func (s *stubStore) Create(_ context.Context, userID string) (string, error) {
 	return "raw-token", nil
 }
 
-func (s *stubStore) ConsumeAndReset(_ context.Context, _, _, _ string) error {
+func (s *stubStore) ConsumeAndReset(_ context.Context, _, _ string) error {
 	return s.consumeErr
 }
 
@@ -186,6 +189,89 @@ func TestSendReset(t *testing.T) {
 	})
 }
 
+// TestSendReset_CooldownThrottlesRepeatSends proves a second SendReset within
+// the cooldown window for the same email does not create another token or
+// send another email — mitigating mailbox flooding and reset-token churn.
+// (ISSUE_LIST #93)
+func TestSendReset_CooldownThrottlesRepeatSends(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	repo := &stubStore{createToken: "token-1"}
+	users := &stubUsers{user: &user.User{ID: "u1", Email: "user@example.com", Locale: "en"}}
+	mail := &stubMailer{}
+	svc := NewService(repo, users, mail)
+	svc.SetRedis(rdb)
+
+	if err := svc.SendReset(context.Background(), "user@example.com", "https://app.example.com"); err != nil {
+		t.Fatalf("first SendReset error: %v", err)
+	}
+	if repo.createUserID != "u1" {
+		t.Fatalf("expected first send to create a token, createUserID=%q", repo.createUserID)
+	}
+
+	repo.createUserID = ""
+	mail.resetURL = ""
+	if err := svc.SendReset(context.Background(), "user@example.com", "https://app.example.com"); err != nil {
+		t.Fatalf("second SendReset error: %v", err)
+	}
+	if repo.createUserID != "" {
+		t.Fatal("second send within cooldown must not create a new token")
+	}
+	if mail.resetURL != "" {
+		t.Fatal("second send within cooldown must not send another email")
+	}
+}
+
+func TestSendReset_CooldownIsPerEmail(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	repo := &stubStore{createToken: "token-1"}
+	users := &stubUsers{user: &user.User{ID: "u1", Email: "user@example.com", Locale: "en"}}
+	mail := &stubMailer{}
+	svc := NewService(repo, users, mail)
+	svc.SetRedis(rdb)
+
+	if err := svc.SendReset(context.Background(), "user@example.com", "https://app.example.com"); err != nil {
+		t.Fatalf("first SendReset error: %v", err)
+	}
+
+	users.user = &user.User{ID: "u2", Email: "other@example.com", Locale: "en"}
+	repo.createUserID = ""
+	if err := svc.SendReset(context.Background(), "other@example.com", "https://app.example.com"); err != nil {
+		t.Fatalf("second SendReset error: %v", err)
+	}
+	if repo.createUserID != "u2" {
+		t.Fatalf("a different email must not be throttled by another address's cooldown, createUserID=%q", repo.createUserID)
+	}
+}
+
+func TestSendReset_NoRedisConfiguredSendsEveryTime(t *testing.T) {
+	repo := &stubStore{createToken: "token-1"}
+	users := &stubUsers{user: &user.User{ID: "u1", Email: "user@example.com", Locale: "en"}}
+	mail := &stubMailer{}
+	svc := NewService(repo, users, mail)
+
+	for i := 0; i < 2; i++ {
+		repo.createUserID = ""
+		if err := svc.SendReset(context.Background(), "user@example.com", "https://app.example.com"); err != nil {
+			t.Fatalf("SendReset error: %v", err)
+		}
+		if repo.createUserID != "u1" {
+			t.Fatal("without Redis configured, every request must send a fresh reset link")
+		}
+	}
+}
+
 func TestGenerateToken(t *testing.T) {
 	tok1, err := generateToken()
 	if err != nil {
@@ -210,18 +296,6 @@ func TestGenerateToken(t *testing.T) {
 	}
 }
 
-func TestReset_BcryptError(t *testing.T) {
-	svc := &Service{repo: &stubStore{}}
-	longPassword := make([]byte, 100)
-	for i := range longPassword {
-		longPassword[i] = 'a'
-	}
-	err := svc.Reset(context.Background(), "any-token", string(longPassword))
-	if err == nil {
-		t.Fatal("expected error with password > 72 bytes, got nil")
-	}
-}
-
 func TestReset_PasswordReuseForbidden(t *testing.T) {
 	svc := &Service{repo: &stubStore{consumeErr: ErrPasswordReuseForbidden}}
 	err := svc.Reset(context.Background(), "any-token", "Secret123!")
@@ -243,4 +317,3 @@ func TestHashToken_Deterministic(t *testing.T) {
 		t.Fatal("different inputs must produce different hashes")
 	}
 }
-

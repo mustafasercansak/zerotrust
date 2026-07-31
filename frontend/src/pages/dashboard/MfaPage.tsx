@@ -21,6 +21,8 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import { useStepUp } from "@/hooks/useStepUp";
 import { StepUpMfaDialog } from "@/components/StepUpMfaDialog";
+// Self-hosted Outfit font (bundled via Vite) for the page's geometric typography.
+import "@/assets/fonts/outfit.css";
 
 type Status = "loading" | "disabled" | "pending" | "enabled" | "unsupported";
 
@@ -118,9 +120,6 @@ export default function MfaPage() {
 
   return (
     <DashboardPage>
-      {/* Import outfit font to match the mockup's premium geometric typography */}
-      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
-
       {status === "loading" && (
         <Paper variant="outlined" sx={{ display: "flex", alignItems: "center", gap: 1.5, px: 3, py: 3, width: "100%", bgcolor: "#0b1120" }}>
           <CircularProgress size={18} />

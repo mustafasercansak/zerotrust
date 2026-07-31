@@ -130,16 +130,17 @@ func (r *ClientRepository) Create(ctx context.Context, clientID, secretHash, nam
 	return &c, nil
 }
 
-// Delete removes a client by its UUID
-func (r *ClientRepository) Delete(ctx context.Context, id string) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM oauth2_clients WHERE id = $1`, id)
+// Delete removes a client by its UUID and returns its client_id (for auditing).
+func (r *ClientRepository) Delete(ctx context.Context, id string) (string, error) {
+	var clientID string
+	err := r.db.QueryRow(ctx, `DELETE FROM oauth2_clients WHERE id = $1 RETURNING client_id`, id).Scan(&clientID)
 	if err != nil {
-		return err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrClientNotFound
+		}
+		return "", err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrClientNotFound
-	}
-	return nil
+	return clientID, nil
 }
 
 // RotateSecret generates a new random client secret, stores its bcrypt hash, and
