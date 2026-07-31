@@ -214,7 +214,22 @@ jobs:
           E2E_USER_PASSWORD: E2eUser!Passw0rd
           E2E_ADMIN_EMAIL: e2e.admin@example.com
           E2E_ADMIN_PASSWORD: E2eAdmin!Passw0rd
-        run: npm run test:e2e
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-results.json
+        run: npm run test:e2e -- --reporter=list,json
+
+      - name: Generate badge data
+        working-directory: frontend
+        run: |
+          PASSED=$(jq '.stats.expected' e2e-results.json)
+          mkdir -p badges
+          printf '{"schemaVersion":1,"label":"e2e tests","message":"%s passing","color":"brightgreen"}' "$PASSED" > badges/e2e-tests.json
+
+      - name: Upload badge data
+        uses: actions/upload-artifact@v7
+        with:
+          name: badges-e2e
+          path: frontend/badges/
+          retention-days: 1
 
       - name: Upload failure artifacts
         if: failure()
@@ -268,9 +283,9 @@ jobs:
 
   badges:
     name: Update badge data
-    needs: [backend, frontend]
+    needs: [backend, frontend, e2e]
     # Only refresh badge data on green pushes to the default branch.
-    if: github.event_name == 'push' && needs.backend.result == 'success' && needs.frontend.result == 'success'
+    if: github.event_name == 'push' && needs.backend.result == 'success' && needs.frontend.result == 'success' && needs.e2e.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -286,6 +301,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: badges-frontend
+          path: docs/badges
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: badges-e2e
           path: docs/badges
 
       - name: Commit badge data

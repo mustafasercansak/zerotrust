@@ -98,12 +98,23 @@ test.describe("Admin flow", () => {
   });
 
   test("users page lists at least one user", async ({ page }) => {
+    // Wait for the data to actually arrive before asserting on grid rows —
+    // index-based row checks race the fetch on slow runners (CI).
+    const usersLoaded = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/admin/users") && r.status() === 200,
+    );
     await page.goto("/dashboard/users");
+    await usersLoaded;
+    // DataGrid row 0 is the header; row 1 is the first data row.
     await expect(page.getByRole("row").nth(1)).toBeVisible({ timeout: 8_000 });
   });
 
   test("audit log page loads events", async ({ page }) => {
+    const auditLoaded = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/admin/audit?") && r.status() === 200,
+    );
     await page.goto("/dashboard/audit");
+    await auditLoaded;
     await expect(page.getByRole("row").nth(1)).toBeVisible({ timeout: 8_000 });
   });
 

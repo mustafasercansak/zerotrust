@@ -3,6 +3,7 @@
 [![CI](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml/badge.svg)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
 [![Backend Tests](https://img.shields.io/endpoint?url=https://mustafasercansak.github.io/zerotrust/badges/backend-tests.json)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
 [![Frontend Tests](https://img.shields.io/endpoint?url=https://mustafasercansak.github.io/zerotrust/badges/frontend-tests.json)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
+[![E2E Tests](https://img.shields.io/endpoint?url=https://mustafasercansak.github.io/zerotrust/badges/e2e-tests.json)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
 [![Backend Coverage](https://img.shields.io/endpoint?url=https://mustafasercansak.github.io/zerotrust/badges/backend-coverage.json)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
 [![Frontend Coverage](https://img.shields.io/endpoint?url=https://mustafasercansak.github.io/zerotrust/badges/frontend-coverage.json)](https://github.com/mustafasercansak/zerotrust/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/mustafasercansak/zerotrust?filename=backend/go.mod)](backend/go.mod)
