@@ -53,15 +53,16 @@ const MOCK_SECURITY_DASHBOARD = {
   range: "24h",
   since: "2024-06-20T00:00:00Z",
   generated_at: "2024-06-20T12:00:00Z",
-  metrics: { successful_logins: 42, failed_logins: 3, lockouts: 0, anomalies: 1, active_sessions: 7 },
+  metrics: { successful_logins: 42, failed_logins: 3, lockouts: 0, anomalies: 1, active_sessions: 7, average_risk_score: 12 },
   auth_activity: [
-    { bucket: "2024-06-20T00:00:00Z", success: 10, failure: 1 },
-    { bucket: "2024-06-20T06:00:00Z", success: 15, failure: 2 },
-    { bucket: "2024-06-20T12:00:00Z", success: 17, failure: 0 },
+    { bucket: "2024-06-20T00:00:00Z", success: 10, failure: 1, average_risk_score: 10 },
+    { bucket: "2024-06-20T06:00:00Z", success: 15, failure: 2, average_risk_score: 14 },
+    { bucket: "2024-06-20T12:00:00Z", success: 17, failure: 0, average_risk_score: 12 },
   ],
   anomaly_breakdown: [{ name: "impossible_travel", count: 1 }],
   login_countries: [{ name: "TR", count: 35 }, { name: "US", count: 7 }],
   failed_login_ips: [{ name: "10.0.0.5", count: 3 }],
+  blocked_countries: [],
 };
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
@@ -239,8 +240,9 @@ test.describe("SecurityDashboardPage", () => {
     await expect(page).toHaveURL(/dashboard\/security/, { timeout: 8_000 });
   });
 
-  test("shows 24h range button as selected by default", async ({ page }) => {
-    await expect(page.getByTestId("range-button-24h")).toBeVisible({ timeout: 6_000 });
+  test("shows 7d range button as selected by default", async ({ page }) => {
+    await expect(page.getByTestId("range-button-7d")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByTestId("range-button-7d")).toHaveClass(/MuiButton-contained/);
   });
 
   test("shows all three range buttons", async ({ page }) => {

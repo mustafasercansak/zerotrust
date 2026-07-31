@@ -397,8 +397,8 @@ test.describe("Settings page — Login Activity tab", () => {
     await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
     await page.getByTestId("tab-login-activity").click();
     await expect(page.getByTestId("activity-section")).toBeVisible({ timeout: 6_000 });
-    await expect(page.getByText("Login")).toBeVisible({ timeout: 6_000 });
-    await expect(page.getByText("Istanbul")).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Login" })).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByRole("cell", { name: /Istanbul/ })).toBeVisible();
   });
 
   test("admin sees Login Activity at tab index 3", async ({ page }) => {

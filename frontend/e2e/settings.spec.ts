@@ -1,6 +1,4 @@
-import { test, expect } from "@playwright/test";
-import { fileURLToPath } from "url";
-import path from "path";
+import { test, expect } from "./fixtures";
 
 // Settings page E2E tests. Requires:
 //   - Backend running at :8080
@@ -9,11 +7,10 @@ import path from "path";
 //
 // These tests verify the UI structure of the settings page and that
 // interactive controls work correctly. They do not test backend persistence.
+// Authentication uses the `authAs` fixture (e2e/fixtures.ts) — see auth-flow.spec.ts.
 
 const hasUserCreds = !!process.env.E2E_USER_EMAIL && !!process.env.E2E_USER_PASSWORD;
 const hasAdminCreds = !!process.env.E2E_ADMIN_EMAIL && !!process.env.E2E_ADMIN_PASSWORD;
-
-const adminAuthFile = path.join(fileURLToPath(new URL(".", import.meta.url)), ".auth/admin.json");
 
 async function forceEnglish(page: Parameters<Parameters<typeof test>[1]>[0]) {
   await page.route("**/api/v1/me", async (route) => {
@@ -33,7 +30,8 @@ async function forceEnglish(page: Parameters<Parameters<typeof test>[1]>[0]) {
 test.describe("Settings page — regular user", () => {
   test.skip(!hasUserCreds, "Set E2E_USER_EMAIL and E2E_USER_PASSWORD to run");
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, authAs }) => {
+    await authAs("user");
     await forceEnglish(page);
     await page.goto("/dashboard/settings");
     await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });
@@ -90,9 +88,8 @@ test.describe("Settings page — regular user", () => {
 test.describe("Settings page — admin", () => {
   test.skip(!hasAdminCreds, "Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD to run");
 
-  test.use({ storageState: adminAuthFile });
-
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, authAs }) => {
+    await authAs("admin");
     await forceEnglish(page);
     await page.goto("/dashboard/settings");
     await expect(page).toHaveURL(/dashboard\/settings/, { timeout: 8_000 });

@@ -1,4 +1,4 @@
-.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint govulncheck clean screenshots
+.PHONY: help secrets certs jwt-key up up-prod down down-v dev build test test-local test-cover test-front test-e2e test-cover-front test-cover-all test-coverage-all coverage-summary coverage-all lint govulncheck clean screenshots
 
 TEST_DB_DOCKER_IMAGE ?= postgres:16-alpine
 TEST_DB_CONTAINER ?= zerotrust-test-db
@@ -170,6 +170,37 @@ test-cover: ## Run backend tests and display coverage (set TEST_DATABASE_URL to 
 
 test-front: ## Run frontend tests
 	cd frontend && npm run test
+
+# E2E test users (throwaway, local dev DB only). The CI e2e job uses the same
+# values against its ephemeral Postgres.
+E2E_USER_EMAIL ?= e2e.user@example.com
+E2E_USER_PASSWORD ?= E2eUser!Passw0rd
+E2E_ADMIN_EMAIL ?= e2e.admin@example.com
+E2E_ADMIN_PASSWORD ?= E2eAdmin!Passw0rd
+E2E_DB_USER ?= zerotrust
+E2E_DB_NAME ?= zerotrust_db
+
+test-e2e: ## Run Playwright E2E tests against the dev stack (start it with 'make up' first)
+	@curl -sf -o /dev/null http://localhost:3000/ || { echo '❌  Frontend not reachable on :3000 — start the dev stack with "make up" first'; exit 1; }
+	@echo '👤  Ensuring E2E test users exist (no MFA)...'
+	@docker exec zerotrust_postgres psql -U $(E2E_DB_USER) -d $(E2E_DB_NAME) -q -c "\
+		INSERT INTO users (email, first_name, last_name, password_hash, locale, email_hash) \
+		VALUES ('$(E2E_USER_EMAIL)', 'E2E', 'User', crypt('$(E2E_USER_PASSWORD)', gen_salt('bf', 12)), 'en', \
+		        encode(digest(lower(btrim('$(E2E_USER_EMAIL)')), 'sha256'), 'hex')) \
+		ON CONFLICT (email) DO NOTHING;"
+	@docker exec zerotrust_postgres psql -U $(E2E_DB_USER) -d $(E2E_DB_NAME) -q -c "\
+		INSERT INTO users (email, first_name, last_name, password_hash, locale, email_hash) \
+		VALUES ('$(E2E_ADMIN_EMAIL)', 'E2E', 'Admin', crypt('$(E2E_ADMIN_PASSWORD)', gen_salt('bf', 12)), 'en', \
+		        encode(digest(lower(btrim('$(E2E_ADMIN_EMAIL)')), 'sha256'), 'hex')) \
+		ON CONFLICT (email) DO NOTHING;"
+	@docker exec zerotrust_postgres psql -U $(E2E_DB_USER) -d $(E2E_DB_NAME) -q -c "\
+		INSERT INTO user_roles (user_id, role_id) \
+		SELECT u.id, r.id FROM users u, roles r \
+		WHERE u.email = '$(E2E_ADMIN_EMAIL)' AND r.name = 'admin' \
+		ON CONFLICT DO NOTHING;"
+	cd frontend && E2E_USER_EMAIL='$(E2E_USER_EMAIL)' E2E_USER_PASSWORD='$(E2E_USER_PASSWORD)' \
+		E2E_ADMIN_EMAIL='$(E2E_ADMIN_EMAIL)' E2E_ADMIN_PASSWORD='$(E2E_ADMIN_PASSWORD)' \
+		npm run test:e2e
 
 test-cover-front: ## Run frontend tests and display coverage
 	cd frontend && npm run test:cover

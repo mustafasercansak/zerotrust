@@ -121,6 +121,109 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: 1
 
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: zerotrust
+          POSTGRES_PASSWORD: zerotrust_secret
+          POSTGRES_DB: zerotrust_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zerotrust -d zerotrust_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # DEV_MODE=true makes the backend default to
+      # postgres://zerotrust:zerotrust_secret@localhost:5432/zerotrust_db and
+      # REDIS_PASSWORD=zerotrust_secret, matching the services started here.
+      - name: Start Redis (dev password)
+        run: docker run -d -p 6379:6379 redis:7-alpine redis-server --requirepass zerotrust_secret
+
+      - name: Build and start backend
+        working-directory: backend
+        env:
+          DEV_MODE: "true"
+          REGISTRATION_ENABLED: "true"
+          MFA_ENABLED: "false"
+          TLS_ENABLED: "false"
+          COOKIES_SECURE: "false"
+          CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+          PUBLIC_APP_URL: "http://localhost:3000"
+          WEBAUTHN_RP_ID: "localhost"
+        run: |
+          go build -o server ./cmd/server
+          nohup ./server > backend-e2e.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/health && exit 0
+            sleep 1
+          done
+          echo "backend did not become healthy; log follows"
+          cat backend-e2e.log
+          exit 1
+
+      # Throwaway users for the ephemeral CI database; pgcrypto's
+      # crypt(gen_salt('bf', 12)) produces the bcrypt hashes the backend
+      # verifies. Mirrors the local 'make test-e2e' setup.
+      - name: Create E2E test users
+        env:
+          PGPASSWORD: zerotrust_secret
+        run: |
+          psql -h localhost -U zerotrust -d zerotrust_db -q -c "\
+            INSERT INTO users (email, first_name, last_name, password_hash, locale, email_hash) \
+            VALUES ('e2e.user@example.com', 'E2E', 'User', crypt('E2eUser!Passw0rd', gen_salt('bf', 12)), 'en', \
+                    encode(digest(lower(btrim('e2e.user@example.com')), 'sha256'), 'hex')), \
+                   ('e2e.admin@example.com', 'E2E', 'Admin', crypt('E2eAdmin!Passw0rd', gen_salt('bf', 12)), 'en', \
+                    encode(digest(lower(btrim('e2e.admin@example.com')), 'sha256'), 'hex')) \
+            ON CONFLICT (email) DO NOTHING;"
+          psql -h localhost -U zerotrust -d zerotrust_db -q -c "\
+            INSERT INTO user_roles (user_id, role_id) \
+            SELECT u.id, r.id FROM users u, roles r \
+            WHERE u.email = 'e2e.admin@example.com' AND r.name = 'admin' \
+            ON CONFLICT DO NOTHING;"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # Playwright's webServer block starts the Vite dev server on :3000 and
+      # the suite uses the runner's preinstalled Chrome (channel: "chrome").
+      - name: Run Playwright E2E tests
+        working-directory: frontend
+        env:
+          E2E_USER_EMAIL: e2e.user@example.com
+          E2E_USER_PASSWORD: E2eUser!Passw0rd
+          E2E_ADMIN_EMAIL: e2e.admin@example.com
+          E2E_ADMIN_PASSWORD: E2eAdmin!Passw0rd
+        run: npm run test:e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-results
+          path: frontend/test-results/
+          retention-days: 7
+
   security:
     name: Security Scans
     runs-on: ubuntu-latest
@@ -187,8 +290,13 @@ jobs:
 
       - name: Commit badge data
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Author the commit as the user who triggered the push (resolved to
+          # their noreply address via the API) so github-actions[bot] does not
+          # pile up commits and pollute the contributors graph.
+          ACTOR="${{ github.actor }}"
+          ACTOR_ID=$(curl -sf "https://api.github.com/users/$ACTOR" | jq -r .id)
+          git config user.name "$ACTOR"
+          git config user.email "$ACTOR_ID+$ACTOR@users.noreply.github.com"
           git add docs/badges/
           if git diff --cached --quiet; then
             echo "Badge data unchanged"

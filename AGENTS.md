@@ -79,6 +79,7 @@ Most work goes through the root `Makefile` (run `make help` for the full list):
 | `make test` | Run all backend tests; auto-starts disposable PostgreSQL + Redis containers when `TEST_DATABASE_URL` is unset |
 | `make test-cover` | Backend tests with coverage; fails below `BACKEND_COVERAGE_MIN` (90%) |
 | `make test-front` | Frontend unit tests (Vitest) |
+| `make test-e2e` | Playwright E2E tests against the running dev stack; creates the E2E users if missing (start the stack with `make up` first) |
 | `make lint` | `go vet ./...` + `npx tsc --noEmit` |
 | `make govulncheck` | Go vulnerability scan |
 | `make certs` / `make jwt-key` | Self-signed TLS cert / persistent Ed25519 JWT key for local prod testing |
@@ -117,7 +118,7 @@ If Docker needs elevated privileges, use `make SUDO=sudo <target>`.
 - Vitest with `react-dom/server` rendering (not a full browser) — tests are limited to what SSR output contains.
 - **useState mock convention (important):** the test harness mocks `useState` by call index. When adding a `useState` to a component that already has tests, **append it after existing hooks**; inserting in the middle shifts indices and breaks pinned tests.
 - Mock at module boundaries (`vi.mock('../api/auth', ...)`), never internal component state or methods.
-- E2E uses the system Chrome — no browser download needed. Auth state is saved once per role via `storageState` to stay below the backend rate limit.
+- E2E uses the system Chrome — no browser download needed. Authenticated tests get a fresh session per test via the `authAs` fixture (`frontend/e2e/fixtures.ts`): one live session per role, refreshed (rotated) before each test — saved-cookie reuse across tests is incompatible with refresh-token rotation and the stale-initial-session janitor. This stays below the backend login rate limit.
 
 ### CI
 

@@ -1,20 +1,17 @@
-import { test, expect } from "@playwright/test";
-import { fileURLToPath } from "url";
-import path from "path";
+import { test, expect } from "./fixtures";
 
 // Full auth flow tests. Requires:
 //   - Backend running at :8080
 //   - E2E_USER_EMAIL + E2E_USER_PASSWORD  →  a regular user (no MFA)
 //   - E2E_ADMIN_EMAIL + E2E_ADMIN_PASSWORD →  an admin user  (no MFA)
 //
-// Authentication is handled once by the setup projects (e2e/setup/*.setup.ts)
-// and stored in e2e/.auth/*.json — not repeated per test, keeping login
-// attempts well below the rate limit.
+// Authentication is provided by the `authAs` fixture (e2e/fixtures.ts): each
+// role keeps one live session that is refreshed (rotated) before every test,
+// like a real browser tab — saved-cookie reuse across tests is impossible
+// with refresh-token rotation and the stale-initial-session janitor.
 
 const hasUserCreds = !!process.env.E2E_USER_EMAIL && !!process.env.E2E_USER_PASSWORD;
 const hasAdminCreds = !!process.env.E2E_ADMIN_EMAIL && !!process.env.E2E_ADMIN_PASSWORD;
-
-const adminAuthFile = path.join(fileURLToPath(new URL(".", import.meta.url)), ".auth/admin.json");
 
 // Force the /me response to return locale:"en" so selectors stay in English
 // regardless of what locale the user's server-side profile has set.
@@ -47,12 +44,13 @@ test.describe("Login with wrong credentials", () => {
   });
 });
 
-// ─── Regular user flow (uses saved cookie from setup:user) ───────────────────
+// ─── Regular user flow (live session via authAs fixture) ────────────────────
 
 test.describe("Regular user flow", () => {
   test.skip(!hasUserCreds, "Set E2E_USER_EMAIL and E2E_USER_PASSWORD to run");
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, authAs }) => {
+    await authAs("user");
     await forceEnglish(page);
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/dashboard/, { timeout: 8_000 });
@@ -81,14 +79,13 @@ test.describe("Regular user flow", () => {
   });
 });
 
-// ─── Admin flow (uses saved cookie from setup:admin) ─────────────────────────
+// ─── Admin flow (live session via authAs fixture) ───────────────────────────
 
 test.describe("Admin flow", () => {
   test.skip(!hasAdminCreds, "Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD to run");
 
-  test.use({ storageState: adminAuthFile });
-
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, authAs }) => {
+    await authAs("admin");
     await forceEnglish(page);
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/dashboard/, { timeout: 8_000 });

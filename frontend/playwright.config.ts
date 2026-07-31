@@ -32,11 +32,7 @@ export default defineConfig({
     },
   },
   projects: [
-    // Login once, save auth state — keeps login attempts below the rate limit.
-    { name: "setup:user",  testMatch: "setup/user.setup.ts" },
-    { name: "setup:admin", testMatch: "setup/admin.setup.ts" },
-
-    // Unauthenticated tests (no setup dependency)
+    // Unauthenticated tests (fully mocked or public pages)
     {
       name: "unauthenticated",
       testMatch: [
@@ -49,12 +45,13 @@ export default defineConfig({
       ],
     },
 
-    // Authenticated tests reuse the saved cookies
+    // Authenticated tests get a fresh, valid session per test via the
+    // `authAs` fixture in e2e/fixtures.ts (one live session per role,
+    // refreshed before each test — saved-cookie reuse is incompatible with
+    // refresh-token rotation and the stale-initial-session janitor).
     {
       name: "user-auth",
       testMatch: "auth-flow.spec.ts",
-      dependencies: ["setup:user", "setup:admin"],
-      use: { storageState: "e2e/.auth/user.json" },
     },
   ],
   webServer: {
